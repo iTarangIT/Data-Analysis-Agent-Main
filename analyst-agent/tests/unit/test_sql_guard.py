@@ -3,6 +3,7 @@ import pytest
 from app.agent.nodes.sql_guard import validate_sql
 
 ALLOWED = {"dealers", "batteries", "telemetry"}
+FILES = {"sales"}
 
 
 def _ok(sql: str, max_rows: int = 100) -> str:
@@ -109,3 +110,82 @@ class TestNonLiteralRowCap:
 
     def test_limit_all_is_treated_as_uncapped(self):
         assert "LIMIT 100" in _ok("select name from dealers limit all")
+
+
+class TestDuckDBDialect:
+    """The file tool parses duckdb. Every rule must still hold, and the parse must round-trip
+    duckdb syntax rather than quietly rewriting it into something duckdb rejects."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "select * from read_csv_auto('C:/Windows/win.ini')",
+            "select * from read_csv('C:/x.csv')",
+            "select * from read_parquet('C:/x.parquet')",
+            "select * from read_json('C:/x.json')",
+            "select * from glob('C:/*')",
+            "select * from read_csv_auto('C:/x.csv') as sales",
+            "select * from sales, read_csv('C:/x.csv')",
+            "select * from (select * from read_csv('C:/x.csv')) t",
+            "select * from 'C:/secret.parquet'",
+        ],
+    )
+    def test_a_table_function_cannot_reach_the_filesystem(self, sql):
+        _, err = validate_sql(sql, FILES, 500, "duckdb")
+
+        assert err is not None
+
+    def test_the_rejection_names_the_function_so_the_model_can_correct_it(self):
+        _, err = validate_sql(
+            "select * from read_csv_auto('C:/Windows/win.ini')", FILES, 500, "duckdb"
+        )
+
+        # "tables not allowed: ['']" told the model nothing, so it reissued the same query
+        # until the tool budget ran out.
+        assert "read_csv_auto" in err.lower()
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "copy sales to 'x.csv'",
+            "copy (select * from sales) to 'x.parquet' (format parquet)",
+            "attach 'other.db' as o",
+            "install httpfs",
+            "load httpfs",
+            "pragma database_list",
+            "set enable_external_access=true",
+            "create table t as select * from sales",
+            "delete from sales",
+        ],
+    )
+    def test_only_selects_survive(self, sql):
+        _, err = validate_sql(sql, FILES, 500, "duckdb")
+
+        assert err is not None
+
+    def test_an_allowed_file_table_is_accepted_and_capped(self):
+        safe, err = validate_sql("select * from sales", FILES, 10, "duckdb")
+
+        assert err is None
+        assert "LIMIT 10" in safe.upper()
+
+    def test_duckdb_syntax_is_not_rewritten_into_something_duckdb_rejects(self):
+        """Parsing duckdb as postgres turns EXCLUDE into EXCEPT, which duckdb refuses. This is
+        the concrete reason the dialect is threaded through rather than hardcoded."""
+        safe, err = validate_sql("select * exclude (secret) from sales", FILES, 500, "duckdb")
+
+        assert err is None
+        assert "EXCLUDE" in safe.upper()
+
+    def test_a_cte_still_resolves_locally(self):
+        safe, err = validate_sql(
+            "with recent as (select * from sales) select * from recent", FILES, 500, "duckdb"
+        )
+
+        assert err is None
+        assert safe
+
+    def test_postgres_remains_the_default(self):
+        _, err = validate_sql("select * from sales", FILES, 500)
+
+        assert err is None

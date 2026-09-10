@@ -11,7 +11,10 @@ import sqlglot
 from sqlglot import exp
 
 # Anything that writes, changes structure or changes permissions. `Into` is here because
-# `SELECT ... INTO t` parses as an ordinary Select yet creates a table.
+# `SELECT ... INTO t` parses as an ordinary Select yet creates a table. `Copy`, `Attach` and
+# `Install` cannot appear inside a Select and so are already unreachable, but on duckdb they are
+# how a query would write a file, open another database or fetch an extension, and this list is
+# where someone looks to check that.
 FORBIDDEN = (
     exp.Insert,
     exp.Update,
@@ -24,6 +27,9 @@ FORBIDDEN = (
     exp.TruncateTable,
     exp.Grant,
     exp.Into,
+    exp.Copy,
+    exp.Attach,
+    exp.Install,
 )
 
 
@@ -76,7 +82,11 @@ def validate_sql(
         if isinstance(node, FORBIDDEN):
             return sql, f"forbidden operation: {type(node).__name__}"
 
-    used = {t.name.lower() for t in tree.find_all(exp.Table)}
+    # A table function such as read_csv_auto('...') is a Table node with an empty name, so the
+    # allowlist already rejects it. Naming it in the message matters: the reason is fed back as a
+    # retry hint, and "tables not allowed: ['']" tells the model nothing, so it reissues the same
+    # query until the tool budget runs out.
+    used = {t.name.lower() or t.sql(dialect=dialect) for t in tree.find_all(exp.Table)}
     unknown = used - {t.lower() for t in allowed_tables} - _local_aliases(tree)
     if unknown:
         return sql, f"tables not allowed: {sorted(unknown)}"
