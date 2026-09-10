@@ -69,7 +69,9 @@ alembic revision --autogenerate -m "msg"; alembic upgrade head
 pytest -m "not integration"                           # fast, no DB
 pytest -m integration                                 # needs the three local databases above
 ruff check app tests; ruff format app tests
-$env:TOKEN="..."; $env:CONN="..."; python evals/run_evals.py   # >= 80% or the phase is not done
+$env:TOKEN="..."; $env:CONN="..."; python evals/run_evals.py   # live gate, >= 80% or not done
+python evals/recorded.py --record --only 0-9    # capture the model; the free tier is 20/day
+python evals/recorded.py --replay               # rerun the suite offline, no API calls
 pip-compile --extra dev -o requirements.lock pyproject.toml     # after any dependency change
 playwright install chromium                           # no `install-deps` on Windows
 ```

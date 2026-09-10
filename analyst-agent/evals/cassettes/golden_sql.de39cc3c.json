@@ -1,0 +1,336 @@
+{
+  "recorded_on": "2026-09-10",
+  "model": "gemini-3.5-flash-lite",
+  "prompt_sha": "de39cc3ccf53fcef83fdc0780bb98c92467c912d76560c91be0e8a23070e03b4",
+  "cases": [
+    {
+      "q": "How many dealers do we have?",
+      "turns": [
+        {
+          "request_sha": "e587302f23ba1c91db11be9bb8b27ebb201d9d1bf3fae5aacf773ae76abb5096",
+          "message": {
+            "content": [],
+            "additional_kwargs": {
+              "function_call": {
+                "name": "query_database",
+                "arguments": "{\"sql\": \"SELECT count(*) FROM dealers\"}"
+              },
+              "__gemini_function_call_thought_signatures__": {
+                "call_2529295": "El4KXAERTTIPTtyy0uz/KdhNHfxvWpLd/Vbv5A3wbkDZKGzYj9msGqGHhKTdYyv8R9eYxN51zWOJlDc1dQ8PTfgthIIPrueiC+BilXaY4Rnd8/JoefcOmHtr/gS90Ncj"
+              }
+            },
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b3d-e474-74b3-85c9-6ed86f904e0b-0",
+            "tool_calls": [
+              {
+                "name": "query_database",
+                "args": {
+                  "sql": "SELECT count(*) FROM dealers"
+                },
+                "id": "call_2529295",
+                "type": "tool_call"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 617,
+              "output_tokens": 20,
+              "total_tokens": 637,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        },
+        {
+          "request_sha": "d26cbee01f0a7b152a4b71c18eb10c96fcfb528c3f8326d17b4394021d14f122",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "You currently have a total of 3 registered dealers in your database. This covers your active dealership network currently stored in the system.",
+                "extras": {
+                  "signature": "El4KXAERTTIPNxHhUYMj1fFnsTgI5muKvc7h/iFBCOpJgnnAsyFzgsPiaGFcvvWbVVrkeViJGI7hL/SSlst94Cwwa/sjdtrBalyqHNjN6Su1U7fIbGyJuJZcIuEXwz94"
+                }
+              }
+            ],
+            "additional_kwargs": {},
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b3d-e997-71c1-b037-8798cd90591b-0",
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 663,
+              "output_tokens": 26,
+              "total_tokens": 689,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "q": "What is the total battery revenue in August 2026?",
+      "turns": [
+        {
+          "request_sha": "2642de61f20edf6129f3647329af3faf22ffd26fb2caaa778b7be7afa4f4735f",
+          "message": {
+            "content": [],
+            "additional_kwargs": {
+              "function_call": {
+                "name": "query_database",
+                "arguments": "{\"sql\": \"SELECT sum(price_inr) AS total_revenue FROM batteries WHERE sold_on >= '2026-08-01' AND sold_on < '2026-09-01'\"}"
+              },
+              "__gemini_function_call_thought_signatures__": {
+                "call_2462997": "El4KXAERTTIP0DSLw8MKqlORUjG4Lhd8hcPGD+AvgVqpffTc+mXDB+VQUGF9o8q817I5+7PYbWSsVJotAhxYVML1zkDrma6lrDSfQmRFceY7wuNOTP8gmMfuLqH+Eu39"
+              }
+            },
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b3d-ef3b-7501-9399-3d2899d7f985-0",
+            "tool_calls": [
+              {
+                "name": "query_database",
+                "args": {
+                  "sql": "SELECT sum(price_inr) AS total_revenue FROM batteries WHERE sold_on >= '2026-08-01' AND sold_on < '2026-09-01'"
+                },
+                "id": "call_2462997",
+                "type": "tool_call"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 624,
+              "output_tokens": 63,
+              "total_tokens": 687,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        },
+        {
+          "request_sha": "3d433a378c043e4e952404e6caca52d225dd901a078919243192701b975d5feb",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "The total battery revenue in August 2026 was \u20b9157,300.00. This figure is based on all batteries sold between August 1 and August 31, 2026.",
+                "extras": {
+                  "signature": "El4KXAERTTIPri+deACXfn/3tR26jru7Z3mjPlq6DEumkAn1NaKEXr9/FIyH1SzMilsvusuSKr4ejMA6hez16GH/jYrYpLdd/cTigCpRub67sIFaGnOm8cB4M62whN0/"
+                }
+              }
+            ],
+            "additional_kwargs": {},
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b3d-f3e9-7752-be69-83d7b13b8825-0",
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 725,
+              "output_tokens": 48,
+              "total_tokens": 773,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "q": "Which city has sold the fewest batteries?",
+      "turns": [
+        {
+          "request_sha": "67d25e7a077f322f1ca873181700d1785e6b88d0b38bfee2a7bbb5819afec081",
+          "message": {
+            "content": [],
+            "additional_kwargs": {
+              "function_call": {
+                "name": "query_database",
+                "arguments": "{\"sql\": \"SELECT d.city, COUNT(b.id) AS battery_count FROM dealers d LEFT JOIN batteries b ON d.id = b.dealer_id GROUP BY d.city ORDER BY battery_count ASC LIMIT 1\"}"
+              },
+              "__gemini_function_call_thought_signatures__": {
+                "call_1858278": "El4KXAERTTIPBvhOt9Mohm/z1mswm4g3xBZoBT/hcqANuaSp/h5ls8FxPLChO++EbYu9fFl86b1y88VlMVfvt7QJFzuKacr3lMjzc88pEwk6Iww46CUn4mAu1PpwAghm"
+              }
+            },
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b3d-fc16-71d3-ae85-d3213120005c-0",
+            "tool_calls": [
+              {
+                "name": "query_database",
+                "args": {
+                  "sql": "SELECT d.city, COUNT(b.id) AS battery_count FROM dealers d LEFT JOIN batteries b ON d.id = b.dealer_id GROUP BY d.city ORDER BY battery_count ASC LIMIT 1"
+                },
+                "id": "call_1858278",
+                "type": "tool_call"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 618,
+              "output_tokens": 61,
+              "total_tokens": 679,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        },
+        {
+          "request_sha": "1c06b40040a4e47c0fc422d35b886ee1501a5226b2721833c4578747d7ecb8e1",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "The city that has sold the fewest batteries is Howrah, with a total of only 1 battery sold. This count includes all dealers registered within that city across the recorded data.",
+                "extras": {
+                  "signature": "El4KXAERTTIPmklTPa1WbeokhKglVUEVaM0N/WncQrb+yKwmjnq84qvUDOb6HtWdKT2OQlamIc6kKy6uG8fzwhKTde8UQd+rCfn2+TqoBb5nHvopo5acBKNP7VQNEipD"
+                }
+              }
+            ],
+            "additional_kwargs": {},
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b3e-01df-7411-95e3-d4fa864bce93-0",
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 716,
+              "output_tokens": 36,
+              "total_tokens": 752,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "q": "What is the average temperature in telemetry over the last 24 hours?",
+      "turns": [
+        {
+          "request_sha": "995f28fe2c7b9a33b169f03f2fe859437228e41d90d70162b84ab5b2f76e5216",
+          "message": {
+            "content": [],
+            "additional_kwargs": {
+              "function_call": {
+                "name": "query_database",
+                "arguments": "{\"sql\": \"SELECT AVG(temp_c) AS avg_temp FROM telemetry WHERE ts >= '2026-09-09 00:00:00' AND ts <= '2026-09-10 00:00:00'\"}"
+              },
+              "__gemini_function_call_thought_signatures__": {
+                "call_2314634": "El4KXAERTTIPeVakvXlEsojp5nUM+hcO2HKkcsDOFU7XCWraUHs29Hq2AJ6w7lb1ZtO9msPdiOrBtxV6MwS39LCR9JxD5c1E0QNyW6oFYt8nlao1vIlOecItIfn6pITb"
+              }
+            },
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b3e-09cc-77d2-bd74-fadcfb7e3330-0",
+            "tool_calls": [
+              {
+                "name": "query_database",
+                "args": {
+                  "sql": "SELECT AVG(temp_c) AS avg_temp FROM telemetry WHERE ts >= '2026-09-09 00:00:00' AND ts <= '2026-09-10 00:00:00'"
+                },
+                "id": "call_2314634",
+                "type": "tool_call"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 625,
+              "output_tokens": 76,
+              "total_tokens": 701,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        },
+        {
+          "request_sha": "b5336e0aac3010da0cf2eecb89c821c28a979bbdb18a146687956389b74a349d",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "The average temperature recorded in the telemetry over the last 24 hours is approximately 32.16 degrees Celsius. This calculation is based on telemetry data collected between September 9, 2026, and September 10, 2026.",
+                "extras": {
+                  "signature": "El4KXAERTTIPgnlFyvO2GZyAMyxFCxV3kjWMpfPtDQQdqzBs+w9iwFVhzTChO30Jl4FuPtI8pKTcSufd0MBG0HWRTtJJThtcGRk9m55NYZlgAWN7CHxK1Uptk8IwZFqT"
+                }
+              }
+            ],
+            "additional_kwargs": {},
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b3e-0e4e-7003-aaaa-a6c8c4e61dec-0",
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 749,
+              "output_tokens": 56,
+              "total_tokens": 805,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "tools_sha": "8ea6500b3582edb64bbac2a5705fa52c3be536b083deb0b43338d60bcf9ef612"
+}
