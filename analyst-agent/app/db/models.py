@@ -66,5 +66,7 @@ class Run(Base):
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     rows_returned: Mapped[int] = mapped_column(Integer, default=0)
+    # So a past run can be re-rendered without re-running the customer's query.
+    chart: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

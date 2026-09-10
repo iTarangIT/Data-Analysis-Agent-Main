@@ -145,9 +145,17 @@ Changing it requires updating both repos in the same PR.
 | `status` | `{"stage": router\|sql_gen\|sql_guard\|db_exec\|web_tool\|answer}` |
 | `sql` | `{"sql": "..."}` |
 | `rows` | `{"columns": [...], "rows": [[...]], "truncated": bool}` |
+| `chart` | `{"type": bar\|line, "x": "col", "y": ["col"]}` — optional, always straight after a `rows` |
 | `token` | `{"text": "..."}` |
 | `done` | `{"run_id": "...", "duration_ms": n}` |
 | `error` | `{"message": "..."}` |
+
+`chart` was added in phase 5, before `analyst-web` existed, so there was no second repo to
+update in the same PR. It is additive: no existing event changed shape, it always follows a
+`rows` event for the same tool call, and it adds **no new stage** — the stage list is unchanged,
+because a chart is a payload rather than a step. A client that ignores unknown event names is
+unaffected. Note that `pnpm gen:agent` will not surface it: SSE events do not appear in
+`/openapi.json`.
 
 ## Hard rules
 

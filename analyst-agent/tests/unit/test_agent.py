@@ -33,11 +33,12 @@ class FakeConnector:
 
     def __init__(self, rows=(("KA01",), ("KA02",))):
         self.rows = [tuple(r) for r in rows]
+        self.columns = ["vehicleno"]
         self.executed: list[str] = []
 
     def run_select(self, sql, max_rows):
         self.executed.append(sql)
-        return ["vehicleno"], self.rows[:max_rows]
+        return self.columns, self.rows[:max_rows]
 
     def describe_schema(self):
         return SCHEMA
@@ -249,7 +250,7 @@ class TestWebPath:
         events, _ = result
         # web_tool precedes rows, so the client is not left on `router` for the whole fetch.
         types = [e["type"] for e in events]
-        assert types == ["status", "status", "rows", "status", "token"]
+        assert types == ["status", "status", "rows", "chart", "status", "token"]
 
     def test_no_sql_is_ever_reported_for_a_dashboard(self, result):
         events, outcome = result
@@ -282,3 +283,48 @@ class TestWebPath:
         assert _stages(events) == ["router", "web_tool", "answer"]
         assert "rows" not in [e["type"] for e in events]
         assert outcome.answer == "The dashboard could not be read."
+
+
+class TestChartEvent:
+    """`chart` is a payload, not a stage. Adding a stage would break the frozen sequence and put
+    a second copy of the decision into the web client's state machine."""
+
+    def _chartable(self):
+        model = FakeToolModel(
+            responses=[
+                _tool_call("select vehicleno, soc from vehicles"),
+                AIMessage(content="West leads."),
+            ]
+        )
+        connector = FakeConnector(rows=(("KA01", 82), ("KA02", 61)))
+        connector.columns = ["vehicleno", "soc"]
+        return _run(model, connector)
+
+    def test_a_chartable_result_emits_a_chart_after_the_rows(self):
+        events, outcome = self._chartable()
+        types = [e["type"] for e in events]
+
+        assert types.index("chart") == types.index("rows") + 1
+        assert outcome.chart == {"type": "bar", "x": "vehicleno", "y": ["soc"]}
+
+    def test_the_stage_sequence_is_unchanged(self):
+        events, _ = self._chartable()
+
+        assert _stages(events) == ["router", "sql_gen", "sql_guard", "db_exec", "answer"]
+
+    def test_a_result_with_nothing_to_plot_emits_no_chart(self):
+        model = FakeToolModel(
+            responses=[_tool_call("select vehicleno from vehicles"), AIMessage(content="Two.")]
+        )
+        events, outcome = _run(model, FakeConnector())
+
+        assert "chart" not in [e["type"] for e in events]
+        assert outcome.chart is None
+
+    def test_a_refused_query_emits_no_chart(self):
+        model = FakeToolModel(
+            responses=[_tool_call("delete from vehicles"), AIMessage(content="No.")]
+        )
+        events, _ = _run(model, FakeConnector())
+
+        assert "chart" not in [e["type"] for e in events]

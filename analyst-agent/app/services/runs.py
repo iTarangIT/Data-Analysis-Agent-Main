@@ -26,6 +26,7 @@ from app.db.session import SessionLocal
 from app.logging import log
 from app.security.auth import TenantContext
 from app.services import connections as conn_svc
+from app.services.charts import infer_chart
 from app.services.errors import BudgetExceeded, DomainError, NotFound, RateLimited
 from app.workers.web_session import DashboardUnavailable
 
@@ -48,6 +49,7 @@ class RunOutcome:
     tool: str | None = None
     sql: str | None = None
     rows: list = field(default_factory=list)
+    chart: dict | None = None
     answer: str = ""
 
 
@@ -121,6 +123,13 @@ class EventTranslator:
                 "truncated": result["truncated"],
             },
         }
+        # Emitted per tool call, so a second query supersedes the first exactly as `sql` and
+        # `rows` already do. `chart` is a payload rather than a stage, so the frozen stage list
+        # is unchanged.
+        chart = infer_chart(result["columns"], result["rows"], result["truncated"])
+        if chart:
+            self.outcome.chart = chart
+            yield {"type": "chart", "data": chart}
 
 
 def sse_frame(event: dict) -> dict[str, str]:
@@ -319,6 +328,7 @@ def execute_run(db: Session, run: Run, connector: Connector, schema: dict, emit:
         tool=outcome.tool,
         sql=outcome.sql,
         rows_returned=len(outcome.rows),
+        chart=outcome.chart,
         model=next(iter(usage.usage_metadata), None),
         prompt_tokens=sum(t.get("input_tokens", 0) for t in totals),
         completion_tokens=sum(t.get("output_tokens", 0) for t in totals),

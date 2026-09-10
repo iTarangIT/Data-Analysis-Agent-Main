@@ -40,6 +40,16 @@ class ConnectionOut(BaseModel):
     has_schema_cache: bool
 
 
+class ChartSpec(BaseModel):
+    """A suggestion rendered beside the table, never instead of it."""
+
+    type: Literal["bar", "line"]
+    x: str
+    # A list, because one month column beside two numeric ones is the commonest shape a
+    # spreadsheet produces, and a list costs nothing.
+    y: list[str]
+
+
 class RunCreate(BaseModel):
     connection_id: str
     thread_id: str = Field(min_length=1, max_length=100)
@@ -61,6 +71,7 @@ class RunOut(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     rows_returned: int
+    chart: ChartSpec | None
     duration_ms: int
     created_at: datetime
 
