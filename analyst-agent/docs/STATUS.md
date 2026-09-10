@@ -87,14 +87,45 @@ Apoorv chose to fix the IoT data pipeline before writing the 30 golden cases, ra
 scope them to the four usable tables. The agent code is complete and tested; only the eval
 gate waits. It can resume once telemetry is backfilled and the empty tables are populated.
 
-### Outstanding obligation under hard rule 6
+### Outstanding obligation under hard rule 6, corrected 2026-09-10
 
-`SQL_SYSTEM` in `app/agent/prompts.py` gained guidance about statement timeouts, time-range
-constraints, rollup tables and entity-first indexes, written tenant-neutrally because that file
-serves every customer. Hard rule 6 requires evals to be run and a before/after pass rate
-reported for any prompt change. **That has not been done**, because no `OPENROUTER_API_KEY` is
-configured and the gate is paused. Run the evals and record both rates before this prompt
-change is considered merged.
+This entry named `SQL_SYSTEM` and asked for a before/after pass rate on the statement-timeout
+and rollup guidance. Two things about it were wrong, and a third makes the measurement it asks
+for worthless where it can actually be run.
+
+1. **The symbol is gone.** `SQL_SYSTEM` was deleted with the five-node graph in `8ac6e69`. The
+   guidance now lives in the "Writing SQL" block of `AGENT_SYSTEM`, the only prompt left.
+2. **There is no "before" in git.** `git log -- app/agent/prompts.py` has three commits, and the
+   timeout and rollup lines are already present in the first of them, `c6fc6a0`. The only
+   pre-change text is the manual's §7.2, which belongs to an architecture that no longer exists.
+   There is no like-for-like earlier prompt to record.
+3. **An A/B on `demo` would measure nothing.** The guidance says a query that scans a whole
+   table will be killed, so prefer a rollup. The largest table in the demo fixture is
+   `telemetry` at 240 rows. Nothing there can time out, so the instruction is inert and the
+   result would read 4/4 against 4/4. Publishing that would satisfy the rule on paper while
+   proving nothing, and would close an item that is not closed.
+
+The guidance is about an 8s timeout against 45.9M rows with only a `(vehicleno, time)` index.
+It can only be evaluated against the IoT database, which is exactly what the phase 1 gate is
+paused on.
+
+**The obligation stands and is now scheduled rather than blocked.** `evals/recorded.py` makes
+the eventual A/B two commands: record a cassette with the timeout bullet removed, record another
+with it present, replay both. Until the telemetry backfill lands there is nothing honest to
+report, and this entry stays open.
+
+## Phases 3 to 5 begin with phases 1 and 2 still open, by decision
+
+`DEVELOPMENT.md` §2 and the table at the top of this file both say phase N+1 does not begin
+until phase N's line reads done. Apoorv asked for the remaining backend anyway, and confirmed
+after the conflict was raised under §9. Recorded here rather than left implicit.
+
+What is actually outstanding in the two open phases is not backend code. Phase 1 waits on the
+IoT data, and phase 2's done-line, "second person connects a DB without help", is a frontend
+milestone: the backend half of phase 2, tenant JWTs, the vault and `/connections`, shipped in
+phase 0 and 1 commits. `analyst-web` does not exist yet.
+
+Phase 6, billing, is deferred. Docker is cut from phase 4; see that phase's section.
 
 ## The agent: create_agent, per the LangChain v1 documentation
 
@@ -205,12 +236,22 @@ the 30 IoT cases.
 
 ## Open checks
 
-| # | Blocked on | Unblocks |
-|---|---|---|
-| 1 | `OPENROUTER_API_KEY` | every model call: the SQL path, the 2 skipped tests, the eval gate |
-| 2 | `analyst_ro` on `itarang` | registering the IoT connection at all |
-| 3 | `LANGSMITH_API_KEY` | the "trace in LangSmith" half of phase 0's done-line |
-| 4 | items 1 and 2 | writing the 30 golden cases against the real schema |
+Items 1 and 2 below were closed on 2026-09-10 and are kept for the record.
+
+| # | Blocked on | Unblocks | State |
+|---|---|---|---|
+| 1 | ~~`OPENROUTER_API_KEY`~~ `GEMINI_API_KEY` | every model call | **closed**, key configured |
+| 2 | `analyst_ro` on `itarang` | registering the IoT connection | **closed**, role created |
+| 3 | `LANGSMITH_API_KEY` | the "trace in LangSmith" half of phase 0's done-line | open |
+| 4 | the telemetry backfill | writing the 30 golden cases against real data | open |
+
+Item 4 was "blocked on items 1 and 2". Both are closed and it is still blocked, because the
+real obstacle was never the key or the role: 7 of the 15 IoT tables are empty and the telemetry
+pipeline stopped in early July. Cases written against that today would encode the outage.
+
+The **20 requests per day per model** free-tier limit no longer blocks the harness itself.
+`evals/recorded.py` records once and replays offline, so everything downstream of the model is
+gated for free. It does not gate a prompt change; see the hard rule 6 entry above.
 
 ### 4. The IoT eval target
 
