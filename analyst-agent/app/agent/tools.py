@@ -6,8 +6,9 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from app.agent.nodes.sql_guard import validate_sql
+from app.agent.prompts import QUERY_TOOL_DESC, QUERY_TOOL_SQL_ARG
 from app.config import get_settings
-from app.connectors.base import Connector
+from app.connectors.base import SqlConnector
 
 TOOL_NAME = "query_database"
 
@@ -15,18 +16,9 @@ TOOL_NAME = "query_database"
 # The complete result travels separately as the tool's artifact.
 PREVIEW_ROWS = 50
 
-_DESCRIPTION = """Run one read-only SQL SELECT against the customer's database and return the
-rows. Use this for any question about historic or stored data.
-
-Only these tables and columns exist, and only SELECT is permitted:
-{tables}
-
-Queries run under a short statement timeout. Constrain time columns, filter by entity where
-the question names one, and prefer summary tables over raw readings."""
-
 
 class QueryDatabaseArgs(BaseModel):
-    sql: str = Field(description="One PostgreSQL SELECT statement. No prose, no code fences.")
+    sql: str = Field(description=QUERY_TOOL_SQL_ARG)
 
 
 def _table_list(schema: dict[str, Any]) -> str:
@@ -40,19 +32,19 @@ def _table_list(schema: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def make_query_tool(connector: Connector, schema: dict[str, Any]) -> BaseTool:
+def make_query_tool(connector: SqlConnector, schema: dict[str, Any]) -> BaseTool:
     allowed = {t["name"] for t in schema.get("tables", [])}
 
     @tool(
         TOOL_NAME,
-        description=_DESCRIPTION.format(tables=_table_list(schema)),
+        description=QUERY_TOOL_DESC.format(tables=_table_list(schema)),
         args_schema=QueryDatabaseArgs,
         response_format="content_and_artifact",
     )
     def query_database(sql: str) -> tuple[str, dict[str, Any]]:
         max_rows = get_settings().max_rows
 
-        safe_sql, err = validate_sql(sql, allowed, max_rows)
+        safe_sql, err = validate_sql(sql, allowed, max_rows, connector.dialect)
         if err:
             return f"Query rejected: {err}. Rewrite it.", {"error": err}
 

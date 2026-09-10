@@ -29,6 +29,7 @@ class FakeToolModel(FakeMessagesListChatModel):
 
 class FakeConnector:
     kind = "postgres"
+    dialect = "postgres"
 
     def __init__(self, rows=(("KA01",), ("KA02",))):
         self.rows = [tuple(r) for r in rows]

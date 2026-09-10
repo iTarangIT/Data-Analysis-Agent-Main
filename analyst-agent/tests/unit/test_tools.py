@@ -13,6 +13,7 @@ SCHEMA = {
 
 class FakeConnector:
     kind = "postgres"
+    dialect = "postgres"
 
     def __init__(self, cols=("vehicleno",), rows=(("KA01",), ("KA02",))):
         self.cols, self.rows = list(cols), [tuple(r) for r in rows]

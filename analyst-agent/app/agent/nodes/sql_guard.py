@@ -51,14 +51,16 @@ def _with_row_cap(tree: exp.Expression, max_rows: int) -> exp.Expression:
     return tree.limit(max_rows)
 
 
-def validate_sql(sql: str, allowed_tables: set[str], max_rows: int) -> tuple[str, str | None]:
+def validate_sql(
+    sql: str, allowed_tables: set[str], max_rows: int, dialect: str = "postgres"
+) -> tuple[str, str | None]:
     """Return (safe_sql, None) if `sql` is a single read-only SELECT over allowed tables.
 
     Otherwise return (sql, reason). The reason is fed back to the SQL generator as a retry hint,
     so it names what was wrong rather than merely saying no.
     """
     try:
-        statements = sqlglot.parse(sql, read="postgres")
+        statements = sqlglot.parse(sql, read=dialect)
     except sqlglot.errors.ParseError as e:
         return sql, f"parse error: {e}"
 
@@ -79,4 +81,4 @@ def validate_sql(sql: str, allowed_tables: set[str], max_rows: int) -> tuple[str
     if unknown:
         return sql, f"tables not allowed: {sorted(unknown)}"
 
-    return _with_row_cap(tree, max_rows).sql(dialect="postgres"), None
+    return _with_row_cap(tree, max_rows).sql(dialect=dialect), None

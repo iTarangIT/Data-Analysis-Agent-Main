@@ -27,3 +27,15 @@ Answering:
 - Write 2 to 4 sentences in plain English with the key numbers.
 - If the result is empty, say so plainly and suggest one reason.
 - Do not mention that you are an AI, and do not repeat the SQL."""
+
+
+QUERY_TOOL_DESC = """Run one read-only SQL SELECT against the customer's database and return the
+rows. Use this for any question about historic or stored data.
+
+Only these tables and columns exist, and only SELECT is permitted:
+{tables}
+
+Queries run under a short statement timeout. Constrain time columns, filter by entity where
+the question names one, and prefer summary tables over raw readings."""
+
+QUERY_TOOL_SQL_ARG = "One PostgreSQL SELECT statement. No prose, no code fences."
