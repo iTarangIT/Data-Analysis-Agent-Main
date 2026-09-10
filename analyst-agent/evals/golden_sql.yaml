@@ -1,7 +1,15 @@
-# Golden questions for the phase 1 gate. Each case needs exactly one expectation:
+# Golden questions for the phase 1 gate. Each case needs one of these expectations:
 #   expect_value:    this value appears somewhere in the returned rows
 #   expect_contains: this text appears in the answer or the rows (case-insensitive)
 #   expect_type:     `number` (a numeric cell came back) or `rows` (any rows came back)
+#
+# `expect_chart: bar|line` may be added alongside any of the three, so a case can require both
+# the right rows and the right picture.
+#
+# Two traps when writing a case. A superlative needs a unique winner, or a model answering
+# correctly is marked wrong; see the note below. And never assert an exact value against a live
+# source such as a web dashboard, because the number changes and the case fails tomorrow for a
+# reason that has nothing to do with the agent.
 #
 # The phase 1 gate is 30 cases at >= 80% against the iTarang IoT database. The four below run
 # against the seeded `demo` fixture and exist so the harness is testable today; they are

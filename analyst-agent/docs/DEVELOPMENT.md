@@ -72,6 +72,7 @@ ruff check app tests; ruff format app tests
 $env:TOKEN="..."; $env:CONN="..."; python evals/run_evals.py   # live gate, >= 80% or not done
 python evals/recorded.py --record --only 0-9    # capture the model; the free tier is 20/day
 python evals/recorded.py --replay               # rerun the suite offline, no API calls
+$env:MAX_RUNS_PER_MINUTE="100"                  # a suite trips the per-tenant rate limit
 pip-compile --extra dev -o requirements.lock pyproject.toml     # after any dependency change
 playwright install chromium                           # no `install-deps` on Windows
 ```

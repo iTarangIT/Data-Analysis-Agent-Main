@@ -2,7 +2,12 @@
 
     $env:TOKEN="..."; $env:CONN="..."; python evals/run_evals.py
 
-Runs every case in golden_sql.yaml through the real SSE endpoint, so it exercises the router,
+The suite runs many questions in a row against one tenant, so it trips the per-tenant rate
+limit. Raise it for an eval run:
+
+    $env:MAX_RUNS_PER_MINUTE="100"
+
+Runs every case through the real SSE endpoint, so it exercises the router,
 the generator, the guard, execution and the answer together.
 """
 
@@ -18,14 +23,13 @@ import httpx
 import yaml
 
 BASE = os.environ.get("AGENT_URL", "http://localhost:8000")
-CASES_PATH = Path(__file__).parent / "golden_sql.yaml"
 PASS_THRESHOLD = 0.8
 
 
 def _stream_case(
     client: httpx.Client, token: str, conn: str, index: int, question: str, stamp: str
 ) -> dict:
-    result: dict[str, Any] = {"rows": [], "answer": "", "sql": None, "error": None}
+    result: dict[str, Any] = {"rows": [], "answer": "", "sql": None, "chart": None, "error": None}
     with client.stream(
         "POST",
         f"{BASE}/runs",
@@ -53,6 +57,8 @@ def _stream_case(
                     result["answer"] += data.get("text", "")
                 elif event == "sql":
                     result["sql"] = data.get("sql")
+                elif event == "chart":
+                    result["chart"] = data
                 elif event == "error":
                     result["error"] = data.get("message")
     return result
@@ -71,7 +77,7 @@ def _is_number(value: Any) -> bool:
     return True
 
 
-def _matches(case: dict, result: dict) -> bool:
+def _primary(case: dict, result: dict) -> bool:
     flat = [x for row in result["rows"] for x in row]
     if "expect_value" in case:
         return any(str(case["expect_value"]) in str(x) for x in flat)
@@ -86,10 +92,23 @@ def _matches(case: dict, result: dict) -> bool:
     raise ValueError(f"case has no expectation: {case.get('q')!r}")
 
 
+def _matches(case: dict, result: dict) -> bool:
+    """`expect_chart` is an extra condition rather than a fourth kind, so a case can require
+    both the right rows and the right picture."""
+    if not _primary(case, result):
+        return False
+    if "expect_chart" in case:
+        return bool(result.get("chart")) and result["chart"]["type"] == case["expect_chart"]
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-v", "--verbose", action="store_true", help="print SQL for failures")
+    parser.add_argument("--cases", default="golden_sql.yaml")
     args = parser.parse_args()
+
+    cases_path = Path(__file__).parent / args.cases
 
     try:
         token, conn = os.environ["TOKEN"], os.environ["CONN"]
@@ -97,9 +116,9 @@ def main() -> int:
         print(f"set {e.args[0]} in the environment", file=sys.stderr)
         return 2
 
-    cases = yaml.safe_load(CASES_PATH.read_text(encoding="utf-8")) or []
+    cases = yaml.safe_load(cases_path.read_text(encoding="utf-8")) or []
     if not cases:
-        print(f"no cases in {CASES_PATH}", file=sys.stderr)
+        print(f"no cases in {cases_path}", file=sys.stderr)
         return 2
 
     # A fresh thread per invocation. The checkpointer keeps chat memory per thread, so reusing

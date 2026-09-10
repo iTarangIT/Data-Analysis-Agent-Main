@@ -1,0 +1,16 @@
+order_date,region,product,units,revenue_inr
+2026-07-03,West,Cell,12,3000.00
+2026-07-09,East,Pack,5,2250.00
+2026-07-17,North,Cell,8,2000.00
+2026-07-24,South,Charger,3,450.00
+2026-07-29,West,Pack,4,1800.00
+2026-08-05,West,Cell,15,3750.00
+2026-08-11,East,Cell,6,1500.00
+2026-08-18,North,Pack,2,900.00
+2026-08-22,South,Cell,4,1000.00
+2026-08-27,West,Charger,7,1050.00
+2026-09-02,East,Pack,9,4050.00
+2026-09-08,North,Cell,11,2750.00
+2026-09-15,South,Pack,1,450.00
+2026-09-21,West,Cell,10,2500.00
+2026-09-26,East,Charger,5,750.00

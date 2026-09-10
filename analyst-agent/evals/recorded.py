@@ -7,6 +7,11 @@ The free tier allows 20 requests per day per model and one case costs two or mor
 30-question gate cannot be recorded in one sitting. `--only` records a slice and re-running
 keeps what was already captured.
 
+The suite runs many questions in a row against one tenant, so it trips the per-tenant rate
+limit. Raise it for an eval run:
+
+    $env:MAX_RUNS_PER_MINUTE="100"
+
 Replay drives the real routes through TestClient rather than a socket, so it still exercises
 auth, prepare_run, the App DB, the agent loop, the tool, the guard, the customer database and
 the SSE encoding. `run_evals.py` remains the live gate over real HTTP.
@@ -145,7 +150,7 @@ def frozen_today(day: str):
 
 
 def _parse_sse(text: str) -> dict:
-    result: dict[str, Any] = {"rows": [], "answer": "", "sql": None, "error": None}
+    result: dict[str, Any] = {"rows": [], "answer": "", "sql": None, "chart": None, "error": None}
     event = None
     for line in text.splitlines():
         if line.startswith("event:"):
@@ -158,6 +163,8 @@ def _parse_sse(text: str) -> dict:
                 result["answer"] += data.get("text", "")
             elif event == "sql":
                 result["sql"] = data.get("sql")
+            elif event == "chart":
+                result["chart"] = data
             elif event == "error":
                 result["error"] = data.get("message")
     return result

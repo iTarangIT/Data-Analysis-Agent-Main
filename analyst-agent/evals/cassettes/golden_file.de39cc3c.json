@@ -1,0 +1,625 @@
+{
+  "tools_sha": "9b837318e6b59ac6f6f138c002f5e0fbbceaae083f05ee9b7edf8c1c0d624332",
+  "recorded_on": "2026-09-10",
+  "model": "gemini-3.5-flash-lite",
+  "prompt_sha": "de39cc3ccf53fcef83fdc0780bb98c92467c912d76560c91be0e8a23070e03b4",
+  "cases": [
+    {
+      "q": "What is the total revenue in this file?",
+      "turns": [
+        {
+          "request_sha": "df43a1a168d2e09b41faa5f9441d30b66b5df438b931fcc89490e584744abca7",
+          "message": {
+            "content": [],
+            "additional_kwargs": {
+              "function_call": {
+                "name": "query_database",
+                "arguments": "{\"sql\": \"SELECT sum(revenue_inr) AS total_revenue FROM sales\"}"
+              },
+              "__gemini_function_call_thought_signatures__": {
+                "call_2479221": "El4KXAERTTIPya5tgC+bFv14M0dwucZfpFL4Ok0igKO0tIP9RTXOS6NiNJ2Ogq8GYPKJpdSciQ45IawobgILrIbIZlRN6EmBDP7eUA8/zHo6gyiKUiO11oUhzOdkZGne"
+              }
+            },
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b6d-8b9f-7450-a1fc-1a159d943847-0",
+            "tool_calls": [
+              {
+                "name": "query_database",
+                "args": {
+                  "sql": "SELECT sum(revenue_inr) AS total_revenue FROM sales"
+                },
+                "id": "call_2479221",
+                "type": "tool_call"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 492,
+              "output_tokens": 29,
+              "total_tokens": 521,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        },
+        {
+          "request_sha": "19b79f7dc40a7571815e6af4011652b8fa7297f90a806a50b2e061b4cdcef6b2",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "The total revenue across all sales in the database is 28,200 INR. This figure encompasses all recorded transactions regardless of product or region.",
+                "extras": {
+                  "signature": "El4KXAERTTIP+SA/QluR/PUHBUzOMYBhth/A01u5sAos0gArvj1e8hEYz8+9rhliHk9wsuGyaqtI5ugKLv0Xt73uEfzzPu/DDq9Y6X745yAsGrpykAjD2/jhcL8yH5QY"
+                }
+              }
+            ],
+            "additional_kwargs": {},
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b6d-b717-70b0-825e-cee51f3b6d18-0",
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 553,
+              "output_tokens": 31,
+              "total_tokens": 584,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "q": "How many orders came from the West region?",
+      "turns": [
+        {
+          "request_sha": "78be6ab447de9f511c492aef8a106bd11bfc08d6f93939b2e4ed67bf1b632118",
+          "message": {
+            "content": [],
+            "additional_kwargs": {
+              "function_call": {
+                "name": "query_database",
+                "arguments": "{\"sql\": \"SELECT COUNT(*) AS total_orders FROM sales WHERE region = 'West'\"}"
+              },
+              "__gemini_function_call_thought_signatures__": {
+                "call_994565": "El4KXAERTTIP7vjugHUN+Bfpi2CNAt0XGV1UxEv8lbkiiB5qEc3j3HBx73KA8N8CsuikrO3+23ZWGPPHOpFP5MvV8fxd2WvlPWadaxrB+mT/Wxs3sUU08vJGkrZAFGCb"
+              }
+            },
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b6e-1598-7ee3-9cfa-53ae76ac43df-0",
+            "tool_calls": [
+              {
+                "name": "query_database",
+                "args": {
+                  "sql": "SELECT COUNT(*) AS total_orders FROM sales WHERE region = 'West'"
+                },
+                "id": "call_994565",
+                "type": "tool_call"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 492,
+              "output_tokens": 30,
+              "total_tokens": 522,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        },
+        {
+          "request_sha": "488da3bf0425fa8683926a06f3ca56f102f0475e6499fb828b24846ba28ee078",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "There were 5 orders recorded from the West region. This count represents the total number of individual order transactions in the sales database for that specific area.",
+                "extras": {
+                  "signature": "El4KXAERTTIP+XKl0f+VmIwbeNnbtcEl/81kA2SMbBpEVde1suAaYd0OO0oVJHyFTARAzHueax9jHHn9RRscO9UZooh8h8ZIGOZWA91/tP06fQfYjXP0or4IwwDDIYnj"
+                }
+              }
+            ],
+            "additional_kwargs": {},
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b6e-578a-70e0-b1de-189fe5d5e77f-0",
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 550,
+              "output_tokens": 30,
+              "total_tokens": 580,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "q": "Which product earned the most revenue?",
+      "turns": [
+        {
+          "request_sha": "f43e5710d6a11bd3164fc0f45e676aee9b6ce04ca04bb1a76dd523ac4e335231",
+          "message": {
+            "content": [],
+            "additional_kwargs": {
+              "function_call": {
+                "name": "query_database",
+                "arguments": "{\"sql\": \"SELECT product, SUM(revenue_inr) AS total_revenue FROM sales GROUP BY product ORDER BY total_revenue DESC LIMIT 1\"}"
+              },
+              "__gemini_function_call_thought_signatures__": {
+                "call_2539355": "El4KXAERTTIPJW2G73paDPCepQHVPNX0UMI4DLG6Y4NJQ34gdRRiHsxhsPaZ/dPWaxKP+D5/lovPXPx+yj5au4SSHZTHLGhJLupMHUuUH//aYz8u+hXE/fDxRPSxTN8h"
+              }
+            },
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b6e-6541-7621-978a-9deee51fc8c0-0",
+            "tool_calls": [
+              {
+                "name": "query_database",
+                "args": {
+                  "sql": "SELECT product, SUM(revenue_inr) AS total_revenue FROM sales GROUP BY product ORDER BY total_revenue DESC LIMIT 1"
+                },
+                "id": "call_2539355",
+                "type": "tool_call"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 490,
+              "output_tokens": 43,
+              "total_tokens": 533,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        },
+        {
+          "request_sha": "2a0e0a533369250f82819ad2349702f8ff8b1590261221e84a301297c35ff901",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "The product that earned the most revenue is Cell, bringing in a total of 16,500 INR. This makes it the top-performing product in the sales records.",
+                "extras": {
+                  "signature": "El4KXAERTTIPUpGs+eBdlLgzpRC8guV3blf053m6+5LWQ0LYR4sp/CNL7vTgnwGFEzLKE+xMnqUqFo25hQ6Mhs8YQHsTTTAY/GGAZSO3G4mqtu3LrXFBvxBkhQzYkG/u"
+                }
+              }
+            ],
+            "additional_kwargs": {},
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b6e-8413-7761-9b74-58985284f77f-0",
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 573,
+              "output_tokens": 37,
+              "total_tokens": 610,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "q": "Show revenue by month.",
+      "turns": [
+        {
+          "request_sha": "600cb873949cb1cd3a11a2fe12f6f3258af3e2158fd31ae6e35394b0600b6744",
+          "message": {
+            "content": [],
+            "additional_kwargs": {
+              "function_call": {
+                "name": "query_database",
+                "arguments": "{\"sql\": \"SELECT DATE_TRUNC('month', order_date) AS month, SUM(revenue_inr) AS total_revenue FROM sales GROUP BY 1 ORDER BY 1\"}"
+              },
+              "__gemini_function_call_thought_signatures__": {
+                "call_2400853": "El4KXAERTTIP3LL/rzc8RLKUbnuVN+roGXW3Sjbe7xIQtQT7UmUxDiS+nrZbLk7UZQ1NXUgjlTtEbtCNdV+RgCfpRKZvVyvSShXUJka1jIh8TRK9QZS/NtOaQxg9hVUB"
+              }
+            },
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b6f-af8c-7681-aaee-c6e5af2d36f6-0",
+            "tool_calls": [
+              {
+                "name": "query_database",
+                "args": {
+                  "sql": "SELECT DATE_TRUNC('month', order_date) AS month, SUM(revenue_inr) AS total_revenue FROM sales GROUP BY 1 ORDER BY 1"
+                },
+                "id": "call_2400853",
+                "type": "tool_call"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 488,
+              "output_tokens": 51,
+              "total_tokens": 539,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        },
+        {
+          "request_sha": "56204af14ad7089b0f777508aacc09c65fc131b4086b342542a79bf0178fe924",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "The monthly revenue data shows totals for July, August, and September of 2026. July generated 9,500 INR, which dipped slightly to 8,200 INR in August. September saw the highest performance among the recorded months, reaching 10,500 INR.",
+                "extras": {
+                  "signature": "El4KXAERTTIPBkBknaR6itUtabDSr0Us6zp+z0EShKECP2jW43bucT/FQ8JwzICkIGeBc2MxJaQb27hERIxMaKaCUsGgbsqIxaqNAEdvjHFMAqg68Sp2YIALErgspj9L"
+                }
+              }
+            ],
+            "additional_kwargs": {},
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b6f-e581-7e80-990a-caa8b0feebe0-0",
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 651,
+              "output_tokens": 64,
+              "total_tokens": 715,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "q": "What is the revenue for each region?",
+      "turns": [
+        {
+          "request_sha": "817c59d1c889d02e574d5d7ada8c380a8be8f8f362c073f9d3175a54872fc552",
+          "message": {
+            "content": [],
+            "additional_kwargs": {
+              "function_call": {
+                "name": "query_database",
+                "arguments": "{\"sql\": \"SELECT region, SUM(revenue_inr) AS total_revenue FROM sales GROUP BY region ORDER BY total_revenue DESC\"}"
+              },
+              "__gemini_function_call_thought_signatures__": {
+                "call_2079807": "El4KXAERTTIPlDhWyLIt9IbG8KCiipTCAln1bdFZS+sNEfietA3YjU8Scz3hG9TDLVy+IHIHrV9gk186xk4O2eSCTJelh6w6rNZsVO5j1waltbh4UDClHjY9HUj0YJtj"
+              }
+            },
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b70-76da-7382-b377-bc9720d03192-0",
+            "tool_calls": [
+              {
+                "name": "query_database",
+                "args": {
+                  "sql": "SELECT region, SUM(revenue_inr) AS total_revenue FROM sales GROUP BY region ORDER BY total_revenue DESC"
+                },
+                "id": "call_2079807",
+                "type": "tool_call"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 491,
+              "output_tokens": 40,
+              "total_tokens": 531,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        },
+        {
+          "request_sha": "9db25b4cb60e3ebdb4febf0967ce30e4ed856048b46a61dd3a281b58358a1b4e",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "The West region generated the highest revenue at 12,100 INR, followed by the East region with 8,550 INR. The North region recorded 5,650 INR, while the South region had the lowest revenue at 1,900 INR.",
+                "extras": {
+                  "signature": "El4KXAERTTIPARREsiWA+IQl5euM2REqWuAc9sAr/HfG0U77+1dYdoZAnfsjE0z8g8xD4S4uZhGVPxtwp1ibneU4NFFpH6HnMHqQURefXe0ZUEmzZzg+hN0hUYDZX5VD"
+                }
+              }
+            ],
+            "additional_kwargs": {},
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b70-acd5-7483-b140-690f4d20f4ef-0",
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 598,
+              "output_tokens": 60,
+              "total_tokens": 658,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "q": "What is the average number of units per order?",
+      "turns": [
+        {
+          "request_sha": "2b2ca9fb8948e4aa53c9d51b30adea0f75d3701ec587858344c9ca346a3f151e",
+          "message": {
+            "content": [],
+            "additional_kwargs": {
+              "function_call": {
+                "name": "query_database",
+                "arguments": "{\"sql\": \"SELECT AVG(units) FROM sales\"}"
+              },
+              "__gemini_function_call_thought_signatures__": {
+                "call_2521506": "El4KXAERTTIPAR4n60CKYU0ggVh1qiXmBkHHpsaT7caXsr515m9oMjI4/6lNlceMaHsvaUQzBNVtDl8g78ofgaBS4PkgHgBBx1zzkQryvzhp9sHxqc7E/jZyT4MMhB7K"
+              }
+            },
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b71-2418-7373-a7f0-8c6d6028da43-0",
+            "tool_calls": [
+              {
+                "name": "query_database",
+                "args": {
+                  "sql": "SELECT AVG(units) FROM sales"
+                },
+                "id": "call_2521506",
+                "type": "tool_call"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 493,
+              "output_tokens": 22,
+              "total_tokens": 515,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        },
+        {
+          "request_sha": "265ed18572560545bbb3bcd8c7beb03f15c6160e2fbba081b6c2f77f83809e8e",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "The average number of units per order is approximately 6.8 across all recorded sales. This calculation is derived from the total units sold divided by the total number of orders in the database.",
+                "extras": {
+                  "signature": "El4KXAERTTIP/J0an7jt1O7viqs4/eAn4gE2yE9yPC6PDW8YWgy4n6nqjfMYtDgJe+prk9DOuZMBBeT3Y/vp1HwnysSSCZB2UXiZwqCeTmCB2pmAbyicSJ6Tr9+BCqIh"
+                }
+              }
+            ],
+            "additional_kwargs": {},
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b71-8c5b-7483-9b82-180e69fa08cd-0",
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 546,
+              "output_tokens": 38,
+              "total_tokens": 584,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "q": "How many orders came from Antarctica?",
+      "turns": [
+        {
+          "request_sha": "6b3ef16278449cf9a71b45df5b643d97dd17bc6a3ce01e68b9102ca946039e2b",
+          "message": {
+            "content": [],
+            "additional_kwargs": {
+              "function_call": {
+                "name": "query_database",
+                "arguments": "{\"sql\": \"SELECT sum(units) AS total_units FROM sales WHERE region = 'Antarctica'\"}"
+              },
+              "__gemini_function_call_thought_signatures__": {
+                "call_517272": "El4KXAERTTIPpRiEtGmeVCMe7hJ0flaLQ3YB3QsqXA1XAEA1hA1fmlevoNPAHXctxUNuuUFrdV6C3bkBKrOCKnp34oIn63C56giG7BW4g8UFes1QaLRmn11r/89Nr8bO"
+              }
+            },
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b71-d947-7202-a28f-7178bddf81c6-0",
+            "tool_calls": [
+              {
+                "name": "query_database",
+                "args": {
+                  "sql": "SELECT sum(units) AS total_units FROM sales WHERE region = 'Antarctica'"
+                },
+                "id": "call_517272",
+                "type": "tool_call"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 490,
+              "output_tokens": 33,
+              "total_tokens": 523,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        },
+        {
+          "request_sha": "aab765cc8b74cfdcd346e4ba0664926b4f5398de80dc2a4557b917082d633b42",
+          "message": {
+            "content": [],
+            "additional_kwargs": {
+              "function_call": {
+                "name": "query_database",
+                "arguments": "{\"sql\": \"SELECT DISTINCT region FROM sales\"}"
+              },
+              "__gemini_function_call_thought_signatures__": {
+                "call_517889": "El4KXAERTTIPzTHX6Mzy4owguTJf/T55Qm41bw7K1UF6WksBsmZmaHLBl01NIcPy4LIZtFmuGIVC23VdBhVAZKONpzKaSRxlXC115LfQDIUa5OBBE/dN22ZsMZ7zxZ9n"
+              }
+            },
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b72-3d07-7522-a6d2-e88dff22b900-0",
+            "tool_calls": [
+              {
+                "name": "query_database",
+                "args": {
+                  "sql": "SELECT DISTINCT region FROM sales"
+                },
+                "id": "call_517889",
+                "type": "tool_call"
+              }
+            ],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 549,
+              "output_tokens": 20,
+              "total_tokens": 569,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        },
+        {
+          "request_sha": "e08d5c7c48c0da5ea9b13c47f19667f3d83ac0ddfb860c35ff2d6a28e205da06",
+          "message": {
+            "content": [
+              {
+                "type": "text",
+                "text": "There are no orders recorded from Antarctica, as the region does not exist in the sales database. The available regions are limited to West, East, North, and South.",
+                "extras": {
+                  "signature": "El4KXAERTTIPc4lM2MmAtHviPRO6T0hBc0X4ESeqBVODBmY4QZmT6KyBerp61mBR1W8cH2bbjQtuZUBiI7JMegRIqpe+68GKYeUFFFXvArW89lmem39M0fmvjK75rSv4"
+                }
+              }
+            ],
+            "additional_kwargs": {},
+            "response_metadata": {
+              "finish_reason": "STOP",
+              "model_name": "gemini-3.5-flash-lite",
+              "safety_ratings": [],
+              "model_provider": "google_genai"
+            },
+            "type": "ai",
+            "name": null,
+            "id": "lc_run--01a08b72-700c-70b1-8582-afb63b2482e4-0",
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "usage_metadata": {
+              "input_tokens": 609,
+              "output_tokens": 34,
+              "total_tokens": 643,
+              "input_token_details": {
+                "cache_read": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
