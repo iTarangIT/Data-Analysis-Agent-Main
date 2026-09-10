@@ -6,9 +6,11 @@ that no model-written SQL reaches a database unguarded, whether it arrives throu
 or through a direct tool call.
 """
 
+import json
 from typing import Any
 
-from langchain_core.tools import StructuredTool
+from langchain.tools import tool
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from app.agent.nodes.sql_guard import validate_sql
@@ -32,21 +34,25 @@ class QueryDatabaseArgs(BaseModel):
 
 
 def _table_list(schema: dict[str, Any]) -> str:
-    return "\n".join(
-        f"- {t['name']}({', '.join(c['name'] for c in t['columns'])})"
-        for t in schema.get("tables", [])
-    )
+    """The tool carries the schema so it is usable on its own, not only from the graph."""
+    parts = []
+    for t in schema.get("tables", []):
+        cols = ", ".join(f"{c['name']} {c['type']}" for c in t["columns"])
+        parts.append(f"TABLE {t['name']} ({cols})")
+        if t.get("sample"):
+            parts.append(f"  sample rows: {json.dumps(t['sample'][:3])}")
+    return "\n".join(parts)
 
 
-def make_query_tool(connector: Connector, schema: dict[str, Any]) -> StructuredTool:
-    """Build the query tool for one tenant's connection.
-
-    Generic rather than IoT-specific: the same tool serves any customer Postgres, because the
-    allowlist and the description are derived from that connection's own schema.
-    """
+def make_query_tool(connector: Connector, schema: dict[str, Any]) -> BaseTool:
     allowed = {t["name"] for t in schema.get("tables", [])}
 
-    def run(sql: str) -> dict[str, Any]:
+    @tool(
+        TOOL_NAME,
+        description=_DESCRIPTION.format(tables=_table_list(schema)),
+        args_schema=QueryDatabaseArgs,
+    )
+    def query_database(sql: str) -> dict[str, Any]:
         max_rows = get_settings().max_rows
         safe_sql, err = validate_sql(sql, allowed, max_rows)
         if err:
@@ -63,9 +69,4 @@ def make_query_tool(connector: Connector, schema: dict[str, Any]) -> StructuredT
             "truncated": len(rows) > max_rows,
         }
 
-    return StructuredTool.from_function(
-        func=run,
-        name=TOOL_NAME,
-        description=_DESCRIPTION.format(tables=_table_list(schema)),
-        args_schema=QueryDatabaseArgs,
-    )
+    return query_database

@@ -98,8 +98,19 @@ change is considered merged.
 
 ## LangChain tool for database access
 
-Apoorv asked for LangChain tools, so `app/agent/tools.py` exposes `query_database`, a real
-`StructuredTool` with a Pydantic args schema that converts to an OpenAI function definition.
+Apoorv asked for LangChain tools, so `app/agent/tools.py` exposes `query_database`, defined
+with the `@tool` decorator from `langchain.tools` per the LangChain v1 documentation, with a
+custom name, an explicit description and a Pydantic `args_schema`. It converts to a valid
+OpenAI function definition.
+
+The decorator is applied inside `make_query_tool` rather than at module level, because each
+tenant connection needs its own closure over its connector and schema.
+
+The v1 docs also present `langchain.agents.create_agent` as the recommended agent harness. It
+is installed and available, but adopting it means replacing the LangGraph state machine, which
+would break the frozen SSE contract's per-node `status` events and the capped retry loop.
+Apoorv chose to keep the graph when asked, so `bind_tools` is used instead, which the same
+docs describe as the lower-level option.
 `sql_gen` binds it with `bind_tools(..., tool_choice=...)`, so the model writes SQL by calling
 the tool rather than by emitting prose, and `db_exec` invokes the same tool to run it.
 
