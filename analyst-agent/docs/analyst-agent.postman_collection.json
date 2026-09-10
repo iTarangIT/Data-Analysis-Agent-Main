@@ -94,6 +94,44 @@
       }
     },
     {
+      "name": "Upload a spreadsheet",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "name",
+              "value": "sales",
+              "type": "text"
+            },
+            {
+              "key": "file",
+              "type": "file",
+              "src": "evals/fixtures/sales.csv"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/connections/file",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "connections",
+            "file"
+          ]
+        },
+        "description": "Register a CSV, TSV or XLSX as a connection. The file is converted to Parquet at ingest and stored under this tenant's directory; the server mints every path, which is why `kind: file` is not accepted on POST /connections. Returns 201 and a connection id you can ask questions against."
+      }
+    },
+    {
       "name": "Run a question (SSE)",
       "request": {
         "method": "POST",

@@ -8,10 +8,10 @@ Source of truth for the active phase. Phase N+1 does not begin until phase N's l
 | 0 | repos, Compose, stub graph, SSE endpoint | `curl -N /runs` streams a stub, trace in LangSmith | **done**, tracing dormant | 2026-09-10 |
 | 1 | SQL tool on our own IoT DB, guard, evals | `evals/run_evals.py` >= 25/30 | code complete, **gate paused** | 2026-09-10 |
 | 2 | JWT auth, vault, `/connections`, then frontend Part B | second person connects a DB without help | not started | — |
-| 3 | web tool (Playwright) | Intellicar live query works for two tenants with separate sessions | not started | — |
-| 4 | Redis workers, limits, usage, Docker deploy | killing a worker mid-run gives a clean `error` event | not started | — |
-| 5 | file tool (DuckDB), charts | spreadsheet-only customer gets value | not started | — |
-| 6 | billing | paid plan sets `daily_token_budget` | not started | — |
+| 3 | web tool (Playwright) | Intellicar live query works for two tenants with separate sessions | code complete, **live check pending** | 2026-09-10 |
+| 4 | Redis workers, limits, usage, ~~Docker deploy~~ | killing a worker mid-run gives a clean `error` event | **done**, Docker cut, Memurai not installed | 2026-09-10 |
+| 5 | file tool (DuckDB), charts | spreadsheet-only customer gets value | **done** | 2026-09-10 |
+| 6 | billing | paid plan sets `daily_token_budget` | deferred by decision | — |
 
 ## Verified
 
@@ -295,3 +295,138 @@ Two manual simplifications are kept and flagged rather than fixed. `graph.stream
 inside an async generator and holds the event loop for the length of a run; it moves to an `arq`
 worker in phase 4. And `answer` emits one `token` event carrying the whole answer rather than
 per-chunk streaming, which the frozen SSE contract permits.
+
+## Phases 3 to 5, built 2026-09-10
+
+265 tests pass, 6 skip (2 need a model key, 4 need Intellicar). Lint clean. Coverage 91% overall
+against a 70% floor; `sql_guard.py` and `app/security/` are both at 100% against an 85% floor.
+
+Evals were run at every step that touched the guard or a prompt: 4/4 before and 4/4 after, every
+time, replayed from a cassette with no drift reported. A new seven-case file suite records and
+replays 7/7.
+
+### Phase 3, the web tool: code complete, live check pending
+
+`kind="web"` was accepted by the API from phase 2 but `connector_for` raised for it, so a web
+connection could be created and then failed as a 500 on the first run. That is closed.
+
+**The live done-line has not been run.** `INTELLICAR_ID` and `INTELLICAR_PASSWORD` are in `.env`
+but `INTELLICAR_URL` is not, so `tests/integration/test_web_runs.py` skips. Add the URL, export
+the three in a shell, and run that file to close phase 3. It drives a scripted model, so the
+check costs no model quota; only the dashboard has to be real.
+
+The manual's 7.7 builds a graph node for the five-node architecture that no longer exists, so the
+capability is a `@tool` like every other one. It takes no arguments: a dashboard has one payload
+and no query language.
+
+**Playwright's sync API refuses to start on a thread that has a running event loop**, and the
+tool is called from inside `agent.stream`, which runs on one. So the browser runs on a worker
+thread, with the contextvars context copied across so its log lines keep `tenant_id` and
+`run_id`. A test calls the fetch from inside a running loop and fails without the hop. This
+survives the queue, because arq is asyncio too.
+
+`prepare_run` is async now and refreshes the schema through `asyncio.to_thread`.
+
+A web connection is deliberately not smoke-tested at creation: a browser launch would make that
+the most expensive endpoint in the service, and a wrong password still surfaces as a real 400
+from the first run, because `prepare_run` happens before the stream opens.
+
+### Phase 4, the queue: done, minus Docker
+
+Apoorv cut deployment. There is no Dockerfile, no production compose file, no Caddyfile and no
+container CI, and none is planned until there is a VPS. `docker-compose.dev.yml` is untouched.
+Manual section 9 is unimplemented; when it returns, the line that matters most is
+`flush_interval -1` in the Caddyfile, without which Caddy buffers the SSE stream and the chat UI
+shows nothing until a run ends.
+
+**Memurai is not installed**, so the queue has only been exercised against fakeredis. The
+transport, the parity of the two paths and the killed-worker error are all covered by tests, but
+the manual end-to-end check against a real worker process is still to do:
+
+```powershell
+$env:QUEUE_ENABLED="true"; arq app.workers.runs.WorkerSettings   # terminal B
+Get-Process arq | Stop-Process -Force                            # terminal D, mid-run
+```
+
+**Ctrl-C will not do**, and this is a trap worth remembering: `loop.add_signal_handler` is
+unsupported on Windows, so arq registers no handler and its shutdown waits for the running task.
+Ctrl-C would let the run finish and the test would falsely pass.
+
+**The synchronous-stream deviation is resolved.** `agent.stream` no longer holds the event loop;
+`execute_run` runs under `asyncio.to_thread` in both modes. That is true with the queue off as
+well, so client disconnects are now observed and keep-alive pings fire. The fix is the threading,
+not the queue.
+
+One `sse_frame` builds both the Redis stream entry and the SSE frame, so the two transports
+cannot drift into producing different bytes.
+
+### Phase 5, files and charts: done
+
+Uploads become Parquet at ingest, so the Excel extension is never needed and CSV type sniffing
+happens once rather than per run. The connector materialises every source as a real table and
+*then* sets `enable_external_access=false` and `lock_configuration=true`. Verified against duckdb
+1.5.5: after that, `read_csv_auto`, `read_parquet`, `read_text`, `read_blob`, `ATTACH` of a file,
+`INSTALL` and `COPY ... TO` all raise, and the flag cannot be turned back on.
+
+`kind="file"` is deliberately **not** accepted on `POST /connections`. A client-supplied path
+would be an arbitrary-file-read primitive that no SQL guard could catch, because the path is
+inside the connector long before any SQL exists. Uploads go to `POST /connections/file`, where
+the server mints every path.
+
+Charts are inferred in code, not asked of the model. Section 16.2 put this in `answer_node`,
+which no longer exists, but its trigger was already deterministic. A model call would have cost
+half again as many requests against a 20-per-day quota and made charts impossible to gate offline.
+
+## Deviations from the manual, recorded deliberately (continued)
+
+8. **There is no `Usage` table.** Section 5.2 defines only Tenant, Connection and Run and says Run
+   is the ledger to price from; `Usage` survives only in a stale directory-tree comment.
+9. **`GET /usage` lives in the agent, not analyst-web.** The ownership table says the web app
+   reads `runs` aggregates itself, but `runs` is in the agent's App DB, not Supabase. The Next.js
+   route will proxy it. `pnpm gen:agent` must be re-run against this surface: it gained
+   `/usage`, `/runs/{id}` and `/connections/file`.
+10. **Rate limiting is DB-backed, not Redis-backed,** so it behaves identically with the queue
+    off. It costs nothing extra: it is a filter clause on the scan the budget check already did.
+11. **No `app/agent/nodes/web_tool.py`.** Section 7.7 targets the deleted five-node graph.
+12. **The SSE contract gained `chart`** before `analyst-web` existed, so there was no second repo
+    to update in the same PR. Additive, no new stage, both doc tables updated.
+
+## Bugs found and fixed while doing this
+
+1. **Token accounting was keyed on the configured model name** while `langchain-google-genai`
+   reports the resolved one. Any alias or dated variant recorded zero, and `daily_token_budget`
+   is enforced from exactly that number, so **the budget was unenforceable** whenever the two
+   differed. Tokens are now summed across every reported model, and the reported id is stored.
+2. **A disconnected client left its run `running` for ever.** `GeneratorExit` is a
+   `BaseException`, so `except Exception` never saw it. Both transports now abandon the run on
+   teardown, and a reaper sweeps what a killed process leaves behind. That reaper is
+   load-bearing: `max_concurrent_runs` counts running rows.
+3. **The guard's rejection for a table function said `tables not allowed: ['']`**, which told the
+   model nothing, so it reissued the same query until the tool budget ran out.
+
+## Known limits and open checks
+
+| # | Item | Blocked on |
+|---|---|---|
+| 1 | Phase 3's live two-tenant check | `INTELLICAR_URL` is missing from `.env` |
+| 2 | Phase 4's killed-worker check against a real worker | Memurai is not installed |
+| 3 | `LANGSMITH_API_KEY` | the tracing half of phase 0's done-line |
+| 4 | The 30 IoT golden cases | the telemetry backfill, unchanged |
+| 5 | The hard rule 6 A/B on the IoT prompt | item 4; the harness makes it two commands |
+
+Other things worth knowing rather than fixing:
+
+- **C: has no free space**, which this work did not cause. It broke the Chromium install at 80%
+  with `ENOSPC` and later broke writing a log file. Chromium therefore lives under
+  `D:\ms-playwright`, and `PLAYWRIGHT_BROWSERS_PATH` must point there. Anything that stages
+  through the temp directory needs `TEMP` on D: too.
+- **`secret_enc` appears in `/openapi.json`**, which fails the manual's 9.6 grep. It is only the
+  word, inside `ConnectionOut`'s docstring explaining that the model has no secret field; the
+  schema has exactly four properties and none is derived from a credential. Pre-existing.
+- **DuckDB sniffs a decimal CSV column as DOUBLE**, so it crosses the wire as a JSON number,
+  where a Postgres NUMERIC becomes a Decimal and crosses as an exact string. For a spreadsheet of
+  money that is a precision question worth revisiting.
+- **An eval suite trips the new rate limit.** That is the limit working; raise
+  `MAX_RUNS_PER_MINUTE` for a suite run.
+- **Aborting a queued run cannot interrupt the thread it runs on**, so an in-flight model call
+  finishes in the background. Its result is discarded by the guarded update.
