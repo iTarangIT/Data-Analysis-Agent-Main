@@ -1,0 +1,21 @@
+# Golden questions for the phase 1 gate. Each case needs exactly one expectation:
+#   expect_value:    this value appears somewhere in the returned rows
+#   expect_contains: this text appears in the answer or the rows (case-insensitive)
+#   expect_type:     `number` (a numeric cell came back) or `rows` (any rows came back)
+#
+# The phase 1 gate is 30 cases at >= 80% against the iTarang IoT database. The four below run
+# against the seeded `demo` fixture and exist so the harness is testable today; they are
+# replaced once the read-only DSN for `itarang` exists and its schema can be introspected.
+# Add a case every time a real user gets a wrong answer.
+
+- q: How many dealers do we have?
+  expect_value: 3
+
+- q: What is the total battery revenue in August 2026?
+  expect_value: 157300
+
+- q: Which city has the most batteries sold?
+  expect_contains: Nashik
+
+- q: What is the average temperature in telemetry over the last 24 hours?
+  expect_type: number
