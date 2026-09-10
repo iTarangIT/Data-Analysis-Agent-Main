@@ -1,6 +1,7 @@
 import asyncio
+import json
 import time
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -10,23 +11,27 @@ from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.errors import GraphRecursionError
-from sqlalchemy import func
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
+from app import queue
 from app.agent.graph import build_agent, recursion_limit
 from app.agent.tools import WEB_TOOL_NAME
 from app.api.schemas import RunCreate
 from app.config import get_settings
 from app.connectors.base import Connector
 from app.connectors.registry import connector_for
-from app.db.models import Connection, Run
+from app.db.models import Connection, Run, Tenant
+from app.db.session import SessionLocal
 from app.logging import log
 from app.security.auth import TenantContext
 from app.services import connections as conn_svc
-from app.services.errors import BudgetExceeded, DomainError
+from app.services.errors import BudgetExceeded, DomainError, NotFound, RateLimited
 from app.workers.web_session import DashboardUnavailable
 
 SCHEMA_CACHE_TTL = timedelta(hours=6)
+
+Emit = Callable[[dict], None]
 
 
 @dataclass(frozen=True)
@@ -118,13 +123,88 @@ class EventTranslator:
         }
 
 
-def _tokens_today(db: Session, tenant_id: str) -> int:
-    since = datetime.now(UTC) - timedelta(days=1)
-    return (
-        db.query(func.coalesce(func.sum(Run.prompt_tokens + Run.completion_tokens), 0))
-        .filter(Run.tenant_id == tenant_id, Run.created_at >= since)
-        .scalar()
+def sse_frame(event: dict) -> dict[str, str]:
+    """The one place a run's event becomes bytes.
+
+    This is simultaneously a valid Redis stream field map and exactly what EventSourceResponse
+    consumes, so the in-process and queued paths cannot drift into producing different bytes.
+    `default=str` keeps Decimal, date, datetime and UUID losslessly encodable: JSON has no type
+    for them, and float() would quietly lose precision on money.
+    """
+    return {"event": event["type"], "data": json.dumps(event["data"], default=str)}
+
+
+@dataclass(frozen=True)
+class TenantUsage:
+    tokens_last_24h: int
+    runs_last_24h: int
+    runs_last_minute: int
+    runs_in_flight: int
+
+
+def _tenant_usage(db: Session, tenant_id: str) -> TenantUsage:
+    """One range scan on (tenant_id, created_at) answering every limit at once."""
+    now = datetime.now(UTC)
+    row = db.execute(
+        select(
+            func.coalesce(func.sum(Run.prompt_tokens + Run.completion_tokens), 0),
+            func.count(),
+            func.count().filter(Run.created_at >= now - timedelta(minutes=1)),
+            func.count().filter(Run.status == "running"),
+        ).where(Run.tenant_id == tenant_id, Run.created_at >= now - timedelta(days=1))
+    ).one()
+    return TenantUsage(*row)
+
+
+def check_limits(db: Session, tenant: Tenant) -> None:
+    """Budget first: it is the commercial limit, and the other two are only throttles."""
+    s = get_settings()
+    usage = _tenant_usage(db, tenant.id)
+    if usage.tokens_last_24h >= tenant.daily_token_budget:
+        raise BudgetExceeded("daily token budget exhausted")
+    if usage.runs_last_minute >= s.max_runs_per_minute:
+        raise RateLimited("too many runs in the last minute")
+    if usage.runs_in_flight >= s.max_concurrent_runs:
+        raise RateLimited("too many runs already in progress")
+
+
+def finish_run(db: Session, run_id: str, **values: Any) -> bool:
+    """Settle a run. First writer wins.
+
+    With a worker there are two possible writers: the thread executing the run, and whichever
+    consumer decides the run is dead. `WHERE status = 'running'` makes that a race nobody loses
+    data to, with no locking. Assigning to the ORM object instead would write every dirty
+    column and let a late-finishing orphan overwrite an error already recorded.
+    """
+    result = db.execute(
+        update(Run).where(Run.id == run_id, Run.status == "running").values(**values)
     )
+    db.commit()
+    return result.rowcount > 0
+
+
+def abandon_run(db: Session, run_id: str, message: str) -> None:
+    """Safe to call unconditionally on teardown: a run that already finished matches nothing."""
+    if finish_run(db, run_id, status="error", error=message):
+        log.info("run.abandoned", run_id=run_id, reason=message)
+
+
+def reap_stale_runs(db: Session) -> int:
+    """Rows left `running` by a process that died mid-run.
+
+    Load-bearing rather than tidy: `max_concurrent_runs` counts running rows, so a leaked one
+    would permanently consume a tenant's slot.
+    """
+    cutoff = datetime.now(UTC) - timedelta(seconds=get_settings().run_timeout_s)
+    result = db.execute(
+        update(Run)
+        .where(Run.status == "running", Run.created_at < cutoff)
+        .values(status="error", error="run did not finish")
+    )
+    db.commit()
+    if result.rowcount:
+        log.warning("run.reaped", count=result.rowcount)
+    return result.rowcount
 
 
 async def _refresh_schema_cache(db: Session, conn: Connection, connector: Connector) -> dict:
@@ -147,8 +227,7 @@ async def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> Prepa
     not-found error raised later could only appear as an SSE `error` event.
     """
     tenant = conn_svc.ensure_tenant(db, ctx.tenant_id)
-    if _tokens_today(db, tenant.id) >= tenant.daily_token_budget:
-        raise BudgetExceeded("daily token budget exhausted")
+    check_limits(db, tenant)
 
     conn = conn_svc.get_connection(db, ctx.tenant_id, body.connection_id)
     connector = connector_for(conn)
@@ -169,63 +248,198 @@ async def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> Prepa
     db.add(run)
     db.commit()
     db.refresh(run)
+
+    if get_settings().queue_enabled:
+        await queue.pool().enqueue_job("run_question", run.id, _job_id=run.id)
+
     return PreparedRun(run=run, connector=connector, schema=schema)
 
 
-async def stream_run(
-    db: Session, ctx: TenantContext, body: RunCreate, prepared: PreparedRun
-) -> AsyncIterator[dict]:
+def execute_run(db: Session, run: Run, connector: Connector, schema: dict, emit: Emit) -> None:
+    """Drive the agent and report what it does. Synchronous, because `agent.stream` is.
+
+    Both transports call this on a worker thread, so it owns the session it is handed: a
+    SQLAlchemy Session is not thread-safe and the request's session belongs to the request.
+    It never mutates `run`; it settles the row with one guarded UPDATE.
+    """
     s = get_settings()
-    run = prepared.run
-    # The SSE generator runs in its own task, so the auth dependency's binding does not reach it.
-    structlog.contextvars.bind_contextvars(tenant_id=ctx.tenant_id, run_id=run.id)
-    log.info("run.start", connection_id=run.connection_id, thread_id=body.thread_id)
+    structlog.contextvars.bind_contextvars(tenant_id=run.tenant_id, run_id=run.id)
+    log.info("run.start", connection_id=run.connection_id, thread_id=run.thread_id)
 
     usage = UsageMetadataCallbackHandler()
     outcome = RunOutcome()
     translator = EventTranslator(outcome)
     t0 = time.perf_counter()
+    status, error = "done", None
 
     try:
         with PostgresSaver.from_conn_string(str(s.checkpoint_db_url)) as saver:
-            agent = build_agent(prepared.connector, prepared.schema, checkpointer=saver)
+            agent = build_agent(connector, schema, checkpointer=saver)
             config = {
-                "configurable": {"thread_id": f"{ctx.tenant_id}:{body.thread_id}"},
+                "configurable": {"thread_id": f"{run.tenant_id}:{run.thread_id}"},
                 "callbacks": [usage],
-                "metadata": {"tenant_id": ctx.tenant_id, "run_id": run.id},
+                "metadata": {"tenant_id": run.tenant_id, "run_id": run.id},
                 "recursion_limit": recursion_limit(),
             }
-            # Synchronous, so it holds the event loop for the length of a run. Acceptable
-            # through phase 2; phase 4 moves this body into an arq task.
             for chunk in agent.stream(
-                {"messages": [("user", body.question)]}, config=config, stream_mode="updates"
+                {"messages": [("user", run.question)]}, config=config, stream_mode="updates"
             ):
-                for node, update in chunk.items():
-                    for message in (update or {}).get("messages", []):
+                for node, update_ in chunk.items():
+                    for message in (update_ or {}).get("messages", []):
                         for event in translator.for_message(node, message):
-                            yield event
-        run.status = "done"
+                            emit(event)
     except GraphRecursionError as e:
         # The model kept calling tools without settling on an answer.
         log.warning("run.exhausted", limit=recursion_limit())
-        run.status, run.error = "error", str(e)
-        yield {
-            "type": "error",
-            "data": {"message": "gave up after too many query attempts; try a narrower question"},
-        }
+        status, error = "error", str(e)
+        emit(
+            {
+                "type": "error",
+                "data": {
+                    "message": "gave up after too many query attempts; try a narrower question"
+                },
+            }
+        )
     except Exception as e:
         log.exception("run.failed")
-        run.status, run.error = "error", str(e)
-        yield {"type": "error", "data": {"message": "run failed; see logs"}}
-    finally:
-        run.duration_ms = int((time.perf_counter() - t0) * 1000)
-        run.tool, run.sql = outcome.tool, outcome.sql
-        run.rows_returned = len(outcome.rows)
-        totals = usage.usage_metadata.get(s.gemini_model, {})
-        run.prompt_tokens = totals.get("input_tokens", 0)
-        run.completion_tokens = totals.get("output_tokens", 0)
-        db.commit()
-        log.info("run.end", status=run.status, ms=run.duration_ms)
+        status, error = "error", str(e)
+        emit({"type": "error", "data": {"message": "run failed; see logs"}})
 
-    if run.status == "done":
-        yield {"type": "done", "data": {"run_id": run.id, "duration_ms": run.duration_ms}}
+    duration_ms = int((time.perf_counter() - t0) * 1000)
+    # The provider reports the model it actually resolved, which is not always the configured
+    # name. Keying on that name recorded zero tokens whenever the two differed, and the daily
+    # budget is enforced from exactly this number.
+    totals = list(usage.usage_metadata.values())
+    finish_run(
+        db,
+        run.id,
+        status=status,
+        error=error,
+        duration_ms=duration_ms,
+        tool=outcome.tool,
+        sql=outcome.sql,
+        rows_returned=len(outcome.rows),
+        model=next(iter(usage.usage_metadata), None),
+        prompt_tokens=sum(t.get("input_tokens", 0) for t in totals),
+        completion_tokens=sum(t.get("output_tokens", 0) for t in totals),
+    )
+    log.info("run.end", status=status, ms=duration_ms)
+
+    if status == "done":
+        emit({"type": "done", "data": {"run_id": run.id, "duration_ms": duration_ms}})
+
+
+async def _stream_inline(prepared: PreparedRun) -> AsyncIterator[dict[str, str]]:
+    """Run in this process, on a worker thread so the event loop stays free.
+
+    Before this the agent ran on the loop itself, which meant a client disconnect could not be
+    observed and keep-alive pings never fired for the length of a run.
+    """
+    frames: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    run = prepared.run
+
+    def emit(event: dict) -> None:
+        loop.call_soon_threadsafe(frames.put_nowait, sse_frame(event))
+
+    def work() -> None:
+        db = SessionLocal()
+        try:
+            execute_run(db, run, prepared.connector, prepared.schema, emit)
+        finally:
+            db.close()
+            loop.call_soon_threadsafe(frames.put_nowait, None)
+
+    task = asyncio.create_task(asyncio.to_thread(work))
+    try:
+        while (frame := await frames.get()) is not None:
+            yield frame
+    finally:
+        await task
+
+
+async def _stream_queued(run_id: str) -> AsyncIterator[dict[str, str]]:
+    """Read what the worker publishes.
+
+    A worker that stops proving it is alive ends the stream with one error frame rather than
+    leaving the client hanging.
+    """
+    try:
+        async for frame in queue.consume(queue.pool(), run_id):
+            yield frame
+    except TimeoutError:
+        db = SessionLocal()
+        try:
+            abandon_run(db, run_id, "worker lost")
+        finally:
+            db.close()
+        yield sse_frame({"type": "error", "data": {"message": "the run stopped responding"}})
+
+
+async def stream_run(
+    db: Session, ctx: TenantContext, prepared: PreparedRun
+) -> AsyncIterator[dict[str, str]]:
+    run_id = prepared.run.id
+    queued = get_settings().queue_enabled
+    stream = _stream_queued(run_id) if queued else _stream_inline(prepared)
+    try:
+        async for frame in stream:
+            yield frame
+    finally:
+        # A disconnect would otherwise leave the row `running` for ever. Harmless once the run
+        # has finished, because the guarded update matches nothing.
+        abandon_run(db, run_id, "client disconnected")
+        if queued:
+            await queue.request_abort(queue.pool(), run_id)
+
+
+def get_run(db: Session, tenant_id: str, run_id: str) -> Run:
+    run = db.get(Run, run_id)
+    if run is None or run.tenant_id != tenant_id:
+        raise NotFound("run not found")  # 404 for both, so existence does not leak
+    return run
+
+
+def usage_summary(db: Session, tenant: Tenant, days: int) -> dict[str, Any]:
+    """Per-day totals plus the rolling figure the 429 actually refers to.
+
+    Reporting only calendar days would ship as "my usage says zero but I am getting 429s",
+    because the budget is enforced over a rolling 24 hours. `date_trunc` on a timestamptz uses
+    the session time zone, so the conversion to UTC is explicit: a native Windows Postgres has
+    it set to the machine's zone and would silently bucket by local day.
+    """
+    day = func.date_trunc("day", func.timezone("UTC", Run.created_at))
+    rows = db.execute(
+        select(
+            day.label("day"),
+            func.count(),
+            func.coalesce(func.sum(Run.prompt_tokens), 0),
+            func.coalesce(func.sum(Run.completion_tokens), 0),
+            func.coalesce(func.sum(Run.rows_returned), 0),
+            func.count().filter(Run.status == "error"),
+        )
+        .where(
+            Run.tenant_id == tenant.id,
+            Run.created_at >= datetime.now(UTC) - timedelta(days=days),
+        )
+        .group_by(day)
+        .order_by(day)
+    ).all()
+
+    usage = _tenant_usage(db, tenant.id)
+    return {
+        "daily_token_budget": tenant.daily_token_budget,
+        "tokens_last_24h": usage.tokens_last_24h,
+        "runs_last_24h": usage.runs_last_24h,
+        "days": [
+            {
+                "day": d.date(),
+                "runs": runs,
+                "prompt_tokens": prompt,
+                "completion_tokens": completion,
+                "rows_returned": returned,
+                "errors": errors,
+            }
+            for d, runs, prompt, completion, returned, errors in rows
+        ],
+    }

@@ -18,3 +18,10 @@ class GuardRejected(DomainError):
 
 class BudgetExceeded(DomainError):
     status_code = 429
+
+
+class RateLimited(DomainError):
+    """Too many runs, as opposed to too many tokens. The client should retry shortly, where
+    `BudgetExceeded` means wait until tomorrow, so the two stay distinct despite sharing 429."""
+
+    status_code = 429

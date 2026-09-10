@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, PostgresDsn, SecretStr
+from pydantic import Field, PostgresDsn, RedisDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +37,21 @@ class Settings(BaseSettings):
     web_data_url_match: str = "/api/"
     web_nav_timeout_ms: int = 30_000
     web_settle_ms: int = 1_500
+
+    redis_url: RedisDsn = RedisDsn("redis://localhost:6379/0")
+    # Off by default so local development and the test suite need no Redis at all.
+    queue_enabled: bool = False
+    run_timeout_s: int = 180
+    run_heartbeat_s: float = 2.0
+    # How long the reader waits with no entry at all before calling the worker dead.
+    run_stall_timeout_s: float = 15.0
+    run_stream_ttl_s: int = 900
+    # Not arq's default of 10: each job holds an App DB session, a checkpoint connection and a
+    # customer DB connection, against a pool of 5 plus 10 overflow.
+    worker_max_jobs: int = 4
+
+    max_runs_per_minute: int = 10
+    max_concurrent_runs: int = 3
 
     langsmith_tracing: bool = False
     langsmith_api_key: SecretStr | None = None

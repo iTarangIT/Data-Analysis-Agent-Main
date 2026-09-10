@@ -87,6 +87,22 @@ playwright install chromium
 
 The same `PLAYWRIGHT_BROWSERS_PATH` must be set when running anything that drives a browser.
 
+
+### The queue (phase 4)
+
+`QUEUE_ENABLED` defaults to false, which runs the agent in this process and needs no Redis.
+With it on, `POST /runs` enqueues and reads the run's frames back from `run:<id>`:
+
+```powershell
+$env:QUEUE_ENABLED="true"; arq app.workers.runs.WorkerSettings
+arq app.workers.runs.WorkerSettings --watch app     # reload on edit
+```
+
+Redis is **Memurai**, a native Windows service on 6379. Its CLI is `memurai-cli`, not
+`redis-cli`. Ctrl-C does **not** stop an in-flight arq job on Windows: `add_signal_handler` is
+unsupported there, so arq registers no handler and its shutdown waits for the running task. Use
+`Stop-Process -Force` to test what a lost worker looks like.
+
 ### analyst-web
 ```bash
 pnpm dev
