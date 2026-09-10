@@ -1,13 +1,15 @@
 from collections.abc import Callable
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.nodes.answer import answer_node
 from app.agent.nodes.db_exec import make_db_exec_node
 from app.agent.nodes.router import router_node
-from app.agent.nodes.sql_gen import sql_gen_node
+from app.agent.nodes.sql_gen import make_sql_gen_node
 from app.agent.nodes.sql_guard import sql_guard_node
 from app.agent.state import AgentState
+from app.agent.tools import make_query_tool
 from app.config import get_settings
 from app.connectors.base import Connector
 
@@ -41,14 +43,18 @@ def _web_tool_unavailable(state: AgentState) -> AgentState:
 
 def build_graph(
     connector: Connector,
+    schema: dict[str, Any],
     web_tool_node: Callable[[AgentState], AgentState] | None = None,
     checkpointer=None,
 ):
+    # One tool per connection, shared by the node that writes SQL and the node that runs it.
+    tool = make_query_tool(connector, schema)
+
     g = StateGraph(AgentState)
     g.add_node("router", router_node)
-    g.add_node("sql_gen", sql_gen_node)
+    g.add_node("sql_gen", make_sql_gen_node(tool))
     g.add_node("sql_guard", sql_guard_node)
-    g.add_node("db_exec", make_db_exec_node(connector))
+    g.add_node("db_exec", make_db_exec_node(tool))
     g.add_node("answer", answer_node)
     g.add_node("web_tool", web_tool_node or _web_tool_unavailable)
 

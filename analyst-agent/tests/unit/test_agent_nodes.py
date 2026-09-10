@@ -5,11 +5,13 @@ import pytest
 from app.agent.nodes.answer import answer_node
 from app.agent.nodes.db_exec import make_db_exec_node
 from app.agent.nodes.router import RouteDecision, router_node
-from app.agent.nodes.sql_gen import SqlDraft, sql_gen_node
+from app.agent.nodes.sql_gen import make_sql_gen_node
+from app.agent.tools import make_query_tool
 
 SCHEMA = {
     "tables": [
-        {"name": "dealers", "columns": [{"name": "id", "type": "INTEGER"}], "sample": [["1"]]}
+        {"name": "dealers", "columns": [{"name": "id", "type": "INTEGER"},
+                                        {"name": "n", "type": "TEXT"}], "sample": [["1", "a"]]}
     ]
 }
 
@@ -20,13 +22,28 @@ class FakeLLM:
     def __init__(self, result):
         self.result = result
         self.seen: list = []
+        self.bound_tools: list = []
+        self.tool_choice = None
 
     def with_structured_output(self, _schema):
+        return self
+
+    def bind_tools(self, tools, tool_choice=None):
+        self.bound_tools = tools
+        self.tool_choice = tool_choice
         return self
 
     def invoke(self, msgs):
         self.seen = msgs
         return self.result
+
+
+class ToolCallReply:
+    """An AIMessage carrying tool calls, which is what bind_tools produces."""
+
+    def __init__(self, *calls):
+        self.tool_calls = [{"name": "query_database", "args": a, "id": f"c{i}"}
+                           for i, a in enumerate(calls)]
 
 
 class TestRouter:
@@ -40,34 +57,48 @@ class TestRouter:
         fake = FakeLLM(RouteDecision(tool="sql", reason="r"))
         with patch("app.agent.nodes.router.get_llm", return_value=fake):
             router_node({"question": "q", "schema": SCHEMA})
-        assert "dealers(id)" in fake.seen[1].content
+        assert "dealers(id, n)" in fake.seen[1].content
 
 
 class TestSqlGen:
-    def test_returns_the_drafted_sql_and_clears_any_previous_error(self):
-        fake = FakeLLM(SqlDraft(sql="  SELECT 1  "))
+    @pytest.fixture
+    def tool(self):
+        return make_query_tool(FakeConnector(["n"], []), SCHEMA)
+
+    def test_the_model_is_given_the_tool_and_told_to_call_it(self, tool):
+        fake = FakeLLM(ToolCallReply({"sql": "SELECT 1"}))
         with patch("app.agent.nodes.sql_gen.get_llm", return_value=fake):
-            out = sql_gen_node({"question": "q", "schema": SCHEMA, "guard_error": "old"})
+            make_sql_gen_node(tool)({"question": "q", "schema": SCHEMA})
+        assert fake.bound_tools == [tool]
+        assert fake.tool_choice == "query_database"
+
+    def test_the_sql_comes_from_the_tool_call_arguments(self, tool):
+        fake = FakeLLM(ToolCallReply({"sql": "  SELECT 1  "}))
+        with patch("app.agent.nodes.sql_gen.get_llm", return_value=fake):
+            out = make_sql_gen_node(tool)({"question": "q", "schema": SCHEMA, "guard_error": "old"})
         assert out == {"sql": "SELECT 1", "guard_error": None}
 
-    def test_feeds_the_rejection_reason_back_on_a_retry(self):
-        fake = FakeLLM(SqlDraft(sql="SELECT 2"))
+    def test_a_reply_with_no_tool_call_is_a_retry_not_a_crash(self, tool):
+        fake = FakeLLM(ToolCallReply())
         with patch("app.agent.nodes.sql_gen.get_llm", return_value=fake):
-            sql_gen_node(
-                {
-                    "question": "q",
-                    "schema": SCHEMA,
-                    "sql": "SELECT bad",
-                    "guard_error": "tables not allowed: ['secrets']",
-                }
-            )
-        retry_hint = fake.seen[-1].content
-        assert "secrets" in retry_hint and "SELECT bad" in retry_hint
+            out = make_sql_gen_node(tool)({"question": "q", "schema": SCHEMA, "retries": 1})
+        assert out["retries"] == 2 and "query_database" in out["guard_error"]
+        assert "sql" not in out
 
-    def test_sends_no_retry_hint_on_the_first_attempt(self):
-        fake = FakeLLM(SqlDraft(sql="SELECT 1"))
+    def test_the_rejection_reason_is_fed_back_on_a_retry(self, tool):
+        fake = FakeLLM(ToolCallReply({"sql": "SELECT 2"}))
         with patch("app.agent.nodes.sql_gen.get_llm", return_value=fake):
-            sql_gen_node({"question": "q", "schema": SCHEMA})
+            make_sql_gen_node(tool)(
+                {"question": "q", "schema": SCHEMA, "sql": "SELECT bad",
+                 "guard_error": "tables not allowed: ['secrets']"}
+            )
+        hint = fake.seen[-1].content
+        assert "secrets" in hint and "SELECT bad" in hint
+
+    def test_no_retry_hint_on_the_first_attempt(self, tool):
+        fake = FakeLLM(ToolCallReply({"sql": "SELECT 1"}))
+        with patch("app.agent.nodes.sql_gen.get_llm", return_value=fake):
+            make_sql_gen_node(tool)({"question": "q", "schema": SCHEMA})
         assert len(fake.seen) == 2
 
 
@@ -92,9 +123,11 @@ class FakeConnector:
 
 
 class TestDbExec:
-    def test_returns_columns_and_rows(self):
-        node = make_db_exec_node(FakeConnector(["n"], [("a",), ("b",)]))
-        out = node({"sql": "SELECT n FROM dealers"})
+    def _node(self, connector):
+        return make_db_exec_node(make_query_tool(connector, SCHEMA))
+
+    def test_returns_columns_and_rows_through_the_tool(self):
+        out = self._node(FakeConnector(["n"], [("a",), ("b",)]))({"sql": "SELECT n FROM dealers"})
         assert out["columns"] == ["n"]
         assert out["rows"] == [["a"], ["b"]]
         assert out["truncated"] is False and out["guard_error"] is None
@@ -104,14 +137,20 @@ class TestDbExec:
 
         monkeypatch.setattr(get_settings(), "max_rows", 2, raising=False)
         conn = FakeConnector(["n"], [("a",), ("b",), ("c",)])
-        out = make_db_exec_node(conn)({"sql": "SELECT n FROM dealers"})
+        out = self._node(conn)({"sql": "SELECT n FROM dealers"})
         assert conn.asked_for == 3, "must request one row beyond the cap to detect truncation"
         assert out["rows"] == [["a"], ["b"]] and out["truncated"] is True
 
     def test_a_database_error_becomes_a_retry_hint(self):
-        node = make_db_exec_node(FakeConnector([], [], error=RuntimeError("column x not found")))
-        out = node({"sql": "SELECT x FROM dealers", "retries": 1})
+        conn = FakeConnector([], [], error=RuntimeError("column x not found"))
+        out = self._node(conn)({"sql": "SELECT x FROM dealers", "retries": 1})
         assert out["retries"] == 2 and "column x not found" in out["guard_error"]
+
+    def test_the_guard_still_refuses_a_write_even_here(self):
+        conn = FakeConnector(["n"], [("a",)])
+        out = self._node(conn)({"sql": "DELETE FROM dealers", "retries": 0})
+        assert out["retries"] == 1 and "DELETE" in out["guard_error"]
+        assert conn.asked_for is None
 
 
 class TestAnswer:

@@ -96,6 +96,30 @@ reported for any prompt change. **That has not been done**, because no `OPENROUT
 configured and the gate is paused. Run the evals and record both rates before this prompt
 change is considered merged.
 
+## LangChain tool for database access
+
+Apoorv asked for LangChain tools, so `app/agent/tools.py` exposes `query_database`, a real
+`StructuredTool` with a Pydantic args schema that converts to an OpenAI function definition.
+`sql_gen` binds it with `bind_tools(..., tool_choice=...)`, so the model writes SQL by calling
+the tool rather than by emitting prose, and `db_exec` invokes the same tool to run it.
+
+The tool is generic per connection, not IoT-specific: the allowlist and the description come
+from that connection's own schema, so the same code serves any customer Postgres.
+
+**The guard runs inside the tool as well as in its own node.** A tool is callable by a model,
+so it cannot assume the graph guarded first. `make_query_tool` calls `validate_sql` before it
+touches the connector, and a unit test asserts the connector is never reached when the guard
+refuses. Running it twice is harmless, since the guard is idempotent.
+
+The graph still orchestrates, so the frozen SSE contract is unchanged: `router`, `sql_gen`,
+`sql_guard`, `db_exec` and `answer` still emit their own `status` events, the `sql` event still
+fires after the guard accepts, and the retry cap still terminates. Replacing the graph with a
+tool-calling loop would have broken all three, which is why it was not done.
+
+The schema now lives only in the tool description rather than being repeated in the SQL
+prompt. That is a change to what the model sees, so it falls under the same hard rule 6
+obligation recorded below.
+
 ## Open checks
 
 | # | Blocked on | Unblocks |

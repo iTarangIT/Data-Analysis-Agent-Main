@@ -92,7 +92,7 @@ async def stream_run(
 
     try:
         with PostgresSaver.from_conn_string(str(s.checkpoint_db_url)) as saver:
-            graph = build_graph(prepared.connector, checkpointer=saver)
+            graph = build_graph(prepared.connector, prepared.schema, checkpointer=saver)
             config = {
                 "configurable": {"thread_id": f"{ctx.tenant_id}:{body.thread_id}"},
                 "callbacks": [usage],

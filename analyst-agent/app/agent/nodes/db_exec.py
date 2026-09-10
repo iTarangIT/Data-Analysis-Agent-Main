@@ -1,28 +1,22 @@
 from collections.abc import Callable
 
+from langchain_core.tools import BaseTool
+
 from app.agent.state import AgentState
-from app.config import get_settings
-from app.connectors.base import Connector
 
 
-def make_db_exec_node(connector: Connector) -> Callable[[AgentState], AgentState]:
-    """Closure so the tenant's connector never has to live in graph state."""
+def make_db_exec_node(tool: BaseTool) -> Callable[[AgentState], AgentState]:
+    """Runs the guarded SQL through the same tool the model called, so there is one code path
+    to the database whether it is reached from the graph or from a direct tool call."""
 
     def db_exec_node(state: AgentState) -> AgentState:
-        max_rows = get_settings().max_rows
-        try:
-            # One row beyond the cap tells us whether the result was truncated.
-            cols, rows = connector.run_select(state["sql"], max_rows + 1)
-        except Exception as e:
-            return {
-                "guard_error": f"database error: {e}",
-                "retries": state.get("retries", 0) + 1,
-            }
-
+        result = tool.invoke({"sql": state["sql"]})
+        if "error" in result:
+            return {"guard_error": result["error"], "retries": state.get("retries", 0) + 1}
         return {
-            "columns": cols,
-            "rows": [list(r) for r in rows[:max_rows]],
-            "truncated": len(rows) > max_rows,
+            "columns": result["columns"],
+            "rows": result["rows"],
+            "truncated": result["truncated"],
             "guard_error": None,
         }
 
