@@ -64,9 +64,16 @@ def _tools_sha(tools: list[Any]) -> str:
 
 
 def prompt_sha() -> str:
+    """Hash what the model is actually given for this suite, not the module's constants.
+
+    Splitting the system prompt into capability blocks changed the constants without changing a
+    byte the model sees, and re-recording costs a day of quota, so the hash must not move for a
+    refactor. A web suite carries its own capability text and is guarded by per-turn drift.
+    """
     from app.agent import prompts
 
-    text = "".join(getattr(prompts, n) for n in sorted(dir(prompts)) if n.isupper())
+    composed = prompts.AGENT_SYSTEM.format(today="{today}", capability=prompts.SQL_CAPABILITY)
+    text = composed + prompts.QUERY_TOOL_DESC + prompts.QUERY_TOOL_SQL_ARG
     return hashlib.sha256(text.encode()).hexdigest()
 
 

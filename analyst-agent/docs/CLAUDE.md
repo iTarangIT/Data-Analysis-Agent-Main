@@ -81,6 +81,17 @@ pip-compile --extra dev -o requirements.lock pyproject.toml    # after any depen
 playwright install chromium                      # no `install-deps` on Windows
 ```
 
+Chromium lives on D: because C: has no free space. Both the browser path and the download's
+temp directory must point there, or the install fails with `ENOSPC` after 80%:
+
+```powershell
+$env:PLAYWRIGHT_BROWSERS_PATH="D:\ms-playwright"
+$env:TEMP="D:\pwtmp"; $env:TMP="D:\pwtmp"
+playwright install chromium
+```
+
+The same `PLAYWRIGHT_BROWSERS_PATH` must be set when running anything that drives a browser.
+
 analyst-web:
 ```bash
 pnpm dev

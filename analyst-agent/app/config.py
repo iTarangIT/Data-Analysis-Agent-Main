@@ -32,6 +32,11 @@ class Settings(BaseSettings):
 
     session_store_dir: str = "./sessions"
     playwright_headless: bool = True
+    # Which of a dashboard's XHR responses carries the data. Narrow it as far as the site
+    # allows: every matching body is read, and a wider match can pick up an auth response.
+    web_data_url_match: str = "/api/"
+    web_nav_timeout_ms: int = 30_000
+    web_settle_ms: int = 1_500
 
     langsmith_tracing: bool = False
     langsmith_api_key: SecretStr | None = None

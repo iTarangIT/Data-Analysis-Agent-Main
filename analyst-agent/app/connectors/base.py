@@ -15,3 +15,9 @@ class SqlConnector(Connector, Protocol):
     dialect: str
 
     def run_select(self, sql: str, max_rows: int) -> tuple[list[str], list[tuple]]: ...
+
+
+class WebSource(Connector, Protocol):
+    """A dashboard read by driving a browser. It has no query language, so no `run_select`."""
+
+    def fetch_rows(self, max_rows: int) -> tuple[list[str], list[tuple]]: ...

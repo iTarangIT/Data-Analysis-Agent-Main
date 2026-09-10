@@ -3,8 +3,8 @@ from typing import Any
 
 from langchain.agents import create_agent
 
-from app.agent.prompts import AGENT_SYSTEM
-from app.agent.tools import make_query_tool
+from app.agent.prompts import AGENT_SYSTEM, SQL_CAPABILITY, WEB_CAPABILITY
+from app.agent.tools import tools_for
 from app.config import get_settings
 from app.connectors.base import Connector
 from app.llm import get_llm
@@ -20,11 +20,17 @@ def recursion_limit() -> int:
 
 
 def build_agent(connector: Connector, schema: dict[str, Any], checkpointer=None):
-    """The agent decides for itself whether a question needs the database, which replaces the
-    explicit router. The web and file tools join this list in phases 3 and 5."""
+    """The agent decides for itself whether a question needs the source, which replaces the
+    explicit router. The file tool joins this list in phase 5.
+
+    The capability block is chosen by kind rather than describing every source at once: a
+    connection has one kind, so telling a dashboard tenant how to write SQL would only invite
+    the model to claim it had.
+    """
+    capability = WEB_CAPABILITY if connector.kind == "web" else SQL_CAPABILITY
     return create_agent(
         model=get_llm(),
-        tools=[make_query_tool(connector, schema)],
-        system_prompt=AGENT_SYSTEM.format(today=date.today().isoformat()),
+        tools=tools_for(connector, schema),
+        system_prompt=AGENT_SYSTEM.format(today=date.today().isoformat(), capability=capability),
         checkpointer=checkpointer,
     )

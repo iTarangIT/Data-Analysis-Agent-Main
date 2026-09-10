@@ -21,7 +21,7 @@ async def create_run(
 ) -> EventSourceResponse:
     # Runs before the response starts, so a missing connection or an exhausted budget still
     # surfaces as a real HTTP status rather than an SSE error event.
-    prepared = svc.prepare_run(db, ctx, body)
+    prepared = await svc.prepare_run(db, ctx, body)
 
     async def event_stream():
         async for event in svc.stream_run(db, ctx, body, prepared):

@@ -1,7 +1,9 @@
+import json
+
 import pytest
 from langchain_core.tools import BaseTool
 
-from app.agent.tools import make_query_tool
+from app.agent.tools import PREVIEW_ROWS, WEB_TOOL_NAME, make_query_tool, make_web_tool
 
 SCHEMA = {
     "tables": [
@@ -40,9 +42,10 @@ def tool(connector):
     return make_query_tool(connector, SCHEMA)
 
 
-def call(tool, sql: str):
+def call(tool, sql: str | None = None):
     """Invoke as the agent does, so the structured artifact comes back on a ToolMessage."""
-    msg = tool.invoke({"name": tool.name, "args": {"sql": sql}, "id": "c1", "type": "tool_call"})
+    args = {} if sql is None else {"sql": sql}
+    msg = tool.invoke({"name": tool.name, "args": args, "id": "c1", "type": "tool_call"})
     return msg.content, msg.artifact
 
 
@@ -97,10 +100,6 @@ class TestExecution:
         assert "LIMIT" in connector.executed[0].upper()
 
     def test_the_model_sees_a_preview_not_the_whole_result(self, connector):
-        import json
-
-        from app.agent.tools import PREVIEW_ROWS
-
         wide = FakeConnector(rows=[(f"KA{i:03}",) for i in range(PREVIEW_ROWS + 25)])
         content, artifact = call(make_query_tool(wide, SCHEMA), "select vehicleno from vehicles")
         assert len(json.loads(content)["rows"]) == PREVIEW_ROWS
@@ -121,3 +120,77 @@ class TestExecution:
         conn = FakeConnector(rows=(("a",), ("b",), ("c",)))
         _, artifact = call(make_query_tool(conn, SCHEMA), "select vehicleno from vehicles")
         assert artifact["truncated"] is True and artifact["rows"] == [["a"]]
+
+
+class FakeDashboard:
+    kind = "web"
+
+    def __init__(self, rows=(("KA01", 82), ("KA02", 61))):
+        self.rows = [tuple(r) for r in rows]
+        self.calls = 0
+
+    def fetch_rows(self, max_rows):
+        self.calls += 1
+        return ["vehicleno", "soc"], self.rows[:max_rows]
+
+    def describe_schema(self):
+        return WEB_SCHEMA
+
+
+WEB_SCHEMA = {
+    "tables": [
+        {
+            "name": "dashboard",
+            "columns": [{"name": "vehicleno", "type": "str"}, {"name": "soc", "type": "int"}],
+            "sample": [],
+        }
+    ]
+}
+
+
+class TestWebTool:
+    def test_it_takes_no_arguments(self):
+        tool = make_web_tool(FakeDashboard(), WEB_SCHEMA)
+
+        assert tool.name == WEB_TOOL_NAME
+        assert tool.args == {}, "a dashboard has one payload and no query language"
+
+    def test_the_description_names_the_columns(self):
+        tool = make_web_tool(FakeDashboard(), WEB_SCHEMA)
+
+        assert "vehicleno" in tool.description and "dashboard" in tool.description
+
+    def test_the_artifact_carries_no_sql(self):
+        _, artifact = call(make_web_tool(FakeDashboard(), WEB_SCHEMA))
+
+        assert "sql" not in artifact, "a web run must never report executed SQL"
+        assert artifact["columns"] == ["vehicleno", "soc"]
+        assert artifact["rows"] == [["KA01", 82], ["KA02", 61]]
+        assert artifact["truncated"] is False
+
+    def test_a_browser_failure_comes_back_as_an_error_not_an_exception(self):
+        class Broken(FakeDashboard):
+            def fetch_rows(self, max_rows):
+                raise RuntimeError("login timed out")
+
+        content, artifact = call(make_web_tool(Broken(), WEB_SCHEMA))
+
+        assert "login timed out" in artifact["error"]
+        assert "Could not read the dashboard" in content
+
+    def test_the_model_sees_a_preview_while_the_caller_keeps_every_row(self):
+        conn = FakeDashboard(rows=[(f"KA{i:04d}", i) for i in range(PREVIEW_ROWS + 25)])
+
+        content, artifact = call(make_web_tool(conn, WEB_SCHEMA))
+
+        assert len(json.loads(content)["rows"]) == PREVIEW_ROWS
+        assert len(artifact["rows"]) == PREVIEW_ROWS + 25
+
+    def test_truncation_is_reported(self, monkeypatch):
+        from app.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "max_rows", 1, raising=False)
+        _, artifact = call(make_web_tool(FakeDashboard(), WEB_SCHEMA))
+
+        assert artifact["truncated"] is True
+        assert len(artifact["rows"]) == 1

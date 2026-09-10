@@ -1,3 +1,4 @@
+import asyncio
 import time
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
@@ -13,6 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.agent.graph import build_agent, recursion_limit
+from app.agent.tools import WEB_TOOL_NAME
 from app.api.schemas import RunCreate
 from app.config import get_settings
 from app.connectors.base import Connector
@@ -21,7 +23,8 @@ from app.db.models import Connection, Run
 from app.logging import log
 from app.security.auth import TenantContext
 from app.services import connections as conn_svc
-from app.services.errors import BudgetExceeded
+from app.services.errors import BudgetExceeded, DomainError
+from app.workers.web_session import DashboardUnavailable
 
 SCHEMA_CACHE_TTL = timedelta(hours=6)
 
@@ -49,6 +52,9 @@ class EventTranslator:
     `create_agent` has two nodes, but the contract names five stages, so each step is reported
     as the stage it actually performs: the first model call is the routing decision, a model
     call that emits a tool call is generation, and the tool guards then executes.
+
+    A web tool call is announced at the model step rather than when the tool returns, because
+    the browser work is the slow part and the client would otherwise sit on `router` for it.
     """
 
     def __init__(self, outcome: RunOutcome):
@@ -67,8 +73,9 @@ class EventTranslator:
             yield {"type": "status", "data": {"stage": "router"}}
 
         if message.tool_calls:
-            self.outcome.tool = "sql"
-            yield {"type": "status", "data": {"stage": "sql_gen"}}
+            web = message.tool_calls[0]["name"] == WEB_TOOL_NAME
+            self.outcome.tool = "web" if web else "sql"
+            yield {"type": "status", "data": {"stage": "web_tool" if web else "sql_gen"}}
             return
 
         # Gemini 3 returns a list of content blocks rather than a string, so read `.text`,
@@ -82,14 +89,25 @@ class EventTranslator:
 
     def _for_tool(self, message: ToolMessage) -> Iterator[dict]:
         result = message.artifact or {}
+        if not result:
+            return  # an unknown tool name or an exception escaping one carries no artifact
+
+        if message.name == WEB_TOOL_NAME:
+            if not result.get("error"):
+                yield from self._rows(result)
+            return  # the stage was reported before the browser ran, and no SQL exists to report
+
         yield {"type": "status", "data": {"stage": "sql_guard"}}
         if result.get("error"):
             return  # rejected, so no SQL was run and the model will be asked to correct it
 
         self.outcome.sql = result["sql"]
-        self.outcome.rows = result["rows"]
         yield {"type": "sql", "data": {"sql": result["sql"]}}
         yield {"type": "status", "data": {"stage": "db_exec"}}
+        yield from self._rows(result)
+
+    def _rows(self, result: dict) -> Iterator[dict]:
+        self.outcome.rows = result["rows"]
         yield {
             "type": "rows",
             "data": {
@@ -109,18 +127,20 @@ def _tokens_today(db: Session, tenant_id: str) -> int:
     )
 
 
-def _refresh_schema_cache(db: Session, conn: Connection, connector: Connector) -> dict:
+async def _refresh_schema_cache(db: Session, conn: Connection, connector: Connector) -> dict:
     stale = conn.schema_cached_at is None or (
         datetime.now(UTC) - conn.schema_cached_at > SCHEMA_CACHE_TTL
     )
     if conn.schema_cache is None or stale:
-        conn.schema_cache = connector.describe_schema()
+        # A web source introspects by signing in and driving a browser, which would hold the
+        # event loop for tens of seconds. Postgres introspection comes off the loop with it.
+        conn.schema_cache = await asyncio.to_thread(connector.describe_schema)
         conn.schema_cached_at = datetime.now(UTC)
         db.commit()
     return conn.schema_cache
 
 
-def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> PreparedRun:
+async def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> PreparedRun:
     """Everything that can still fail as a plain HTTP status, done before the stream opens.
 
     Once the response starts writing, the status line is already sent, so a budget or
@@ -132,7 +152,13 @@ def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> PreparedRun
 
     conn = conn_svc.get_connection(db, ctx.tenant_id, body.connection_id)
     connector = connector_for(conn)
-    schema = _refresh_schema_cache(db, conn, connector)
+    try:
+        schema = await _refresh_schema_cache(db, conn, connector)
+    except DashboardUnavailable as e:
+        # A web connection is not smoke-tested when it is created, so a wrong password surfaces
+        # here. This runs before the stream opens, so it is still a real status, not an event.
+        log.warning("connection.dashboard_failed", connection_id=conn.id, error=str(e))
+        raise DomainError("could not read that dashboard with the details given") from e
 
     run = Run(
         tenant_id=ctx.tenant_id,
