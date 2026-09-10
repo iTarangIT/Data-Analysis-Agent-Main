@@ -42,3 +42,23 @@ class TestRunCreate:
     def test_rejects_a_blank_thread_id(self):
         with pytest.raises(ValidationError):
             RunCreate(connection_id="c", thread_id="", question="how many dealers")
+
+
+class TestFileConnectionsAreNotCreatedFromABody:
+    """`kind="file"` is deliberately absent from the create-connection body.
+
+    Accepting it would mean a client could name the path, and any tenant with a valid token
+    could register a connection pointing at an arbitrary local file. No SQL guard could catch
+    that, because the path is inside the connector long before any SQL exists. Files arrive
+    through `POST /connections/file`, where the server mints every path itself.
+    """
+
+    def test_the_body_refuses_a_file_kind(self):
+        with pytest.raises(ValidationError):
+            ConnectionCreate(name="leak", kind="file", secret={"path": "C:/Windows/win.ini"})
+
+    def test_the_upload_suffixes_are_an_allowlist(self):
+        from app.api.schemas import UPLOAD_SUFFIXES
+
+        assert ".exe" not in UPLOAD_SUFFIXES
+        assert ".csv" in UPLOAD_SUFFIXES

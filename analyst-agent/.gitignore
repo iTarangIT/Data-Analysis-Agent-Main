@@ -1,6 +1,7 @@
 .env
 .venv/
 sessions/
+uploads/
 __pycache__/
 *.pyc
 .pytest_cache/

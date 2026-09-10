@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     max_tool_calls: int = 6
 
     session_store_dir: str = "./sessions"
+    file_store_dir: str = "./uploads"
+    # Bounds resident memory per concurrent run, because an upload is materialised in full.
+    max_upload_bytes: int = 25 * 1024 * 1024
     playwright_headless: bool = True
     # Which of a dashboard's XHR responses carries the data. Narrow it as far as the site
     # allows: every matching body is read, and a wider match can pick up an auth response.

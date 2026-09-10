@@ -3,6 +3,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+# A file connection is never created from a client-supplied body: `kind="file"` there would
+# let any tenant register a path of their choosing, which no SQL guard could catch, because
+# the path is inside the connector long before any SQL exists. Uploads go to /connections/file.
+UPLOAD_SUFFIXES = {".csv", ".tsv", ".xlsx", ".parquet"}
+
 REQUIRED_SECRET_FIELDS: dict[str, set[str]] = {
     "postgres": {"dsn"},
     "web": {"url", "username", "password"},

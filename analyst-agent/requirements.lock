@@ -58,6 +58,8 @@ duckdb==1.5.5
     # via analyst-agent (pyproject.toml)
 ecdsa==0.19.2
     # via python-jose
+et-xmlfile==2.0.0
+    # via openpyxl
 fakeredis==2.38.0
     # via analyst-agent (pyproject.toml)
 fastapi==0.141.1
@@ -153,6 +155,8 @@ mypy-extensions==1.1.0
     # via mypy
 numpy==2.5.3
     # via pandas
+openpyxl==3.1.5
+    # via analyst-agent (pyproject.toml)
 orjson==3.12.0
     # via
     #   langgraph-checkpoint-postgres
@@ -239,6 +243,8 @@ python-dotenv==1.2.3
     #   pydantic-settings
     #   uvicorn
 python-jose[cryptography]==3.5.0
+    # via analyst-agent (pyproject.toml)
+python-multipart==0.0.32
     # via analyst-agent (pyproject.toml)
 pyyaml==6.0.3
     # via
