@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     gemini_api_key: SecretStr
-    gemini_model: str = "gemini-3.6-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
 
     app_db_url: PostgresDsn
     checkpoint_db_url: PostgresDsn

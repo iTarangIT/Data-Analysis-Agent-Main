@@ -182,6 +182,27 @@ The eval run before the quota ran out scored 1 of 4, and that number is not trus
 taken while defects 3 and 4 were still present. There is still no honest before/after pass rate
 for the prompt changes, so the hard rule 6 obligation below stands.
 
+## Model comparison, measured 2026-09-10
+
+Three questions against the demo database, run directly rather than over HTTP.
+
+| Model | Latency | Correct |
+|---|---|---|
+| `gemini-3.6-flash` | ~40s (one sample) | not re-measured, quota exhausted |
+| `gemini-3.1-flash-lite` | 4.9 to 7.1s | 2 of 3 |
+| `gemini-3.5-flash-lite` | 1.9 to 2.0s | 2 of 3 |
+
+`gemini-3.5-flash-lite` is roughly twenty times faster than `gemini-3.6-flash` with no loss of
+correctness on these cases, so it is now the default. **This needs re-checking against the IoT
+schema**, which is far harder than the three-table demo fixture: 15 tables, weekly partitions
+and an 8s statement timeout. Three easy questions are thin evidence for a model choice.
+
+The third case failed on both models and was a defect in the case, not the models. "Which city
+has the most batteries sold?" has no unique answer: Gurugram and Nashik both have 2, so a model
+answering Gurugram was marked wrong for being right. It is replaced with an unambiguous
+question, and `golden_sql.yaml` now warns to check every new case for ties. That matters for
+the 30 IoT cases.
+
 ## Open checks
 
 | # | Blocked on | Unblocks |

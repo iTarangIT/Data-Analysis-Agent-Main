@@ -14,8 +14,11 @@
 - q: What is the total battery revenue in August 2026?
   expect_value: 157300
 
-- q: Which city has the most batteries sold?
-  expect_contains: Nashik
+# A case is only usable if its answer is unique. "Which city has the most batteries sold?"
+# was here and had to go: Gurugram and Nashik both have 2, so a model answering Gurugram was
+# marked wrong for being right. Check every new case against the data for ties.
+- q: Which city has sold the fewest batteries?
+  expect_contains: Howrah
 
 - q: What is the average temperature in telemetry over the last 24 hours?
   expect_type: number
