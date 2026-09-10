@@ -5,7 +5,7 @@ from cryptography.fernet import Fernet
 
 # Settings are read at import time, so these must be set before any `app.*` import. Every
 # `app` import in this file therefore lives inside a fixture body.
-os.environ.setdefault("OPENROUTER_API_KEY", "test")
+os.environ.setdefault("GEMINI_API_KEY", "test")
 os.environ.setdefault("CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode())
 os.environ.setdefault("JWT_SECRET", "test-secret-test-secret-test-secret")
 os.environ.setdefault("APP_DB_URL", "postgresql+psycopg://app:app@localhost:5432/analyst")

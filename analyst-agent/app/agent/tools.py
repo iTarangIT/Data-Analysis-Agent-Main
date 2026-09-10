@@ -1,10 +1,3 @@
-"""LangChain tools the agent may call.
-
-A tool is invoked by the model, so it cannot assume anything guarded the query first. Every
-tool that touches a customer database runs `validate_sql` itself. That is what keeps the
-guarantee that no model-written SQL reaches a database unguarded.
-"""
-
 import json
 from typing import Any
 
@@ -48,15 +41,6 @@ def _table_list(schema: dict[str, Any]) -> str:
 
 
 def make_query_tool(connector: Connector, schema: dict[str, Any]) -> BaseTool:
-    """Build the query tool for one tenant's connection.
-
-    Generic rather than IoT-specific: the allowlist and the description come from that
-    connection's own schema, so the same tool serves any customer Postgres. The decorator is
-    applied here rather than at module level so each connection gets its own closure.
-
-    Returns content plus an artifact: the model reads a row preview, while the caller keeps
-    the full result for the `rows` event without it passing through the model's context.
-    """
     allowed = {t["name"] for t in schema.get("tables", [])}
 
     @tool(

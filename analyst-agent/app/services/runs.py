@@ -8,6 +8,7 @@ import structlog
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.errors import GraphRecursionError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -68,11 +69,16 @@ class EventTranslator:
         if message.tool_calls:
             self.outcome.tool = "sql"
             yield {"type": "status", "data": {"stage": "sql_gen"}}
-        elif message.content:
+            return
+
+        # Gemini 3 returns a list of content blocks rather than a string, so read `.text`,
+        # which flattens both shapes. `.content` would serialise a Python repr into the stream.
+        answer = message.text
+        if answer:
             self.outcome.tool = self.outcome.tool or "clarify"
-            self.outcome.answer = str(message.content)
+            self.outcome.answer = answer
             yield {"type": "status", "data": {"stage": "answer"}}
-            yield {"type": "token", "data": {"text": self.outcome.answer}}
+            yield {"type": "token", "data": {"text": answer}}
 
     def _for_tool(self, message: ToolMessage) -> Iterator[dict]:
         result = message.artifact or {}
@@ -173,6 +179,14 @@ async def stream_run(
                         for event in translator.for_message(node, message):
                             yield event
         run.status = "done"
+    except GraphRecursionError as e:
+        # The model kept calling tools without settling on an answer.
+        log.warning("run.exhausted", limit=recursion_limit())
+        run.status, run.error = "error", str(e)
+        yield {
+            "type": "error",
+            "data": {"message": "gave up after too many query attempts; try a narrower question"},
+        }
     except Exception as e:
         log.exception("run.failed")
         run.status, run.error = "error", str(e)
@@ -181,7 +195,7 @@ async def stream_run(
         run.duration_ms = int((time.perf_counter() - t0) * 1000)
         run.tool, run.sql = outcome.tool, outcome.sql
         run.rows_returned = len(outcome.rows)
-        totals = usage.usage_metadata.get(s.openrouter_model, {})
+        totals = usage.usage_metadata.get(s.gemini_model, {})
         run.prompt_tokens = totals.get("input_tokens", 0)
         run.completion_tokens = totals.get("output_tokens", 0)
         db.commit()

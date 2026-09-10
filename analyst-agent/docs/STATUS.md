@@ -139,6 +139,49 @@ statement never reaches the database and is never reported as executed SQL.
 `DEVELOPMENT.md` and `CLAUDE.md` were updated in the same change, because both described the
 five-node graph that no longer exists.
 
+## Model provider: Gemini
+
+`OPENROUTER_API_KEY` was replaced with `GEMINI_API_KEY`, so `app/llm.py` now builds
+`ChatGoogleGenerativeAI` and `langchain-google-genai` replaces `langchain-openai`.
+
+`gemini-2.5-flash` is refused for new keys ("no longer available to new users"); the API
+itself recommends `gemini-3.6-flash`, which is the default.
+
+### Running it live found four defects the fake model could not
+
+1. **`Decimal` is not JSON serialisable.** Any NUMERIC, DATE, TIMESTAMP or UUID column killed
+   the SSE stream mid-flight, and the client saw a truncated body. `json.dumps` at the SSE
+   boundary now uses `default=str`, which is lossless; `float()` would lose precision on money.
+   The eval harness accepts numeric strings for the same reason.
+2. **Gemini 3 returns content blocks, not a string.** `str(message.content)` would have put a
+   Python list repr into the `token` event. The translator reads `message.text`, which
+   flattens both shapes.
+3. **The recursion limit was derived from `max_sql_retries`,** which measures retries after a
+   rejection, not total tool calls. A model that legitimately queried three times was cut off
+   with `GraphRecursionError`. `max_tool_calls` (default 6) is now its own setting, and
+   exhaustion returns a clear message instead of "run failed; see logs".
+4. **The eval harness reused thread ids** like `eval-0`. The checkpointer keeps chat memory per
+   thread, so a later run answered from the previous run's conversation without querying at
+   all. Each invocation now stamps its threads uniquely.
+
+### Verified live, end to end
+
+`curl -N /runs` against the demo database streamed the full contract in order, with correct
+SQL (a `GROUP BY` with `ORDER BY` and `LIMIT`), correct rows, and an accurate answer. One run
+took 40 seconds.
+
+### The free tier blocks the phase 1 gate
+
+The key is on the free tier: **20 requests per day, per model**
+(`GenerateRequestsPerDayPerProjectPerModel-FreeTier`). One eval case costs two or more model
+calls, so the 30-question gate needs 60 to 90, and today's allowance was exhausted after a
+handful of runs. The quota is per model, so `gemini-3.1-flash-lite` and `gemini-3.5-flash-lite`
+each have their own allowance, but 20 a day is not workable either.
+
+The eval run before the quota ran out scored 1 of 4, and that number is not trustworthy: it was
+taken while defects 3 and 4 were still present. There is still no honest before/after pass rate
+for the prompt changes, so the hard rule 6 obligation below stands.
+
 ## Open checks
 
 | # | Blocked on | Unblocks |

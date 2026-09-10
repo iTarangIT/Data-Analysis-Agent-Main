@@ -25,6 +25,8 @@ async def create_run(
 
     async def event_stream():
         async for event in svc.stream_run(db, ctx, body, prepared):
-            yield {"event": event["type"], "data": json.dumps(event["data"])}
+            # default=str keeps Decimal, date, datetime and UUID losslessly encodable.
+            # JSON has no type for them, and float() would quietly lose precision on money.
+            yield {"event": event["type"], "data": json.dumps(event["data"], default=str)}
 
     return EventSourceResponse(event_stream())

@@ -12,10 +12,10 @@ annotated-types==0.8.0
     # via pydantic
 anyio==4.15.1
     # via
+    #   google-genai
     #   httpx
     #   httpx2
     #   langsmith
-    #   openai
     #   sse-starlette
     #   starlette
     #   watchfiles
@@ -27,7 +27,6 @@ certifi==2026.7.22
     # via
     #   httpcore
     #   httpx
-    #   langchain-openai
     #   requests
 cffi==2.1.1
     # via cryptography
@@ -46,15 +45,24 @@ coverage[toml]==7.16.0
 cryptography==50.0.1
     # via
     #   analyst-agent (pyproject.toml)
+    #   google-auth
     #   python-jose
 distro==1.9.0
-    # via langsmith
+    # via
+    #   google-genai
+    #   langsmith
 duckdb==1.5.5
     # via analyst-agent (pyproject.toml)
 ecdsa==0.19.2
     # via python-jose
 fastapi==0.141.1
     # via analyst-agent (pyproject.toml)
+filetype==1.2.0
+    # via langchain-google-genai
+google-auth[requests]==2.58.0
+    # via google-genai
+google-genai==2.22.0
+    # via langchain-google-genai
 greenlet==3.5.5
     # via
     #   playwright
@@ -73,12 +81,11 @@ httptools==0.8.0
 httpx==0.28.1
     # via
     #   analyst-agent (pyproject.toml)
+    #   google-genai
     #   langchain-core
     #   langgraph-sdk
 httpx2==2.12.0
-    # via
-    #   langsmith
-    #   openai
+    # via langsmith
 idna==3.19
     # via
     #   anyio
@@ -87,8 +94,6 @@ idna==3.19
     #   requests
 iniconfig==2.3.0
     # via pytest
-jiter==0.16.0
-    # via openai
 jsonpatch==1.33
     # via langchain-core
 jsonpointer==3.1.1
@@ -99,12 +104,12 @@ langchain-core==1.6.2
     # via
     #   analyst-agent (pyproject.toml)
     #   langchain
-    #   langchain-openai
+    #   langchain-google-genai
     #   langgraph
     #   langgraph-checkpoint
     #   langgraph-prebuilt
     #   langgraph-sdk
-langchain-openai==1.6.2
+langchain-google-genai==4.4.0
     # via analyst-agent (pyproject.toml)
 langchain-protocol==0.0.19
     # via
@@ -141,8 +146,6 @@ mypy-extensions==1.1.0
     # via mypy
 numpy==2.5.3
     # via pandas
-openai==3.11.0
-    # via langchain-openai
 orjson==3.12.0
     # via
     #   langgraph-checkpoint-postgres
@@ -181,19 +184,23 @@ psycopg-pool==3.3.1
     #   psycopg
 pyasn1==0.6.4
     # via
+    #   pyasn1-modules
     #   python-jose
     #   rsa
+pyasn1-modules==0.4.2
+    # via google-auth
 pycparser==3.0
     # via cffi
 pydantic==2.13.5
     # via
     #   analyst-agent (pyproject.toml)
     #   fastapi
+    #   google-genai
     #   langchain
     #   langchain-core
+    #   langchain-google-genai
     #   langgraph
     #   langsmith
-    #   openai
     #   pydantic-settings
 pydantic-core==2.46.5
     # via pydantic
@@ -231,13 +238,12 @@ pyyaml==6.0.3
     #   uvicorn
 redis==8.1.0
     # via analyst-agent (pyproject.toml)
-regex==2026.9.10
-    # via tiktoken
 requests==2.34.2
     # via
+    #   google-auth
+    #   google-genai
     #   langsmith
     #   requests-toolbelt
-    #   tiktoken
 requests-toolbelt==1.0.0
     # via langsmith
 rsa==4.9.1
@@ -250,8 +256,8 @@ six==1.17.0
     #   python-dateutil
 sniffio==1.3.1
     # via
+    #   google-genai
     #   langsmith
-    #   openai
 sqlalchemy==2.0.52
     # via
     #   alembic
@@ -267,9 +273,9 @@ starlette==1.6.0
 structlog==26.1.0
     # via analyst-agent (pyproject.toml)
 tenacity==9.1.4
-    # via langchain-core
-tiktoken==0.14.0
-    # via langchain-openai
+    # via
+    #   google-genai
+    #   langchain-core
 truststore==0.10.4
     # via
     #   httpcore2
@@ -279,12 +285,12 @@ typing-extensions==4.16.0
     #   alembic
     #   anyio
     #   fastapi
+    #   google-genai
     #   httpx2
     #   langchain-core
     #   langchain-protocol
     #   langsmith
     #   mypy
-    #   openai
     #   psycopg
     #   psycopg-pool
     #   pydantic
@@ -315,6 +321,7 @@ watchfiles==1.2.0
     # via uvicorn
 websockets==16.1.1
     # via
+    #   google-genai
     #   langgraph-sdk
     #   langsmith
     #   uvicorn

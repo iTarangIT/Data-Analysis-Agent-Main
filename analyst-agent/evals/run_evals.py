@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -21,13 +22,19 @@ CASES_PATH = Path(__file__).parent / "golden_sql.yaml"
 PASS_THRESHOLD = 0.8
 
 
-def _stream_case(client: httpx.Client, token: str, conn: str, index: int, question: str) -> dict:
+def _stream_case(
+    client: httpx.Client, token: str, conn: str, index: int, question: str, stamp: str
+) -> dict:
     result: dict[str, Any] = {"rows": [], "answer": "", "sql": None, "error": None}
     with client.stream(
         "POST",
         f"{BASE}/runs",
         headers={"Authorization": f"Bearer {token}"},
-        json={"connection_id": conn, "thread_id": f"eval-{index}", "question": question},
+        json={
+            "connection_id": conn,
+            "thread_id": f"eval-{stamp}-{index}",
+            "question": question,
+        },
         timeout=120,
     ) as r:
         if r.status_code != 200:
@@ -51,6 +58,19 @@ def _stream_case(client: httpx.Client, token: str, conn: str, index: int, questi
     return result
 
 
+def _is_number(value: Any) -> bool:
+    """Numeric columns cross the wire as strings, because JSON cannot hold a Decimal."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int | float):
+        return True
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def _matches(case: dict, result: dict) -> bool:
     flat = [x for row in result["rows"] for x in row]
     if "expect_value" in case:
@@ -60,7 +80,7 @@ def _matches(case: dict, result: dict) -> bool:
         return str(case["expect_contains"]).lower() in haystack.lower()
     if "expect_type" in case:
         if case["expect_type"] == "number":
-            return any(isinstance(x, int | float) and not isinstance(x, bool) for x in flat)
+            return any(_is_number(x) for x in flat)
         if case["expect_type"] == "rows":
             return len(result["rows"]) > 0
     raise ValueError(f"case has no expectation: {case.get('q')!r}")
@@ -82,10 +102,15 @@ def main() -> int:
         print(f"no cases in {CASES_PATH}", file=sys.stderr)
         return 2
 
+    # A fresh thread per invocation. The checkpointer keeps chat memory per thread, so reusing
+    # `eval-0` lets a later run answer from the previous run's conversation without querying,
+    # which silently inflates or deflates the score.
+    stamp = uuid.uuid4().hex[:8]
+
     passed = 0
     with httpx.Client() as client:
         for i, case in enumerate(cases):
-            result = _stream_case(client, token, conn, i, case["q"])
+            result = _stream_case(client, token, conn, i, case["q"], stamp)
             ok = result["error"] is None and _matches(case, result)
             passed += ok
             print(f"{'PASS' if ok else 'FAIL'} | {case['q']}")

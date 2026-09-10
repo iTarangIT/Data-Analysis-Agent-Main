@@ -11,12 +11,12 @@ from app.llm import get_llm
 
 
 def recursion_limit() -> int:
-    """Bound the tool-calling loop the way `max_sql_retries` bounded the old retry edge.
+    """Bound the tool-calling loop, so a confused model cannot spend a tenant's budget.
 
-    One attempt is a model step plus a tool step, so an initial try plus N retries needs
-    2*(N+1) steps, and one more model step to write the answer.
+    One tool call is a model step plus a tool step, and one final model step writes the
+    answer.
     """
-    return 2 * (get_settings().max_sql_retries + 1) + 1
+    return 2 * get_settings().max_tool_calls + 1
 
 
 def build_agent(connector: Connector, schema: dict[str, Any], checkpointer=None):

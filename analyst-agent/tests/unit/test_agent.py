@@ -157,8 +157,32 @@ class TestGuardRejection:
 
 
 class TestRecursionLimit:
-    def test_it_allows_the_configured_number_of_retries(self):
+    def test_it_allows_the_configured_number_of_tool_calls(self):
         from app.config import get_settings
 
-        # An attempt is a model step plus a tool step, then one model step for the answer.
-        assert recursion_limit() == 2 * (get_settings().max_sql_retries + 1) + 1
+        # A tool call is a model step plus a tool step, then one model step for the answer.
+        assert recursion_limit() == 2 * get_settings().max_tool_calls + 1
+
+    def test_it_leaves_room_for_more_than_one_query(self):
+        # A model may legitimately query twice to answer one question; the first limit was
+        # derived from max_sql_retries and cut runs off after three tool calls.
+        assert recursion_limit() >= 2 * 3 + 1
+
+
+class TestContentBlocks:
+    """Gemini 3 returns a list of content blocks. Reading `.content` would put a Python repr
+    of that list into the token event instead of the answer."""
+
+    def test_the_answer_is_flattened_from_content_blocks(self):
+        blocks = [{"type": "text", "text": "There are three dealers.", "extras": {"sig": "x"}}]
+        model = FakeToolModel(responses=[AIMessage(content=blocks)])
+        events, outcome = _run(model, FakeConnector())
+
+        token = next(e for e in events if e["type"] == "token")
+        assert token["data"]["text"] == "There are three dealers."
+        assert outcome.answer == "There are three dealers."
+
+    def test_a_plain_string_answer_still_works(self):
+        model = FakeToolModel(responses=[AIMessage(content="Plain string.")])
+        events, _ = _run(model, FakeConnector())
+        assert next(e for e in events if e["type"] == "token")["data"]["text"] == "Plain string."
