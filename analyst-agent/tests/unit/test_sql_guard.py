@@ -1,8 +1,6 @@
-from typing import ClassVar
-
 import pytest
 
-from app.agent.nodes.sql_guard import sql_guard_node, validate_sql
+from app.agent.nodes.sql_guard import validate_sql
 
 ALLOWED = {"dealers", "batteries", "telemetry"}
 
@@ -111,29 +109,3 @@ class TestNonLiteralRowCap:
 
     def test_limit_all_is_treated_as_uncapped(self):
         assert "LIMIT 100" in _ok("select name from dealers limit all")
-
-
-class TestGuardNode:
-    SCHEMA: ClassVar[dict] = {"tables": [{"name": "dealers"}, {"name": "batteries"}]}
-
-    def test_accepted_sql_is_written_back_and_clears_the_error(self):
-        out = sql_guard_node({"sql": "select name from dealers", "schema": self.SCHEMA})
-        assert out["guard_error"] is None and "LIMIT" in out["sql"]
-
-    def test_rejection_records_the_reason_and_counts_a_retry(self):
-        out = sql_guard_node({"sql": "delete from dealers", "schema": self.SCHEMA, "retries": 1})
-        assert out["retries"] == 2 and "DELETE" in out["guard_error"]
-        assert "sql" not in out
-
-    def test_dml_buried_in_a_cte_is_named_as_a_forbidden_operation(self):
-        out = sql_guard_node(
-            {
-                "sql": "with x as (delete from dealers returning *) select * from x",
-                "schema": self.SCHEMA,
-            }
-        )
-        assert "forbidden operation: Delete" in out["guard_error"]
-
-    def test_first_rejection_starts_the_retry_count(self):
-        out = sql_guard_node({"sql": "select * from secrets", "schema": self.SCHEMA})
-        assert out["retries"] == 1

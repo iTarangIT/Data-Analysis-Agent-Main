@@ -1,15 +1,17 @@
 import time
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import structlog
 from langchain_core.callbacks import UsageMetadataCallbackHandler
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.postgres import PostgresSaver
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.agent.graph import build_graph
+from app.agent.graph import build_agent, recursion_limit
 from app.api.schemas import RunCreate
 from app.config import get_settings
 from app.connectors.base import Connector
@@ -20,7 +22,6 @@ from app.security.auth import TenantContext
 from app.services import connections as conn_svc
 from app.services.errors import BudgetExceeded
 
-STAGES = {"router", "sql_gen", "sql_guard", "db_exec", "web_tool", "answer"}
 SCHEMA_CACHE_TTL = timedelta(hours=6)
 
 
@@ -29,6 +30,68 @@ class PreparedRun:
     run: Run
     connector: Connector
     schema: dict
+
+
+@dataclass
+class RunOutcome:
+    """What the Run row needs, accumulated as the agent streams."""
+
+    tool: str | None = None
+    sql: str | None = None
+    rows: list = field(default_factory=list)
+    answer: str = ""
+
+
+class EventTranslator:
+    """Maps the agent's `model` and `tools` steps onto the frozen SSE contract.
+
+    `create_agent` has two nodes, but the contract names five stages, so each step is reported
+    as the stage it actually performs: the first model call is the routing decision, a model
+    call that emits a tool call is generation, and the tool guards then executes.
+    """
+
+    def __init__(self, outcome: RunOutcome):
+        self.outcome = outcome
+        self._routed = False
+
+    def for_message(self, node: str, message: Any) -> Iterator[dict]:
+        if node == "model" and isinstance(message, AIMessage):
+            yield from self._for_model(message)
+        elif node == "tools" and isinstance(message, ToolMessage):
+            yield from self._for_tool(message)
+
+    def _for_model(self, message: AIMessage) -> Iterator[dict]:
+        if not self._routed:
+            self._routed = True
+            yield {"type": "status", "data": {"stage": "router"}}
+
+        if message.tool_calls:
+            self.outcome.tool = "sql"
+            yield {"type": "status", "data": {"stage": "sql_gen"}}
+        elif message.content:
+            self.outcome.tool = self.outcome.tool or "clarify"
+            self.outcome.answer = str(message.content)
+            yield {"type": "status", "data": {"stage": "answer"}}
+            yield {"type": "token", "data": {"text": self.outcome.answer}}
+
+    def _for_tool(self, message: ToolMessage) -> Iterator[dict]:
+        result = message.artifact or {}
+        yield {"type": "status", "data": {"stage": "sql_guard"}}
+        if result.get("error"):
+            return  # rejected, so no SQL was run and the model will be asked to correct it
+
+        self.outcome.sql = result["sql"]
+        self.outcome.rows = result["rows"]
+        yield {"type": "sql", "data": {"sql": result["sql"]}}
+        yield {"type": "status", "data": {"stage": "db_exec"}}
+        yield {
+            "type": "rows",
+            "data": {
+                "columns": result["columns"],
+                "rows": result["rows"],
+                "truncated": result["truncated"],
+            },
+        }
 
 
 def _tokens_today(db: Session, tenant_id: str) -> int:
@@ -54,7 +117,7 @@ def _refresh_schema_cache(db: Session, conn: Connection, connector: Connector) -
 def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> PreparedRun:
     """Everything that can still fail as a plain HTTP status, done before the stream opens.
 
-    Once `EventSourceResponse` starts writing, the status line is already sent, so a budget or
+    Once the response starts writing, the status line is already sent, so a budget or
     not-found error raised later could only appear as an SSE `error` event.
     """
     tenant = conn_svc.ensure_tenant(db, ctx.tenant_id)
@@ -87,54 +150,37 @@ async def stream_run(
     log.info("run.start", connection_id=run.connection_id, thread_id=body.thread_id)
 
     usage = UsageMetadataCallbackHandler()
+    outcome = RunOutcome()
+    translator = EventTranslator(outcome)
     t0 = time.perf_counter()
-    final: dict = {}
 
     try:
         with PostgresSaver.from_conn_string(str(s.checkpoint_db_url)) as saver:
-            graph = build_graph(prepared.connector, prepared.schema, checkpointer=saver)
+            agent = build_agent(prepared.connector, prepared.schema, checkpointer=saver)
             config = {
                 "configurable": {"thread_id": f"{ctx.tenant_id}:{body.thread_id}"},
                 "callbacks": [usage],
                 "metadata": {"tenant_id": ctx.tenant_id, "run_id": run.id},
+                "recursion_limit": recursion_limit(),
             }
-            inputs = {
-                "tenant_id": ctx.tenant_id,
-                "connection_id": run.connection_id,
-                "question": body.question,
-                "schema": prepared.schema,
-                "retries": 0,
-            }
-            # Synchronous, so it holds the event loop for the length of the run. Acceptable
-            # through phase 2; phase 4 moves this body into an arq worker.
-            for event in graph.stream(inputs, config=config, stream_mode="updates"):
-                node, update = next(iter(event.items()))
-                if node in STAGES:
-                    yield {"type": "status", "data": {"stage": node}}
-                if node == "sql_guard" and update.get("guard_error") is None:
-                    yield {"type": "sql", "data": {"sql": update["sql"]}}
-                if node in ("db_exec", "web_tool") and "rows" in update:
-                    yield {
-                        "type": "rows",
-                        "data": {
-                            "columns": update["columns"],
-                            "rows": update["rows"],
-                            "truncated": update["truncated"],
-                        },
-                    }
-                if node == "answer" and "answer" in update:
-                    yield {"type": "token", "data": {"text": update["answer"]}}
-                final.update(update)
-
-        run.status = "error" if final.get("error") else "done"
+            # Synchronous, so it holds the event loop for the length of a run. Acceptable
+            # through phase 2; phase 4 moves this body into an arq task.
+            for chunk in agent.stream(
+                {"messages": [("user", body.question)]}, config=config, stream_mode="updates"
+            ):
+                for node, update in chunk.items():
+                    for message in (update or {}).get("messages", []):
+                        for event in translator.for_message(node, message):
+                            yield event
+        run.status = "done"
     except Exception as e:
         log.exception("run.failed")
         run.status, run.error = "error", str(e)
         yield {"type": "error", "data": {"message": "run failed; see logs"}}
     finally:
         run.duration_ms = int((time.perf_counter() - t0) * 1000)
-        run.tool, run.sql = final.get("tool"), final.get("sql")
-        run.rows_returned = len(final.get("rows", []))
+        run.tool, run.sql = outcome.tool, outcome.sql
+        run.rows_returned = len(outcome.rows)
         totals = usage.usage_metadata.get(s.openrouter_model, {})
         run.prompt_tokens = totals.get("input_tokens", 0)
         run.completion_tokens = totals.get("output_tokens", 0)

@@ -85,11 +85,16 @@ pnpm playwright test  # needs agent + local Postgres + pnpm dev running
 ## 4. Architecture you must preserve
 
 ```
-router -> sql_gen -> sql_guard -> db_exec -> answer
-             ^          |  err     |  err
-             +----------+----------+   (retry, max_sql_retries=2)
-router -> web_tool -> answer
+create_agent:  model  <-->  tools        (loop until the model stops calling tools)
+                              |
+                              +-- query_database  -> sql_guard -> customer DB (read-only)
+                              +-- web_tool        -> Playwright  (phase 3)
+                              +-- file_tool       -> DuckDB      (phase 5)
 ```
+
+The model chooses whether to call a tool, which replaces the hand-written router. The guard
+runs inside the tool, so no model-issued SQL can reach a database unguarded. The loop is
+bounded by `recursion_limit()`, derived from `max_sql_retries`.
 
 - `app/api/` = HTTP only. `app/services/` = business rules. `app/agent/` = LangGraph. `app/connectors/` = customer data sources. `app/security/` = JWT + Fernet vault. Nothing imports upward.
 - `app/agent/nodes/sql_guard.py` is pure code (sqlglot). **It must never call a model.** SELECT only, one statement, table allowlist from the connection's schema cache, LIMIT injected, forbidden ops rejected.
@@ -125,7 +130,7 @@ router -> web_tool -> answer
 
 - Python: ruff (line 100), type hints everywhere, `structlog` with `tenant_id`/`run_id` bound in contextvars, domain errors from `app/services/errors.py` (never raise `HTTPException` outside `app/api/`).
 - TypeScript: strict, zod at every boundary (env, forms, route bodies), no `any`, server-only secrets never imported into client components.
-- Tests: unit tests mock the LLM (see `tests/unit/test_router.py`); integration tests are marked `integration` and need the three local Postgres databases (Compose in CI only). Coverage floors: 85% `sql_guard.py` + `security/`, 70% overall; 90% `src/lib/agent/`, 80% `src/hooks/`.
+- Tests: unit tests script the LLM (see `tests/unit/test_agent.py`); integration tests are marked `integration` and need the three local Postgres databases (Compose in CI only). Coverage floors: 85% `sql_guard.py` + `security/`, 70% overall; 90% `src/lib/agent/`, 80% `src/hooks/`.
 - Commits: `feat(agent): ...`, `fix(web): ...`, `chore: ...`. One phase item per PR.
 - Prompts live only in `app/agent/prompts.py`. Change a prompt → run evals → paste before/after pass rate in the PR.
 

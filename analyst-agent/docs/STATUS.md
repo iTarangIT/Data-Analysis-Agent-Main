@@ -96,40 +96,48 @@ reported for any prompt change. **That has not been done**, because no `OPENROUT
 configured and the gate is paused. Run the evals and record both rates before this prompt
 change is considered merged.
 
-## LangChain tool for database access
+## The agent: create_agent, per the LangChain v1 documentation
 
-Apoorv asked for LangChain tools, so `app/agent/tools.py` exposes `query_database`, defined
-with the `@tool` decorator from `langchain.tools` per the LangChain v1 documentation, with a
-custom name, an explicit description and a Pydantic `args_schema`. It converts to a valid
-OpenAI function definition.
+Apoorv asked to follow the official documentation and go all-in on `create_agent`, so the
+hand-written LangGraph state machine is gone.
 
-The decorator is applied inside `make_query_tool` rather than at module level, because each
-tenant connection needs its own closure over its connector and schema.
+- `app/agent/tools.py` defines `query_database` with the `@tool` decorator from
+  `langchain.tools`, with a custom name, an explicit description and a Pydantic `args_schema`.
+  It uses `response_format="content_and_artifact"`: the model reads a 50-row preview while the
+  full result travels as the artifact, so a 500-row answer never enters the model's context.
+- `app/agent/graph.py` builds the harness with `langchain.agents.create_agent`, passing the
+  model, the tool list, the system prompt and the checkpointer.
+- `router.py`, `sql_gen.py`, `db_exec.py`, `answer.py` and `state.py` are deleted. The model
+  now decides whether a question needs a tool, which is what the router used to do, and
+  `create_agent` supplies the loop that the retry edges used to.
+- `sql_guard.py` stays exactly where it was and is now called from inside the tool. A tool is
+  invoked by the model and cannot assume anything guarded first, so this is the only remaining
+  place the guarantee lives, and it is tested from both the unit and integration suites.
 
-The v1 docs also present `langchain.agents.create_agent` as the recommended agent harness. It
-is installed and available, but adopting it means replacing the LangGraph state machine, which
-would break the frozen SSE contract's per-node `status` events and the capped retry loop.
-Apoorv chose to keep the graph when asked, so `bind_tools` is used instead, which the same
-docs describe as the lower-level option.
-`sql_gen` binds it with `bind_tools(..., tool_choice=...)`, so the model writes SQL by calling
-the tool rather than by emitting prose, and `db_exec` invokes the same tool to run it.
+### The frozen SSE contract still holds
 
-The tool is generic per connection, not IoT-specific: the allowlist and the description come
-from that connection's own schema, so the same code serves any customer Postgres.
+`create_agent` has two nodes, `model` and `tools`, but the contract names five stages, so
+`EventTranslator` in `app/services/runs.py` reports each step as the stage it actually
+performs: the first model call is the routing decision, a model call carrying a tool call is
+generation, and the tool guards then executes. An integration test asserts the exact sequence
+`router, sql_gen, sql_guard, db_exec, answer` and the exact event order, so `analyst-web`
+needs no change in phase 2.
 
-**The guard runs inside the tool as well as in its own node.** A tool is callable by a model,
-so it cannot assume the graph guarded first. `make_query_tool` calls `validate_sql` before it
-touches the connector, and a unit test asserts the connector is never reached when the guard
-refuses. Running it twice is harmless, since the guard is idempotent.
+A rejected query emits `sql_guard` and then nothing else, so no `sql` or `rows` event ever
+reports a statement that did not run. That is asserted too.
 
-The graph still orchestrates, so the frozen SSE contract is unchanged: `router`, `sql_gen`,
-`sql_guard`, `db_exec` and `answer` still emit their own `status` events, the `sql` event still
-fires after the guard accepts, and the retry cap still terminates. Replacing the graph with a
-tool-calling loop would have broken all three, which is why it was not done.
+### Verified without a model key
 
-The schema now lives only in the tool description rather than being repeated in the SQL
-prompt. That is a change to what the model sees, so it falls under the same hard rule 6
-obligation recorded below.
+A scripted `FakeMessagesListChatModel` drives the real HTTP route against the demo database,
+covering auth, `prepare_run`, the agent loop, the tool, the guard, SSE encoding and the `Run`
+row. A second test scripts the model into attempting `delete from dealers` and asserts the
+statement never reaches the database and is never reported as executed SQL.
+
+98 tests pass, 2 skipped. Coverage: overall 95%, `sql_guard.py` 100%, `app/security/` 100%,
+`services/runs.py` 96%. Floors are 85/85/70.
+
+`DEVELOPMENT.md` and `CLAUDE.md` were updated in the same change, because both described the
+five-node graph that no longer exists.
 
 ## Open checks
 

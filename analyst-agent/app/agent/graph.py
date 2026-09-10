@@ -1,69 +1,30 @@
-from collections.abc import Callable
+from datetime import date
 from typing import Any
 
-from langgraph.graph import END, START, StateGraph
+from langchain.agents import create_agent
 
-from app.agent.nodes.answer import answer_node
-from app.agent.nodes.db_exec import make_db_exec_node
-from app.agent.nodes.router import router_node
-from app.agent.nodes.sql_gen import make_sql_gen_node
-from app.agent.nodes.sql_guard import sql_guard_node
-from app.agent.state import AgentState
+from app.agent.prompts import AGENT_SYSTEM
 from app.agent.tools import make_query_tool
 from app.config import get_settings
 from app.connectors.base import Connector
-
-_ROUTE_TO_NODE = {"sql": "sql_gen", "web": "web_tool", "clarify": "answer"}
-
-
-def _after_router(state: AgentState) -> str:
-    return _ROUTE_TO_NODE[state["tool"]]
+from app.llm import get_llm
 
 
-def _retry_or_answer(state: AgentState) -> str:
-    """Both the guard and the executor feed failures back to sql_gen, up to the retry cap."""
-    if state.get("guard_error") is None:
-        return "db_exec"
-    if state.get("retries", 0) <= get_settings().max_sql_retries:
-        return "sql_gen"
-    return "answer"
+def recursion_limit() -> int:
+    """Bound the tool-calling loop the way `max_sql_retries` bounded the old retry edge.
+
+    One attempt is a model step plus a tool step, so an initial try plus N retries needs
+    2*(N+1) steps, and one more model step to write the answer.
+    """
+    return 2 * (get_settings().max_sql_retries + 1) + 1
 
 
-def _after_guard(state: AgentState) -> str:
-    return _retry_or_answer(state)
-
-
-def _after_exec(state: AgentState) -> str:
-    return "answer" if state.get("guard_error") is None else _retry_or_answer(state)
-
-
-def _web_tool_unavailable(state: AgentState) -> AgentState:
-    return {"error": "web tool not configured"}
-
-
-def build_graph(
-    connector: Connector,
-    schema: dict[str, Any],
-    web_tool_node: Callable[[AgentState], AgentState] | None = None,
-    checkpointer=None,
-):
-    # One tool per connection, shared by the node that writes SQL and the node that runs it.
-    tool = make_query_tool(connector, schema)
-
-    g = StateGraph(AgentState)
-    g.add_node("router", router_node)
-    g.add_node("sql_gen", make_sql_gen_node(tool))
-    g.add_node("sql_guard", sql_guard_node)
-    g.add_node("db_exec", make_db_exec_node(tool))
-    g.add_node("answer", answer_node)
-    g.add_node("web_tool", web_tool_node or _web_tool_unavailable)
-
-    g.add_edge(START, "router")
-    g.add_conditional_edges("router", _after_router, ["sql_gen", "web_tool", "answer"])
-    g.add_edge("sql_gen", "sql_guard")
-    g.add_conditional_edges("sql_guard", _after_guard, ["db_exec", "sql_gen", "answer"])
-    g.add_conditional_edges("db_exec", _after_exec, ["answer", "sql_gen"])
-    g.add_edge("web_tool", "answer")
-    g.add_edge("answer", END)
-
-    return g.compile(checkpointer=checkpointer)
+def build_agent(connector: Connector, schema: dict[str, Any], checkpointer=None):
+    """The agent decides for itself whether a question needs the database, which replaces the
+    explicit router. The web and file tools join this list in phases 3 and 5."""
+    return create_agent(
+        model=get_llm(),
+        tools=[make_query_tool(connector, schema)],
+        system_prompt=AGENT_SYSTEM.format(today=date.today().isoformat()),
+        checkpointer=checkpointer,
+    )

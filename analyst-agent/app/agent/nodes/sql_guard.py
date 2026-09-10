@@ -3,13 +3,12 @@
 Pure sqlglot. This module must never call a model: it is the one place where a mistake becomes
 a breach rather than a wrong answer. It is also only the third of three independent read-only
 layers, the others being the `analyst_ro` role and the connector's connect_args.
+
+Called from `app.agent.tools`, which every model-issued query must pass through.
 """
 
 import sqlglot
 from sqlglot import exp
-
-from app.agent.state import AgentState
-from app.config import get_settings
 
 # Anything that writes, changes structure or changes permissions. `Into` is here because
 # `SELECT ... INTO t` parses as an ordinary Select yet creates a table.
@@ -81,11 +80,3 @@ def validate_sql(sql: str, allowed_tables: set[str], max_rows: int) -> tuple[str
         return sql, f"tables not allowed: {sorted(unknown)}"
 
     return _with_row_cap(tree, max_rows).sql(dialect="postgres"), None
-
-
-def sql_guard_node(state: AgentState) -> AgentState:
-    allowed = {t["name"] for t in state["schema"]["tables"]}
-    safe_sql, err = validate_sql(state["sql"], allowed, get_settings().max_rows)
-    if err:
-        return {"guard_error": err, "retries": state.get("retries", 0) + 1}
-    return {"sql": safe_sql, "guard_error": None}
