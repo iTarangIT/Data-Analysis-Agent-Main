@@ -1,0 +1,208 @@
+{
+  "info": {
+    "name": "analyst-agent",
+    "description": "Data Analyst SaaS backend. Set {{token}} and {{connectionId}} in the collection variables. /runs streams Server-Sent Events.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "token",
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0ZW5hbnRfaWQiOiJ0X2RlbW8iLCJzdWIiOiJ1X2Fwb29ydiIsImV4cCI6MTc4OTY0Mjk1N30.IRui2kKPaqmPxlIKmzwZQLJYux0FIVoBSm0whYitX90"
+    },
+    {
+      "key": "connectionId",
+      "value": "2b2c9f03-7036-4a68-b3d4-b90e3dd81d53"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        },
+        "description": "Liveness. The only route that needs no token."
+      }
+    },
+    {
+      "name": "Create connection",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/connections",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "connections"
+          ]
+        },
+        "description": "Registers a customer data source. The DSN is Fernet-encrypted at rest and never appears in any response. Returns 201 and the connection id.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"demo\",\n  \"kind\": \"postgres\",\n  \"secret\": {\n    \"dsn\": \"postgresql+psycopg://analyst_ro:ro@localhost:5432/demo\"\n  }\n}"
+        }
+      }
+    },
+    {
+      "name": "List connections",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/connections",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "connections"
+          ]
+        },
+        "description": "Only this tenant's connections. Another tenant's token returns an empty list."
+      }
+    },
+    {
+      "name": "Run a question (SSE)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/runs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "runs"
+          ]
+        },
+        "description": "Streams status, sql, rows, token and done as Server-Sent Events. Postman shows the whole stream once it finishes; use curl -N to watch it live.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"connection_id\": \"{{connectionId}}\",\n  \"thread_id\": \"postman-1\",\n  \"question\": \"How many dealers do we have?\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Run a follow-up (same thread)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/runs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "runs"
+          ]
+        },
+        "description": "Same thread_id, so the checkpointer supplies the previous turn as memory.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"connection_id\": \"{{connectionId}}\",\n  \"thread_id\": \"postman-1\",\n  \"question\": \"And which of them sold the most batteries?\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Rejected: no token",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/runs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "runs"
+          ]
+        },
+        "description": "Expect 401.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"connection_id\": \"{{connectionId}}\",\n  \"thread_id\": \"postman-x\",\n  \"question\": \"test this\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Rejected: unknown connection",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/runs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "runs"
+          ]
+        },
+        "description": "Expect 404. A connection owned by another tenant returns 404 too, so existence does not leak.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"connection_id\": \"does-not-exist\",\n  \"thread_id\": \"postman-x\",\n  \"question\": \"test this\"\n}"
+        }
+      }
+    }
+  ]
+}
