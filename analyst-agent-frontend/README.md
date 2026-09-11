@@ -90,15 +90,30 @@ on a cell, because in an analytics product that ships a wrong figure with total 
 
 ## Design
 
-Called "Read-only", after the product's one promise. The agent's workspace is dark and what it
-hands you is printed on paper: chrome sits on `--ground`, and every artifact it produces (the
-SQL, the table, the answer) sits on `--paper`, which is also where dense data reads best. Two
-semantic colours only: `--live` marks the machine working and is never a button, `--fault`
-marks errors. Tokens are in `app/globals.css`; the shell inverts them rather than defining a
-second palette, so the surfaces cannot drift apart.
+Light throughout, and built from one card. `--bg` is the page, `--surface` is a card sitting
+on it, `--surface-sunk` is anything recessed into a card. Separation is a hairline plus a
+shadow faint enough to read as a lift rather than a drop.
 
-Typefaces are IBM Plex Sans and IBM Plex Mono, one superfamily. Mono is not decoration here:
-it carries the SQL and the table cells, which genuinely are monospace content.
+`--brand` is the one accent: it marks the primary action and the machine working, and nothing
+else. `--fault`, `--warning` and `--success` mark states and are never decoration.
+`--code-bg` is the only dark surface in the product and exists because SQL is the one thing
+here people read as code. There is no dark theme and no theme toggle -- `@custom-variant dark`
+in `app/globals.css` deliberately redefines the variant as a class nothing sets, so registry
+components' `dark:` utilities stay inert rather than flipping the app on someone's OS setting.
+
+Tokens live in `app/globals.css` and are re-exported as utilities through `@theme inline`.
+Chart series are capped at three steps of one hue; `MAX_SERIES` in `features/ask/chart.ts` is
+the enforcement, not the palette.
+
+Typefaces are Inter and JetBrains Mono. Mono is not decoration here: it carries the SQL, the
+result-table cells, the figures and the wordmark, all of which genuinely are monospace
+content. The wordmark is the literal lowercase word `analyst` -- there is no logo file, no
+mark and no monogram.
+
+Navigation is a left rail. It used to be a top rail, on the argument that a column would steal
+width from a result table that can be five hundred columns wide; `min-w-0` on the main column
+is what answers that, by letting the table scroll inside its own box instead of stretching the
+flex row. Remove it and the old objection becomes correct again.
 
 ## shadcn/ui
 

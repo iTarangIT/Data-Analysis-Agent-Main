@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 1,
+  "targets": {
+    "/login": {
+      "targetKind": "existing-ui",
+      "projectId": "25c8b0a9-9c52-471c-a06a-5c987dec39ab",
+      "activeDraftId": "dfc6b916-520f-40db-9414-50f131706d75",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "app/globals.css",
+        "app/(auth)/layout.tsx",
+        "app/(auth)/login/page.tsx",
+        "app/(auth)/register/page.tsx",
+        "components/auth/auth-form.tsx",
+        "components/auth/auth-hero.tsx",
+        "components/ui/button.tsx",
+        "components/ui/input.tsx",
+        "components/ui/label.tsx",
+        "lib/utils.ts"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "8b1faaa8b7ef91491be422579509ba059703d4cfc2efd02fb1b4390fafae3c7a",
+        "app/globals.css": "ee09b4993a87def00e8064a179be38fd0bf2938c1069f277b088bb35260b5da4",
+        "app/(auth)/layout.tsx": "b4a68a2b51668fe66351d09c76107d1d4365a2cf337c7e37471293523aa6a910",
+        "app/(auth)/login/page.tsx": "37e64e2d33920814c9edb72e6ffa76c01311b17f7febaa797e1f72cb9e981f3a",
+        "app/(auth)/register/page.tsx": "a64da29b43f5612795a117601f7024fe0f07e3058cdd588f59a464b6e88afe75",
+        "components/auth/auth-form.tsx": "c98c84a449f40b5489cf6b714054c31f6137ac43b6d65a109e6c2cd583f5123d",
+        "components/auth/auth-hero.tsx": "06de6b8883fdad508832a913677ea8b05c3e963099fef63ec9f8cb8543fcf7a3",
+        "components/ui/button.tsx": "557e27d5d3159c338da761c5aec138dcd32d313b5a55774ea8001c3f3bfc620c",
+        "components/ui/input.tsx": "7bfd0eff6c53a38c99184394a09f55e7a86c725de12d6a300fa46b3765114091",
+        "components/ui/label.tsx": "db5dfcd98a78c5b7c3c01e0bb7726a3adbf0470f4d552e777ccf4751b51e6a56",
+        "lib/utils.ts": "4877d0135a484e4d69c0f5117e383188757d1956d20caf38057d4242549d1cbb"
+      },
+      "components": [
+        {
+          "name": "AppShell",
+          "id": "90a44db3-5a96-444e-a605-40b2b58cf063",
+          "sourcePath": "components/app-shell/app-shell.tsx"
+        }
+      ],
+      "drafts": {
+        "dfc6b916-520f-40db-9414-50f131706d75": {
+          "title": "B2B SaaS Authentication Suite with Social Auth",
+          "visualDirection": "light two-panel, social designed but inert",
+          "currentVersion": 4,
+          "authoredBy": "claude-opus-5 via import-design-draft"
+        }
+      },
+      "updatedAt": "2026-09-11T08:29:20.145Z"
+    },
+    "/ask": {
+      "targetKind": "existing-ui",
+      "projectId": "25c8b0a9-9c52-471c-a06a-5c987dec39ab",
+      "activeDraftId": "62f67ed3-f2b8-4814-97bd-b72c16681158",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "app/globals.css",
+        "components/app-shell/app-shell.tsx",
+        "components/ask/ask-workspace.tsx",
+        "components/ask/run-timeline.tsx",
+        "components/ask/result-table.tsx",
+        "components/ask/sql-block.tsx",
+        "components/ask/run-error.tsx",
+        "features/ask/run-types.ts",
+        "features/ask/run-machine.ts",
+        "features/ask/cells.ts",
+        "lib/api/types.ts"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "8b1faaa8b7ef91491be422579509ba059703d4cfc2efd02fb1b4390fafae3c7a",
+        "app/globals.css": "ee09b4993a87def00e8064a179be38fd0bf2938c1069f277b088bb35260b5da4",
+        "components/app-shell/app-shell.tsx": "915b1f3f8443a9c578526d19ad95eaa36025a5fbb6515cd3926fa55f07a45d61",
+        "components/ask/ask-workspace.tsx": "97e8fc7344885bafcb78085007c1c7f4e4b09be3f996f4162e625713c80c01d0",
+        "components/ask/run-timeline.tsx": "b907417e4607f0857e638c2c65e33ae27989b238b22a1db74653f3bd40b7bedb",
+        "components/ask/result-table.tsx": "0b478d984072fa4ef314f70aaee75a232bbe2efc811754a27c159a4d9bba9977",
+        "components/ask/sql-block.tsx": "f9b982b83b1beab0d11c4ba19934b8623df2b4167c65af88c6a0d8d4059e38b1",
+        "components/ask/run-error.tsx": "21427711f4f0436d423c3aca731fc85fe2eeb8069955a46017abd60cae3173ec",
+        "features/ask/run-types.ts": "6ac8b9b7242d8167dd662e378c713a43b856360cd5eac3ad2368dbfe6a24d0e9",
+        "features/ask/run-machine.ts": "24f0894db02f45157e578e02da689cfcf0cb20f3b176593e8d28a1c225351cf5",
+        "features/ask/cells.ts": "5643073bdfd6960c5460af18844688368c97441c40424a57a6ccc5daeca657c2",
+        "lib/api/types.ts": "4edcd147f56a164bab2eb6d9c8c3881540515cb88782e7c202bc49d26a9a6948"
+      },
+      "components": [
+        {
+          "name": "AppShell",
+          "id": "90a44db3-5a96-444e-a605-40b2b58cf063",
+          "sourcePath": "components/app-shell/app-shell.tsx"
+        }
+      ],
+      "drafts": {
+        "62f67ed3-f2b8-4814-97bd-b72c16681158": {
+          "title": "Enterprise Data Chat Interface - Vercel Premium Edition",
+          "visualDirection": "light transcript, composer on paper-sunk, chart region added",
+          "currentVersion": 3,
+          "authoredBy": "claude-opus-5 via import-design-draft"
+        }
+      },
+      "updatedAt": "2026-09-11T08:29:20.145Z"
+    },
+    "/connections": {
+      "targetKind": "existing-ui",
+      "projectId": "25c8b0a9-9c52-471c-a06a-5c987dec39ab",
+      "activeDraftId": "03dc0259-8c9c-4820-8bf4-fd9632f0ab52",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "app/globals.css",
+        "components/app-shell/app-shell.tsx",
+        "components/connections/connection-form.tsx",
+        "components/connections/connection-list.tsx",
+        "lib/api/types.ts"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "8b1faaa8b7ef91491be422579509ba059703d4cfc2efd02fb1b4390fafae3c7a",
+        "app/globals.css": "ee09b4993a87def00e8064a179be38fd0bf2938c1069f277b088bb35260b5da4",
+        "components/app-shell/app-shell.tsx": "915b1f3f8443a9c578526d19ad95eaa36025a5fbb6515cd3926fa55f07a45d61",
+        "components/connections/connection-form.tsx": "3464ae8501df005e1987b50de259eb7988a18487bd62f013a7217572918c38af",
+        "components/connections/connection-list.tsx": "6687a36bad7c198cf8cb7771b898f9e480832065b4251ce058a5f2c504ac6332",
+        "lib/api/types.ts": "4edcd147f56a164bab2eb6d9c8c3881540515cb88782e7c202bc49d26a9a6948"
+      },
+      "components": [
+        {
+          "name": "AppShell",
+          "id": "90a44db3-5a96-444e-a605-40b2b58cf063",
+          "sourcePath": "components/app-shell/app-shell.tsx"
+        }
+      ],
+      "drafts": {
+        "03dc0259-8c9c-4820-8bf4-fd9632f0ab52": {
+          "title": "B2B SaaS Connections & Integration Library",
+          "visualDirection": "light ruled list, postgres only, read-only role script",
+          "currentVersion": 2,
+          "authoredBy": "claude-opus-5 via import-design-draft"
+        }
+      },
+      "updatedAt": "2026-09-11T08:29:20.145Z"
+    },
+    "/runs": {
+      "targetKind": "existing-ui",
+      "projectId": "25c8b0a9-9c52-471c-a06a-5c987dec39ab",
+      "activeDraftId": "8288825f-6138-4544-be84-7b2d12231352",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "app/globals.css",
+        "components/app-shell/app-shell.tsx",
+        "components/ask/run-history.tsx",
+        "components/ask/sql-block.tsx",
+        "lib/api/types.ts"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "8b1faaa8b7ef91491be422579509ba059703d4cfc2efd02fb1b4390fafae3c7a",
+        "app/globals.css": "ee09b4993a87def00e8064a179be38fd0bf2938c1069f277b088bb35260b5da4",
+        "components/app-shell/app-shell.tsx": "915b1f3f8443a9c578526d19ad95eaa36025a5fbb6515cd3926fa55f07a45d61",
+        "components/ask/run-history.tsx": "75c9fd6189b442450f8cef83da9de82c201d86659b2fa238630a8494f07c3b39",
+        "components/ask/sql-block.tsx": "f9b982b83b1beab0d11c4ba19934b8623df2b4167c65af88c6a0d8d4059e38b1",
+        "lib/api/types.ts": "4edcd147f56a164bab2eb6d9c8c3881540515cb88782e7c202bc49d26a9a6948"
+      },
+      "components": [
+        {
+          "name": "AppShell",
+          "id": "90a44db3-5a96-444e-a605-40b2b58cf063",
+          "sourcePath": "components/app-shell/app-shell.tsx"
+        }
+      ],
+      "drafts": {
+        "8288825f-6138-4544-be84-7b2d12231352": {
+          "title": "Enterprise Usage & Audit Interface",
+          "visualDirection": "light usage strip, line chart, ruled runs, audit table",
+          "currentVersion": 2,
+          "authoredBy": "claude-opus-5 via import-design-draft"
+        }
+      },
+      "updatedAt": "2026-09-11T08:29:20.145Z"
+    }
+  }
+}
