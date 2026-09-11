@@ -50,7 +50,7 @@ CHECKPOINT_DB_URL=postgresql://ckpt:ckpt@localhost:5432/checkpoints
 # demo connection DSN: postgresql+psycopg://analyst_ro:ro@localhost:5432/demo
 ```
 
-Redis is not installed and not needed before phase 4. When phase 4 starts, use Memurai or WSL2 `redis-server`; until then any code path that needs Redis must be behind a feature flag defaulting to off.
+Redis is **Memurai Developer 4.1.2**, installed and running as a Windows service on 6379. `winget install Memurai.MemuraiDeveloper` fails with MSI 1603 and `SFXCA: Failed to create temp directory. Error code 5` even elevated; download the MSI and run `msiexec /i` directly instead. Any code path that needs Redis still sits behind `QUEUE_ENABLED`, which defaults to off.
 
 `docker-compose.dev.yml` stays in the repo for CI and other developers — keep it in sync with these three databases, but never assume it is running.
 
@@ -103,6 +103,20 @@ Redis is **Memurai**, a native Windows service on 6379. Its CLI is `memurai-cli`
 `redis-cli`. Ctrl-C does **not** stop an in-flight arq job on Windows: `add_signal_handler` is
 unsupported there, so arq registers no handler and its shutdown waits for the running task. Use
 `Stop-Process -Force` to test what a lost worker looks like.
+
+Use `127.0.0.1` in `REDIS_URL`, never `localhost`. Memurai binds IPv4 only while `localhost`
+resolves to `::1` first, so a client spends its whole connect timeout on IPv6 and fails, while
+`memurai-cli ping` answers normally and makes it look like an application bug.
+
+Phase 4's done-line is one command, and it starts and stops its own server and worker:
+
+```powershell
+python scripts/check_killed_worker.py
+```
+
+It kills the worker mid-run and asserts the client gets exactly one `error` event and the run
+row is not left `running`. Read its docstring before changing it: there are two ways to make it
+pass without testing anything.
 
 ### analyst-web
 ```bash

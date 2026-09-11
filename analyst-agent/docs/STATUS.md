@@ -9,7 +9,7 @@ Source of truth for the active phase. Phase N+1 does not begin until phase N's l
 | 1 | SQL tool on our own IoT DB, guard, evals | `evals/run_evals.py` >= 25/30 | code complete, **gate paused** | 2026-09-10 |
 | 2 | JWT auth, vault, `/connections`, then frontend Part B | second person connects a DB without help | not started | — |
 | 3 | web tool (Playwright) | Intellicar live query works for two tenants with separate sessions | **done**, verified live | 2026-09-11 |
-| 4 | Redis workers, limits, usage, ~~Docker deploy~~ | killing a worker mid-run gives a clean `error` event | **done**, Docker cut, Memurai not installed | 2026-09-10 |
+| 4 | Redis workers, limits, usage, ~~Docker deploy~~ | killing a worker mid-run gives a clean `error` event | **done**, verified live, Docker cut | 2026-09-11 |
 | 5 | file tool (DuckDB), charts | spreadsheet-only customer gets value | **done** | 2026-09-10 |
 | 6 | billing | paid plan sets `daily_token_budget` | deferred by decision | — |
 
@@ -386,18 +386,34 @@ Manual section 9 is unimplemented; when it returns, the line that matters most i
 `flush_interval -1` in the Caddyfile, without which Caddy buffers the SSE stream and the chat UI
 shows nothing until a run ends.
 
-**Memurai is not installed**, so the queue has only been exercised against fakeredis. The
-transport, the parity of the two paths and the killed-worker error are all covered by tests, but
-the manual end-to-end check against a real worker process is still to do:
+**The done-line passes against a real worker**, as of 2026-09-11. Memurai Developer 4.1.2 is
+installed and the check is one command:
 
 ```powershell
-$env:QUEUE_ENABLED="true"; arq app.workers.runs.WorkerSettings   # terminal B
-Get-Process arq | Stop-Process -Force                            # terminal D, mid-run
+python scripts/check_killed_worker.py
 ```
+
+It starts a real uvicorn and a real arq worker, opens the SSE stream, kills the worker mid-run,
+and asserts the stream ends with exactly one `error` event and the run row is not left
+`running`. Twice in a row: frames already published still arrive, then
+`error: the run stopped responding`, and the row reads `error` / `worker lost`.
+
+**Running this for the first time found the queue path completely broken against real Redis**,
+which is recorded under the bugs below. It is the single strongest argument in this project for
+doing the manual end-to-end checks rather than trusting a green suite.
 
 **Ctrl-C will not do**, and this is a trap worth remembering: `loop.add_signal_handler` is
 unsupported on Windows, so arq registers no handler and its shutdown waits for the running task.
-Ctrl-C would let the run finish and the test would falsely pass.
+Ctrl-C would let the run finish and the check would falsely pass. The script kills by pid.
+
+**Two ways the check can pass without testing anything**, both learned the hard way and both
+guarded in the script. A single-tool question finishes in under two seconds, faster than a kill
+can land, so the question is heavy enough to need several tool calls. And looking the worker up
+with PowerShell costs the better part of a second, so it is killed by tracked pid instead.
+
+**Memurai installs only outside winget.** `winget install Memurai.MemuraiDeveloper` fails with
+MSI 1603, `SFXCA: Failed to create temp directory. Error code 5`, despite running elevated.
+Downloading the MSI and running `msiexec /i` directly succeeds.
 
 **The synchronous-stream deviation is resolved.** `agent.stream` no longer holds the event loop;
 `execute_run` runs under `asyncio.to_thread` in both modes. That is true with the queue off as
@@ -450,15 +466,29 @@ half again as many requests against a 20-per-day quota and made charts impossibl
    load-bearing: `max_concurrent_runs` counts running rows.
 3. **The guard's rejection for a table function said `tables not allowed: ['']`**, which told the
    model nothing, so it reissued the same query until the tool budget ran out.
+4. **Every queued run reported a dead worker**, found the moment Memurai was installed and phase
+   4's done-line run for the first time. arq builds its pool with `decode_responses=False` and
+   has to, because its own job payloads are pickled bytes. So frames came back bytes-keyed, the
+   consumer's `"event" not in fields` test skipped all of them, the stall clock ran out, and a
+   run the worker had answered correctly in under two seconds was reported to the customer as a
+   worker that died. Silent by construction: nothing raises, frames are just dropped.
+
+   Both fakes were built `decode_responses=True`, so eighteen tests passed against a Redis that
+   behaved as the code assumed. They are `False` now; reverting the fix fails seven of them.
+   Same shape as phase 3's login fake. **A fake built from an assumption tests the assumption**,
+   and that sentence has now cost this project two live bugs.
+5. **The shipped `REDIS_URL` default could not work on Windows.** Memurai binds IPv4 only and
+   `localhost` resolves to `::1` first, so the client spent its whole connect timeout on IPv6.
+   The default is `127.0.0.1` now. `memurai-cli ping` answers normally throughout, which makes
+   this present as an application bug rather than a name-resolution one.
 
 ## Known limits and open checks
 
 | # | Item | Blocked on |
 |---|---|---|
-| 1 | Phase 4's killed-worker check against a real worker | Memurai is not installed |
-| 2 | `LANGSMITH_API_KEY` | the tracing half of phase 0's done-line |
-| 3 | The 30 IoT golden cases | the telemetry backfill, unchanged |
-| 4 | The hard rule 6 A/B on the IoT prompt | item 3; the harness makes it two commands |
+| 1 | `LANGSMITH_API_KEY` | the tracing half of phase 0's done-line |
+| 2 | The 30 IoT golden cases | the telemetry backfill, unchanged |
+| 3 | The hard rule 6 A/B on the IoT prompt | item 2; the harness makes it two commands |
 
 Other things worth knowing rather than fixing:
 
