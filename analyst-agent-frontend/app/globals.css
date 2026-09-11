@@ -1,26 +1,184 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ---------------------------------------------------------------------------
+   Read-only
+
+   The product only ever reads. Three independent layers in the backend enforce
+   that, and the interface says the same thing by staying quiet.
+
+   The organising idea: the agent's workspace is dark, and what it hands you is
+   printed on paper. Chrome sits on `ground`. Every artifact the agent produces
+   -- the SQL, the result table, the written answer -- sits on `paper`, which is
+   also where dense tabular data reads best.
+
+   Two semantic colours only. `live` marks the machine working and nothing else,
+   which is what keeps it a signal rather than a brand colour. Never put it on a
+   button.
+--------------------------------------------------------------------------- */
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --ground: #131922;
+  --ground-raised: #1a222d;
+  --ground-ink: #e7eaee;
+  --ground-muted: #8b97a6;
+  --rule-ground: #252b33;
+
+  --paper: #fbfbf9;
+  --paper-sunk: #f2f2ee;
+  --ink: #1a1f26;
+  --ink-muted: #676f7b;
+  --rule-paper: #d8dad5;
+
+  --live: #0fb5ae;
+  --fault: #c2554d;
+
+  --radius: 0.375rem;
+
+  /* shadcn primitives read these. Mapped onto the palette above so an
+     out-of-the-box component lands on paper and already looks like the rest. */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper);
+  --card-foreground: var(--ink);
+  --popover: var(--paper);
+  --popover-foreground: var(--ink);
+  --primary: var(--ground);
+  --primary-foreground: var(--paper);
+  --secondary: var(--paper-sunk);
+  --secondary-foreground: var(--ink);
+  --muted: var(--paper-sunk);
+  --muted-foreground: var(--ink-muted);
+  --accent: var(--paper-sunk);
+  --accent-foreground: var(--ink);
+  --destructive: var(--fault);
+  --destructive-foreground: var(--paper);
+  --border: var(--rule-paper);
+  --input: var(--rule-paper);
+  --ring: var(--ground-muted);
+}
+
+/* The shell inverts the same tokens rather than defining a second palette, so
+   the two surfaces can never drift apart. */
+.on-ground {
+  --background: var(--ground);
+  --foreground: var(--ground-ink);
+  --card: var(--ground-raised);
+  --card-foreground: var(--ground-ink);
+  --popover: var(--ground-raised);
+  --popover-foreground: var(--ground-ink);
+  --primary: var(--paper);
+  --primary-foreground: var(--ground);
+  --secondary: var(--ground-raised);
+  --secondary-foreground: var(--ground-ink);
+  --muted: var(--ground-raised);
+  --muted-foreground: var(--ground-muted);
+  --accent: var(--ground-raised);
+  --accent-foreground: var(--ground-ink);
+  --border: var(--rule-ground);
+  --input: var(--rule-ground);
+  --ring: var(--ground-muted);
 }
 
 @theme inline {
+  --color-ground: var(--ground);
+  --color-ground-raised: var(--ground-raised);
+  --color-ground-ink: var(--ground-ink);
+  --color-ground-muted: var(--ground-muted);
+  --color-rule-ground: var(--rule-ground);
+
+  --color-paper: var(--paper);
+  --color-paper-sunk: var(--paper-sunk);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-rule-paper: var(--rule-paper);
+
+  --color-live: var(--live);
+  --color-fault: var(--fault);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* IBM Plex, one superfamily drawn for technical contexts. Mono carries the
+     SQL and the table cells, which genuinely are monospace content. */
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Visible, and on the right surface either way. The shell inverts --ring
+     along with everything else, so this needs no second rule. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--live) 28%, transparent);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* The one piece of non-user-triggered motion in the product: the stage spine
+   ticking as the agent works. It answers the machine's action, and it stops the
+   moment the run settles. */
+@keyframes pulse-live {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.is-live {
+  animation: pulse-live 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-live {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
