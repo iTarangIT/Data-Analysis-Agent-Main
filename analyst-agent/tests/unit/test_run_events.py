@@ -35,7 +35,9 @@ EVENTS = [
 
 @pytest.fixture
 def redis():
-    return fakeredis.aioredis.FakeRedis(decode_responses=True)
+    # decode_responses=False, matching arq's real pool. With True these tests passed while
+    # every queued run against real Redis silently reported a dead worker.
+    return fakeredis.aioredis.FakeRedis(decode_responses=False)
 
 
 @pytest.fixture

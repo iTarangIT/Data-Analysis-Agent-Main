@@ -65,7 +65,9 @@ def connection_id(client, token, demo_dsn, clean_app_db) -> str:
 
 @pytest.fixture
 def redis(monkeypatch):
-    client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    # decode_responses=False, matching arq's real pool. With True these tests passed while
+    # every queued run against real Redis silently reported a dead worker.
+    client = fakeredis.aioredis.FakeRedis(decode_responses=False)
     monkeypatch.setattr(queue, "_pool", client)
     return client
 

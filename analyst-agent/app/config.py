@@ -46,7 +46,9 @@ class Settings(BaseSettings):
     web_data_timeout_ms: int = 25_000
     web_settle_ms: int = 1_500
 
-    redis_url: RedisDsn = RedisDsn("redis://localhost:6379/0")
+    # 127.0.0.1, not localhost: Memurai binds IPv4 only, while `localhost` resolves to ::1
+    # first on Windows, so the client spends its whole connect timeout on IPv6 and fails.
+    redis_url: RedisDsn = RedisDsn("redis://127.0.0.1:6379/0")
     # Off by default so local development and the test suite need no Redis at all.
     queue_enabled: bool = False
     run_timeout_s: int = 180

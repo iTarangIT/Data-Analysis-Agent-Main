@@ -60,6 +60,23 @@ async def publish(redis: Any, run_id: str, frame: dict[str, str]) -> None:
     await redis.expire(key, s.run_stream_ttl_s)
 
 
+def _decode(fields: dict[Any, Any]) -> dict[str, str]:
+    """Normalise one stream entry to str keys and values.
+
+    arq builds its pool with `decode_responses=False`, and it has to: its own job payloads are
+    pickled bytes that would not survive a UTF-8 decode. So frames come back as bytes and are
+    decoded here instead of by the client.
+
+    Getting this wrong is silent rather than loud. A bytes-keyed frame fails the `"event" in`
+    test below, so every frame is skipped, the stall clock runs out, and a perfectly healthy
+    run is reported to the customer as a worker that died.
+    """
+    return {
+        (k.decode() if isinstance(k, bytes) else k): (v.decode() if isinstance(v, bytes) else v)
+        for k, v in fields.items()
+    }
+
+
 async def consume(redis: Any, run_id: str) -> AsyncIterator[dict[str, str]]:
     """Yield the run's frames until it ends, or until the worker stops proving it is alive.
 
@@ -82,10 +99,11 @@ async def consume(redis: Any, run_id: str) -> AsyncIterator[dict[str, str]]:
         for _, entries in batch:
             for entry_id, fields in entries:
                 last = entry_id
-                if "event" not in fields:
+                frame = _decode(fields)
+                if "event" not in frame:
                     continue
-                yield fields
-                if fields["event"] in ("done", "error"):
+                yield frame
+                if frame["event"] in ("done", "error"):
                     return
 
     log.warning("queue.stalled", run_id=run_id, after_s=s.run_stall_timeout_s)
