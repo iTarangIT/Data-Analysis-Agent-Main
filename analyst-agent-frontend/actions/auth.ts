@@ -23,7 +23,24 @@ import { REFRESH_COOKIE, clearedCookies, sessionCookies } from "@/lib/auth/cooki
 export type FormState = {
   message?: string;
   fieldErrors?: Record<string, string>;
+  /**
+   * What was submitted, echoed back so the form can refill itself.
+   *
+   * React resets an uncontrolled form once its action completes, so without this a failed
+   * sign-up silently wipes everything the person typed. Passwords are never echoed.
+   */
+  values?: Record<string, string>;
 };
+
+/** Every non-secret field, so a rejected form comes back filled in. */
+function keep(formData: FormData, fields: string[]): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const field of fields) {
+    const value = formData.get(field);
+    if (typeof value === "string") values[field] = value;
+  }
+  return values;
+}
 
 const LoginSchema = z.object({
   email: z.email({ error: "Enter a valid email address." }).trim(),
@@ -72,7 +89,8 @@ export async function login(_prev: FormState, formData: FormData): Promise<FormS
     email: formData.get("email"),
     password: formData.get("password"),
   });
-  if (!parsed.success) return { fieldErrors: flatten(parsed.error) };
+  const typed = keep(formData, ["email"]);
+  if (!parsed.success) return { fieldErrors: flatten(parsed.error), values: typed };
 
   try {
     const auth = await agentJson<AuthResponse>("/auth/login", {
@@ -85,6 +103,7 @@ export async function login(_prev: FormState, formData: FormData): Promise<FormS
     // One message whatever went wrong, matching the agent. Saying "no such account" here
     // would undo the enumeration protection it goes to the trouble of providing.
     return {
+      values: typed,
       message:
         api.status === 401
           ? "That email and password do not match an account."
@@ -103,7 +122,8 @@ export async function register(_prev: FormState, formData: FormData): Promise<Fo
     tenant_name: formData.get("tenant_name") || undefined,
     name: formData.get("name") || undefined,
   });
-  if (!parsed.success) return { fieldErrors: flatten(parsed.error) };
+  const typed = keep(formData, ["email", "tenant_name", "name"]);
+  if (!parsed.success) return { fieldErrors: flatten(parsed.error), values: typed };
 
   try {
     const auth = await agentJson<AuthResponse>("/auth/register", {
@@ -114,12 +134,15 @@ export async function register(_prev: FormState, formData: FormData): Promise<Fo
   } catch (error) {
     const api = error as ApiError;
     if (api.status === 409) {
-      return { fieldErrors: { email: "An account with that email already exists." } };
+      return {
+        values: typed,
+        fieldErrors: { email: "An account with that email already exists." },
+      };
     }
     if (api.fieldErrors && Object.keys(api.fieldErrors).length > 0) {
-      return { fieldErrors: api.fieldErrors };
+      return { values: typed, fieldErrors: api.fieldErrors };
     }
-    return { message: api.message ?? "Could not create the account. Try again." };
+    return { values: typed, message: api.message ?? "Could not create the account. Try again." };
   }
 
   redirect("/ask");

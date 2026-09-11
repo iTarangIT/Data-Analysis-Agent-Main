@@ -57,13 +57,25 @@ function codeFor(status: number, message: string): ApiErrorCode {
 
 type ValidationItem = { loc?: unknown[]; msg?: string };
 
+/**
+ * Pydantic prefixes its messages with machine wording. The rest of the sentence is usually
+ * the useful part and worth keeping, so only the prefix is dropped.
+ */
+const MACHINE_PREFIX = /^(value error,\s*|value is not a valid [^:]+:\s*|assertion failed,\s*)/i;
+
+function humanise(message: string): string {
+  const trimmed = message.replace(MACHINE_PREFIX, "").trim();
+  if (!trimmed) return message;
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
 /** Turn pydantic's array into field name -> message. `loc` is ["body", "email"]. */
 function fieldErrorsFrom(detail: ValidationItem[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const item of detail) {
     const path = Array.isArray(item.loc) ? item.loc : [];
     const field = path.filter((p) => p !== "body").join(".");
-    if (field && item.msg && !out[field]) out[field] = item.msg;
+    if (field && item.msg && !out[field]) out[field] = humanise(item.msg);
   }
   return out;
 }
