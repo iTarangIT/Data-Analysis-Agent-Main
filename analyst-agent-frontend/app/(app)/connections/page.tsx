@@ -1,5 +1,6 @@
-import { ConnectionForm } from "@/components/connections/connection-form";
-import { ConnectionList } from "@/components/connections/connection-list";
+import { AlertTriangle } from "lucide-react";
+
+import { ConnectionsView } from "@/components/connections/connections-view";
 import { agentJson } from "@/lib/api/agent-client";
 import type { Connection } from "@/lib/api/types";
 import { requireSession } from "@/lib/auth/dal";
@@ -19,28 +20,24 @@ export default async function ConnectionsPage() {
   }
 
   return (
-    <main className="flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-3xl px-5 py-10 sm:px-8">
-        <h1 className="text-[1.5rem] font-normal text-ink">Connections</h1>
-        <p className="mt-2 max-w-[58ch] text-[0.9375rem] leading-relaxed text-ink-muted">
-          The databases you can ask about. Questions are answered by reading them, never by
-          writing to them.
-        </p>
+    <main className="flex-1 overflow-y-auto">
+      <div className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-8">
+        <header className="mb-7">
+          <h1 className="text-2xl font-semibold tracking-tight text-ink">Connections</h1>
+          <p className="mt-1.5 max-w-[62ch] text-[0.875rem] leading-relaxed text-ink-muted">
+            The databases you can ask about. Questions are answered by reading them, never by
+            writing to them.
+          </p>
+        </header>
 
         {unreachable ? (
-          <p className="mt-6 border-l-2 border-fault bg-paper-sunk px-4 py-3 text-[0.9375rem] text-ink">
-            Could not reach the analyst service, so this list may be out of date.
+          <p className="mb-5 flex items-start gap-2.5 rounded-md border border-fault/30 bg-fault-soft px-3.5 py-3 text-[0.875rem] text-fault">
+            <AlertTriangle aria-hidden className="mt-px size-4 shrink-0" strokeWidth={2} />
+            <span>Could not reach the analyst service, so this list may be out of date.</span>
           </p>
         ) : null}
 
-        <section className="mt-9">
-          <ConnectionList connections={connections} />
-        </section>
-
-        <section className="mt-10">
-          <h2 className="mb-5 text-[1.0625rem] font-medium text-ink">Add a connection</h2>
-          <ConnectionForm />
-        </section>
+        <ConnectionsView connections={connections} />
       </div>
     </main>
   );
