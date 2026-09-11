@@ -38,7 +38,12 @@ class Settings(BaseSettings):
     # Which of a dashboard's XHR responses carries the data. Narrow it as far as the site
     # allows: every matching body is read, and a wider match can pick up an auth response.
     web_data_url_match: str = "/api/"
-    web_nav_timeout_ms: int = 30_000
+    # The Intellicar dashboard pulls in Google Maps, Firebase and reCAPTCHA before it is
+    # interactive, and gets slower under repeated sign-ins. 30s was not enough.
+    web_nav_timeout_ms: int = 60_000
+    # How long to wait for the dashboard's own data call, which only starts after its
+    # scripts boot. Waiting is polled, so a fast dashboard does not pay the whole budget.
+    web_data_timeout_ms: int = 25_000
     web_settle_ms: int = 1_500
 
     redis_url: RedisDsn = RedisDsn("redis://localhost:6379/0")

@@ -3,9 +3,16 @@
 Session state is persisted per tenant and per connection, so two tenants signed into the same
 dashboard never share cookies. That separation is the whole point of the file: it is what
 phase 3's done-line checks.
+
+The sign-in flow was measured against Intellicar rather than guessed. The dashboard has no
+inline login form: it shows one button, which opens a popup to a separate single sign-on host
+that asks for an identifier, then a password, then closes itself and hands a token back to the
+window that opened it. Driving that sign-in page directly mints a token nothing consumes, so
+the popup has to be opened from the dashboard.
 """
 
 import contextvars
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
@@ -15,6 +22,11 @@ from playwright.sync_api import Page, Response, sync_playwright
 
 from app.config import get_settings
 from app.logging import log
+
+# All the site-specific knowledge is these three selectors and nothing else.
+LOGIN_BUTTON = "button:visible:has-text('Login')"
+IDENTIFIER_FIELD = "input:visible >> nth=0"
+PASSWORD_FIELD = "input[type=password]:visible"
 
 
 class DashboardUnavailable(RuntimeError):
@@ -61,10 +73,29 @@ def _capture(response: Response, data_url_match: str, out: list[Any]) -> None:
 
 
 def _login(page: Page, secret: dict[str, str], timeout_ms: int) -> None:
-    page.fill("input[type=text]:visible, input[type=email]:visible", secret["username"])
-    page.fill("input[type=password]:visible", secret["password"])
-    page.keyboard.press("Enter")
-    page.wait_for_load_state("networkidle", timeout=timeout_ms)
+    """Sign in through the popup the dashboard opens.
+
+    The popup closing is the success signal: it means the token reached the opener. A rejected
+    credential leaves it open, which is why that is what the failures below detect.
+    """
+    with page.expect_popup(timeout=timeout_ms) as popup_info:
+        page.click(LOGIN_BUTTON)
+    popup = popup_info.value
+    popup.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+
+    popup.fill(IDENTIFIER_FIELD, secret["username"])
+    popup.keyboard.press("Enter")
+    try:
+        popup.wait_for_selector(PASSWORD_FIELD, timeout=timeout_ms)
+    except Exception as e:
+        raise DashboardUnavailable("the dashboard did not accept that username") from e
+
+    popup.fill(PASSWORD_FIELD, secret["password"])
+    popup.keyboard.press("Enter")
+    try:
+        popup.wait_for_event("close", timeout=timeout_ms)
+    except Exception as e:
+        raise DashboardUnavailable("the dashboard did not accept those credentials") from e
 
 
 def _rows(payload: Any) -> list[dict[str, Any]]:
@@ -76,6 +107,15 @@ def _rows(payload: Any) -> list[dict[str, Any]]:
                 return [r for r in payload[key] if isinstance(r, dict)]
         return [payload]
     return []
+
+
+def _wait_for_data(page: Page, captured: list[Any], timeout_ms: int, settle_ms: int) -> None:
+    """Wait only as long as the data actually takes, then briefly for a larger one behind it."""
+    deadline = time.monotonic() + timeout_ms / 1000
+    while not captured and time.monotonic() < deadline:
+        page.wait_for_timeout(250)
+    if captured:
+        page.wait_for_timeout(settle_ms)
 
 
 def _open_and_capture(
@@ -90,20 +130,28 @@ def _open_and_capture(
         context = browser.new_context(storage_state=str(state) if state.exists() else None)
         page = context.new_page()
         page.on("response", lambda r: _capture(r, data_url_match, captured))
-        page.goto(secret["url"], wait_until="networkidle", timeout=s.web_nav_timeout_ms)
+        page.goto(secret["url"], wait_until="domcontentloaded", timeout=s.web_nav_timeout_ms)
+        _wait_for_data(page, captured, s.web_data_timeout_ms, s.web_settle_ms)
 
-        # `:visible` matters: a single-page app often keeps a hidden login form mounted, and
-        # matching it would re-authenticate on every fetch and defeat the saved session.
-        if page.locator("input[type=password]:visible").count():
+        # A saved session that still works fetches the data on that first load. Only when it
+        # does not is a sign-in needed.
+        if not captured and page.locator(LOGIN_BUTTON).count():
             _login(page, secret, s.web_nav_timeout_ms)
             context.storage_state(path=str(state))
             log.info("web.login", connection_id=connection_id)
-            if not page.url.startswith(secret["url"]):
-                page.goto(secret["url"], wait_until="networkidle", timeout=s.web_nav_timeout_ms)
+
+            # The dashboard reloads itself once the popup hands back the token. Navigating at
+            # that same moment aborts its navigation with ERR_ABORTED, so wait for it first and
+            # only load the page if it does not do so on its own.
+            _wait_for_data(page, captured, s.web_data_timeout_ms, s.web_settle_ms)
+            if not captured:
+                page.goto(
+                    secret["url"], wait_until="domcontentloaded", timeout=s.web_nav_timeout_ms
+                )
+                _wait_for_data(page, captured, s.web_data_timeout_ms, s.web_settle_ms)
         else:
             log.debug("web.session_reused", connection_id=connection_id)
 
-        page.wait_for_timeout(s.web_settle_ms)
         browser.close()
 
     if not captured:
