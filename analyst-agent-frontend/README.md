@@ -28,6 +28,11 @@ npm run build   # also type-checks
 npx eslint .
 ```
 
+One thing that will catch you out: the agent's integration suite shares the local App DB and
+truncates `users`, `tenants`, `connections` and `runs` between tests. Running `pytest` over
+there therefore signs you out here and deletes the connections you added. The app handles it
+without complaint, but the data is gone.
+
 ## How it is put together
 
 **The browser never holds a token.** It talks only to this app; this app talks to the agent.

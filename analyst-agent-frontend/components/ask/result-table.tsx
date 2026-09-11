@@ -1,5 +1,6 @@
 "use client";
 
+import { columnIsNumeric, renderCell } from "@/features/ask/cells";
 import type { Cell, ResultTable as Result } from "@/features/ask/run-types";
 import { cn } from "@/lib/utils";
 
@@ -12,41 +13,6 @@ import { cn } from "@/lib/utils";
  * and in an analytics product that turns "266300.00" into a rounded float and ships a wrong
  * number with total confidence. Nothing here ever calls Number() on a cell.
  */
-
-/** A string that is entirely numeric: what a Decimal or a bigint column looks like. */
-const NUMERIC_TEXT = /^-?\d+(\.\d+)?$/;
-
-function isNumericCell(value: Cell): boolean {
-  if (typeof value === "number") return true;
-  return typeof value === "string" && NUMERIC_TEXT.test(value);
-}
-
-/**
- * Align a column by what it holds, not by its name. Decided from the column rather than the
- * cell so a single null does not knock one figure out of line with the rest.
- */
-function columnIsNumeric(rows: Cell[][], index: number): boolean {
-  let seen = 0;
-  for (const row of rows) {
-    const value = row[index];
-    if (value === null) continue;
-    if (!isNumericCell(value)) return false;
-    seen++;
-    if (seen >= 20) break; // enough to decide; no need to walk five hundred rows
-  }
-  return seen > 0;
-}
-
-function renderCell(value: Cell) {
-  if (value === null) {
-    return <span className="text-ink-muted">null</span>;
-  }
-  if (typeof value === "boolean") {
-    return <span className="text-ink-muted">{value ? "true" : "false"}</span>;
-  }
-  // Printed exactly as it arrived. This is the line that keeps money correct.
-  return String(value);
-}
 
 export function ResultTable({ result }: { result: Result }) {
   const { columns, rows, truncated } = result;
@@ -101,7 +67,7 @@ export function ResultTable({ result }: { result: Result }) {
                         numeric[c] ? "text-right tabular-nums" : "text-left",
                       )}
                     >
-                      {renderCell(value)}
+                      <RenderedCell value={value} />
                     </td>
                   ))}
                 </tr>
@@ -112,4 +78,11 @@ export function ResultTable({ result }: { result: Result }) {
       )}
     </div>
   );
+}
+
+/** Null and booleans are shown as absent and as words, both in the muted ink. */
+function RenderedCell({ value }: { value: Cell }) {
+  const rendered = renderCell(value);
+  if (rendered.kind === "value") return rendered.text;
+  return <span className="text-ink-muted">{rendered.kind === "null" ? "null" : rendered.text}</span>;
 }
