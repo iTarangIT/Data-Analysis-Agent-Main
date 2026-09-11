@@ -10,12 +10,12 @@ import {
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
 // Edited from the registry version, which reads `next-themes`. This product commits to one
-// look -- artifacts on paper, chrome on ground -- so there is no theme to read and no reason
-// to carry the dependency. Toasts sit on the shell, so they are always dark.
+// look -- one light surface family -- so there is no theme to read and no reason
+// to carry the dependency. A toast is a card like any other, so it sits on `surface`.
 const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
-      theme="dark"
+      theme="light"
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,
@@ -26,9 +26,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }}
       style={
         {
-          "--normal-bg": "var(--ground-raised)",
-          "--normal-text": "var(--ground-ink)",
-          "--normal-border": "var(--rule-ground)",
+          "--normal-bg": "var(--surface)",
+          "--normal-text": "var(--ink)",
+          "--normal-border": "var(--line)",
           "--border-radius": "var(--radius)",
         } as React.CSSProperties
       }

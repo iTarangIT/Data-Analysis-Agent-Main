@@ -1,23 +1,23 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 
 import { Toaster } from "@/components/ui/sonner";
 
 import "./globals.css";
 
-// One superfamily, drawn for technical contexts. Mono is not decoration here: it carries the
-// SQL and the table cells, which genuinely are monospace content.
-const plexSans = IBM_Plex_Sans({
-  variable: "--font-plex-sans",
+// Both are variable fonts, so no weight array: pinning statics here would ship four files
+// where one does, and would quietly cap which weights the interface can reach for.
+// Mono is not decoration -- it carries the SQL, the table cells and the figures, which
+// genuinely are monospace content.
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
   display: "swap",
 });
 
-const plexMono = IBM_Plex_Mono({
-  variable: "--font-plex-mono",
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
   subsets: ["latin"],
-  weight: ["400", "500"],
   display: "swap",
 });
 
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${plexSans.variable} ${plexMono.variable} h-full`}>
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} h-full`}>
       {/* Extensions inject attributes onto body before React hydrates, which is not a
           mismatch we can fix or should report. */}
       <body className="flex min-h-full flex-col" suppressHydrationWarning>
