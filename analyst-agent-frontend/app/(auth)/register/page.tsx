@@ -1,18 +1,16 @@
-import Link from "next/link";
-
 import { register } from "@/actions/auth";
+import { AuthCard } from "@/components/auth/auth-card";
 import { AuthForm } from "@/components/auth/auth-form";
 
 export const metadata = { title: "Create an account" };
 
 export default function RegisterPage() {
   return (
-    <>
-      <h1 className="text-[1.625rem] leading-tight font-medium text-ink">Create an account</h1>
-      <p className="mt-2 mb-8 text-[0.9375rem] text-ink-muted">
-        You will be the owner of a new organisation. Teammates can join later.
-      </p>
-
+    <AuthCard
+      title="Create an account"
+      subtitle="You will be the owner of a new organisation. Teammates can join later."
+      footer={{ prompt: "Already have an account?", href: "/login", label: "Sign in" }}
+    >
       <AuthForm
         action={register}
         submitLabel="Create account"
@@ -24,7 +22,7 @@ export default function RegisterPage() {
             placeholder: "Acme Logistics",
             autoComplete: "organization",
           },
-          { name: "email", label: "Email", type: "email", autoComplete: "email" },
+          { name: "email", label: "Work email", type: "email", autoComplete: "email" },
           {
             name: "password",
             label: "Password",
@@ -34,13 +32,6 @@ export default function RegisterPage() {
           },
         ]}
       />
-
-      <p className="mt-8 text-[0.875rem] text-ink-muted">
-        Already have an account?{" "}
-        <Link href="/login" className="text-ink underline underline-offset-4">
-          Sign in
-        </Link>
-      </p>
-    </>
+    </AuthCard>
   );
 }

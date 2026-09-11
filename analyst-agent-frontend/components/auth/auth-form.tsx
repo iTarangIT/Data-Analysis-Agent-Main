@@ -2,10 +2,12 @@
 
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
+import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import type { FormState } from "@/actions/auth";
 
 type Field = {
@@ -31,8 +33,19 @@ function Submit({ label, pendingLabel }: { label: string; pendingLabel: string }
   // useFormStatus reads the enclosing form, so the button knows without being told.
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" disabled={pending} className="mt-2 h-11 w-full text-[0.9375rem]">
-      {pending ? pendingLabel : label}
+    <Button
+      type="submit"
+      disabled={pending}
+      className="mt-1 h-10 w-full bg-brand text-sm font-medium text-brand-fg hover:bg-brand-hover"
+    >
+      {pending ? (
+        <>
+          <Loader2 aria-hidden className="size-4 animate-spin" />
+          {pendingLabel}
+        </>
+      ) : (
+        label
+      )}
     </Button>
   );
 }
@@ -41,13 +54,17 @@ export function AuthForm({ action, fields, submitLabel, pendingLabel, next }: Pr
   const [state, formAction] = useActionState<FormState, FormData>(action, {});
 
   return (
-    <form action={formAction} className="flex flex-col gap-5" noValidate>
+    <form action={formAction} className="flex flex-col gap-4" noValidate>
       {next ? <input type="hidden" name="next" value={next} /> : null}
 
+      {/* Form-level rather than under the email field, which is where a mockup would put it.
+          The login action collapses every failure into one message on purpose, so that a
+          wrong password and an email with no account are indistinguishable; pinning that
+          message to a field would undo the protection by implying which half was wrong. */}
       {state.message ? (
         <p
           role="alert"
-          className="border-l-2 border-fault bg-paper-sunk px-3 py-2 text-sm text-ink"
+          className="rounded-md border border-fault/30 bg-fault-soft px-3 py-2 text-[0.8125rem] text-fault"
         >
           {state.message}
         </p>
@@ -62,8 +79,14 @@ export function AuthForm({ action, fields, submitLabel, pendingLabel, next }: Pr
             : undefined;
 
         return (
-          <div key={field.name} className="flex flex-col gap-2">
-            <Label htmlFor={field.name} className="text-[0.8125rem] font-medium text-ink">
+          <div key={field.name} className="flex flex-col gap-1.5">
+            <Label
+              htmlFor={field.name}
+              className={cn(
+                "text-[0.8125rem] font-medium",
+                error ? "text-fault" : "text-brand",
+              )}
+            >
               {field.label}
             </Label>
             <Input
@@ -79,7 +102,10 @@ export function AuthForm({ action, fields, submitLabel, pendingLabel, next }: Pr
               required={field.required !== false}
               aria-invalid={error ? true : undefined}
               aria-describedby={describedBy}
-              className="h-11 rounded-sm border-rule-paper bg-paper text-[0.9375rem] text-ink"
+              className={cn(
+                "h-10 rounded-md bg-surface text-sm text-ink placeholder:text-ink-faint",
+                error ? "border-fault" : "border-line",
+              )}
             />
             {error ? (
               <p id={`${field.name}-error`} className="text-[0.8125rem] text-fault">
