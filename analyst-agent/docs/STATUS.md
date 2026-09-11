@@ -8,7 +8,7 @@ Source of truth for the active phase. Phase N+1 does not begin until phase N's l
 | 0 | repos, Compose, stub graph, SSE endpoint | `curl -N /runs` streams a stub, trace in LangSmith | **done**, tracing dormant | 2026-09-10 |
 | 1 | SQL tool on our own IoT DB, guard, evals | `evals/run_evals.py` >= 25/30 | code complete, **gate paused** | 2026-09-10 |
 | 2 | JWT auth, vault, `/connections`, then frontend Part B | second person connects a DB without help | not started | — |
-| 3 | web tool (Playwright) | Intellicar live query works for two tenants with separate sessions | code complete, **live check pending** | 2026-09-10 |
+| 3 | web tool (Playwright) | Intellicar live query works for two tenants with separate sessions | **done**, verified live | 2026-09-11 |
 | 4 | Redis workers, limits, usage, ~~Docker deploy~~ | killing a worker mid-run gives a clean `error` event | **done**, Docker cut, Memurai not installed | 2026-09-10 |
 | 5 | file tool (DuckDB), charts | spreadsheet-only customer gets value | **done** | 2026-09-10 |
 | 6 | billing | paid plan sets `daily_token_budget` | deferred by decision | — |
@@ -305,15 +305,62 @@ Evals were run at every step that touched the guard or a prompt: 4/4 before and 
 time, replayed from a cassette with no drift reported. A new seven-case file suite records and
 replays 7/7.
 
-### Phase 3, the web tool: code complete, live check pending
+### Phase 3, the web tool: done, verified live on 2026-09-11
 
 `kind="web"` was accepted by the API from phase 2 but `connector_for` raised for it, so a web
 connection could be created and then failed as a 500 on the first run. That is closed.
 
-**The live done-line has not been run.** `INTELLICAR_ID` and `INTELLICAR_PASSWORD` are in `.env`
-but `INTELLICAR_URL` is not, so `tests/integration/test_web_runs.py` skips. Add the URL, export
-the three in a shell, and run that file to close phase 3. It drives a scripted model, so the
-check costs no model quota; only the dashboard has to be real.
+**The done-line passes against the real dashboard.** Two tenants, two session files in two
+tenant directories, six cookies each, byte-different from one another, and neither containing
+the plaintext password. Byte-different is the part that matters: it is what distinguishes two
+independent sessions from one shared cookie jar copied twice.
+
+To re-run it, export the four variables and run that one file. `MSYS_NO_PATHCONV=1` matters in
+Git Bash, which otherwise rewrites the leading slash of the match string into a Windows path and
+produces a confusing "no dashboard data matched 'C:/Program Files/Git/api/...'":
+
+```bash
+export MSYS_NO_PATHCONV=1 PLAYWRIGHT_BROWSERS_PATH="D:\ms-playwright"
+export INTELLICAR_URL=... INTELLICAR_ID=... INTELLICAR_PASSWORD=...
+export INTELLICAR_DATA_MATCH=/api/group/listevgroups
+pytest tests/integration/test_web_runs.py
+```
+
+It drives a scripted model, so the check costs no model quota; only the dashboard has to be real.
+
+**The sign-in was a guess, and the guess was wrong in every particular.** The original code
+filled a username and password on the page. The real dashboard has no inline form: it has one
+button, which opens a popup to a separate single sign-on host, which asks for an identifier,
+then for a password on a second screen, then closes itself.
+
+The closing is the mechanism, not a detail. The popup hands a token back to the window that
+opened it, so driving the sign-in URL directly mints a valid token that nothing consumes. The
+popup must be opened from the dashboard. A rejected credential leaves it open, which is exactly
+how the two failure paths are told apart.
+
+The old code could never have worked, and the tests passed anyway, because the fake driver
+modelled the guess rather than the site. That is the lesson worth keeping from this phase: a
+fake built from an assumption tests the assumption.
+
+**A race only visible against the real site.** After the token goes back, the dashboard reloads
+itself. Issuing a reload at that same moment killed it with `ERR_ABORTED`. The code now waits for
+the dashboard's own reload and navigates only if none arrives.
+
+**Two timeouts were guesses too.** Navigation was 30s against a page that loads Google Maps,
+Firebase and reCAPTCHA before it is interactive, and it timed out repeatedly; it is 60s. Waiting
+for data was a fixed 1.5s sleep, too short here and wasteful on a fast dashboard, so it polls up
+to `WEB_DATA_TIMEOUT_MS` and stops the moment the data lands.
+
+**The dashboard slows under repeated sign-ins.** Running the whole file back to back, the first
+test fails on a navigation timeout while the rest pass, and it recovers after a few minutes'
+pause. Production does not behave like this: the tests wipe the session store before each test
+and so force a fresh login every time, which is the worst case by construction. A real tenant
+signs in once and reuses the session until it expires. Re-run the file on its own, not in a loop.
+
+**`INTELLICAR_DATA_MATCH` must name one endpoint.** The dashboard calls about ten. The vehicle
+groups are at `/api/group/listevgroups`; a broad `/api/` match captures whichever happens to land
+last, which is not stable across loads. Every Intellicar endpoint returns
+`{"status", "data": [...], "err", "msg"}`, which the existing unwrapping already handled.
 
 The manual's 7.7 builds a graph node for the five-node architecture that no longer exists, so the
 capability is a `@tool` like every other one. It takes no arguments: a dashboard has one payload
@@ -408,11 +455,10 @@ half again as many requests against a 20-per-day quota and made charts impossibl
 
 | # | Item | Blocked on |
 |---|---|---|
-| 1 | Phase 3's live two-tenant check | `INTELLICAR_URL` is missing from `.env` |
-| 2 | Phase 4's killed-worker check against a real worker | Memurai is not installed |
-| 3 | `LANGSMITH_API_KEY` | the tracing half of phase 0's done-line |
-| 4 | The 30 IoT golden cases | the telemetry backfill, unchanged |
-| 5 | The hard rule 6 A/B on the IoT prompt | item 4; the harness makes it two commands |
+| 1 | Phase 4's killed-worker check against a real worker | Memurai is not installed |
+| 2 | `LANGSMITH_API_KEY` | the tracing half of phase 0's done-line |
+| 3 | The 30 IoT golden cases | the telemetry backfill, unchanged |
+| 4 | The hard rule 6 A/B on the IoT prompt | item 3; the harness makes it two commands |
 
 Other things worth knowing rather than fixing:
 
