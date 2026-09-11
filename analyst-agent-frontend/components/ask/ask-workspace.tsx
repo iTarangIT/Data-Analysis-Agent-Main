@@ -1,176 +1,351 @@
 "use client";
 
+import { ArrowUp, ChevronDown, Database, Loader2, ShieldCheck, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { PastTurn } from "@/components/ask/past-turn";
+import { ResultChart } from "@/components/ask/result-chart";
 import { ResultTable } from "@/components/ask/result-table";
 import { RunErrorPanel } from "@/components/ask/run-error";
 import { RunTimeline } from "@/components/ask/run-timeline";
 import { SqlBlock } from "@/components/ask/sql-block";
+import { ThreadList } from "@/components/ask/thread-list";
 import { Button } from "@/components/ui/button";
+import { buildChart } from "@/features/ask/chart";
+import type { RunState } from "@/features/ask/run-types";
 import { isRunning } from "@/features/ask/run-types";
 import { useRun } from "@/features/ask/use-run";
-import type { Connection } from "@/lib/api/types";
+import type { Connection, RunSummary, Thread } from "@/lib/api/types";
+import { cn } from "@/lib/utils";
 
 /**
- * The transcript.
+ * The ask screen: threads, the conversation, and the composer.
  *
- * Question, then SQL, then the table, then the answer, in the order the stream delivers them,
- * so the page fills downwards as the agent works rather than appearing all at once.
+ * Three things are worth knowing before changing anything here.
  *
- * The thread id is minted once per conversation and reused for every follow-up, which is what
- * makes the agent replay the earlier turns.
+ * A run is started from the submit handler and never from an effect. React double-invokes
+ * effects in development and a run costs tokens against the tenant's daily budget.
+ *
+ * The turns this hook accumulates are this sitting only, and they are not history. A reload
+ * clears them; the runs page is the record, and reopening a thread replays it from the agent
+ * as `history`.
+ *
+ * The result table can be five hundred columns wide, so every flex and grid child that can
+ * contain it carries `min-w-0`. Without it the table refuses to shrink and stretches the
+ * whole transcript instead of scrolling inside its own box.
  */
+
 export function AskWorkspace({
   connections,
   threadId,
+  threads,
+  history,
+  userInitials,
 }: {
   connections: Connection[];
   threadId: string;
+  threads: Thread[];
+  history: RunSummary[];
+  userInitials: string;
 }) {
-  const { state, ask, cancel, reset } = useRun();
+  const { state, turns, ask, cancel, reset } = useRun();
   const [question, setQuestion] = useState("");
   const [connectionId, setConnectionId] = useState(connections[0]?.id ?? "");
 
   const busy = isRunning(state.phase);
   const canAsk = question.trim().length >= 3 && connectionId !== "" && !busy;
   const started = state.phase !== "idle";
+  const empty = !started && turns.length === 0 && history.length === 0;
+  const activeConnection = connections.find((c) => c.id === connectionId) ?? null;
 
-  async function submit(event: React.FormEvent) {
+  async function submit(event: { preventDefault: () => void }) {
     event.preventDefault();
     if (!canAsk) return;
     const asked = question.trim();
+    // Cleared before the await, so the composer empties the instant you send.
     setQuestion("");
     await ask({ connectionId, question: asked, threadId });
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl px-5 py-10 sm:px-8">
-          {!started ? (
-            <Opening connections={connections} />
-          ) : (
-            <article className="flex flex-col gap-7 bg-paper p-6 sm:p-8">
-              <h1 className="text-[1.5rem] leading-[1.3] font-normal text-ink">
-                {state.question}
-              </h1>
+    <div className="flex min-h-0 flex-1">
+      <aside className="hidden w-[248px] shrink-0 border-r border-line bg-surface lg:block">
+        <ThreadList threads={threads} activeId={threadId} />
+      </aside>
 
-              <RunTimeline state={state} />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-5 sm:px-6">
+          <ConnectionChip
+            connections={connections}
+            value={connectionId}
+            onChange={setConnectionId}
+            active={activeConnection}
+          />
 
-              {state.sql ? <SqlBlock sql={state.sql} /> : null}
-              {state.result ? <ResultTable result={state.result} /> : null}
+          {started && !busy ? (
+            <Button
+              variant="ghost"
+              onClick={reset}
+              className="ml-auto h-8 px-2.5 text-[0.8125rem] text-ink-muted hover:bg-surface-sunk hover:text-ink"
+            >
+              New question
+            </Button>
+          ) : null}
+        </header>
 
-              {state.answer ? (
-                <p className="max-w-[68ch] text-[1.0625rem] leading-[1.65] text-ink">
-                  {state.answer}
-                </p>
-              ) : null}
-
-              {state.error ? <RunErrorPanel error={state.error} /> : null}
-
-              {state.phase === "cancelled" ? (
-                <p className="text-[0.875rem] text-ink-muted">You stopped this run.</p>
-              ) : null}
-            </article>
-          )}
-        </div>
-      </div>
-
-      <div className="shrink-0 border-t border-rule-ground bg-ground">
-        <form onSubmit={submit} className="mx-auto w-full max-w-3xl px-5 py-4 sm:px-8">
-          <div className="flex flex-col gap-3">
-            <textarea
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit(e);
-              }}
-              rows={2}
-              disabled={connections.length === 0}
-              placeholder={
-                connections.length === 0
-                  ? "Add a connection before you can ask anything"
-                  : started
-                    ? "Ask a follow-up"
-                    : "Ask a question about your data"
-              }
-              aria-label="Your question"
-              className="w-full resize-none rounded-sm border border-rule-ground bg-ground-raised px-3 py-2.5 text-[0.9375rem] text-ground-ink placeholder:text-ground-muted focus-visible:outline-none disabled:opacity-60"
-            />
-
-            <div className="flex flex-wrap items-center gap-3">
-              {connections.length > 1 ? (
-                <select
-                  value={connectionId}
-                  onChange={(e) => setConnectionId(e.target.value)}
-                  aria-label="Data source"
-                  className="h-8 rounded-sm border border-rule-ground bg-ground-raised px-2 text-[0.8125rem] text-ground-ink"
-                >
-                  {connections.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              ) : connections.length === 1 ? (
-                <span className="font-mono text-[0.75rem] text-ground-muted">
-                  {connections[0].name}
-                </span>
-              ) : null}
-
-              <span className="ml-auto flex items-center gap-2">
-                {started && !busy ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={reset}
-                    className="h-8 px-2 text-[0.8125rem] text-ground-muted hover:bg-ground-raised hover:text-ground-ink"
-                  >
-                    New question
-                  </Button>
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-6">
+            {empty ? (
+              <Opening connections={connections} />
+            ) : (
+              <div className="flex flex-col gap-8">
+                {history.length > 0 ? (
+                  <section className="flex flex-col gap-5">
+                    <p className="text-[0.6875rem] font-semibold tracking-[0.08em] text-ink-faint uppercase">
+                      Earlier in this thread
+                    </p>
+                    {history.map((run) => (
+                      <TurnRow key={run.id} avatar={<UserAvatar initials={userInitials} />}>
+                        <PastTurn run={run} />
+                      </TurnRow>
+                    ))}
+                  </section>
                 ) : null}
 
-                {busy ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={cancel}
-                    className="h-8 px-3 text-[0.8125rem] text-ground-muted hover:bg-ground-raised hover:text-ground-ink"
-                  >
-                    Stop
-                  </Button>
-                ) : (
-                  <Button
+                {turns.map((turn, i) => (
+                  <Turn key={(turn.runId ?? "turn") + "-" + i} turn={turn} initials={userInitials} />
+                ))}
+
+                {started ? (
+                  <Turn turn={state} initials={userInitials} onCancel={cancel} live />
+                ) : null}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="shrink-0 px-5 pt-2 pb-5 sm:px-6">
+          <form onSubmit={submit} className="mx-auto w-full max-w-3xl">
+            <div className="rounded-xl border border-line bg-surface p-3 shadow-card focus-within:border-brand/40 focus-within:ring-2 focus-within:ring-brand/15">
+              <textarea
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void submit(event);
+                }}
+                rows={2}
+                disabled={connections.length === 0}
+                aria-label="Your question"
+                placeholder={
+                  connections.length === 0
+                    ? "Connect a database before asking anything"
+                    : started
+                      ? "Ask a follow-up"
+                      : "Ask a question about your data"
+                }
+                className="w-full resize-none border-0 bg-transparent px-1 py-1 text-[0.9375rem] text-ink placeholder:text-ink-faint focus-visible:outline-none disabled:opacity-60"
+              />
+
+              <div className="mt-2 flex items-center gap-3">
+                <p className="flex min-w-0 items-center gap-1.5 truncate text-[0.75rem] text-ink-muted">
+                  <ShieldCheck
+                    aria-hidden
+                    className="size-3.5 shrink-0 text-success"
+                    strokeWidth={2}
+                  />
+                  Read-only. It never writes to your database.
+                </p>
+
+                <span className="ml-auto flex shrink-0 items-center gap-3">
+                  <kbd className="hidden font-mono text-[0.6875rem] text-ink-faint sm:inline">
+                    Ctrl + Enter
+                  </kbd>
+                  <button
                     type="submit"
                     disabled={!canAsk}
-                    className="h-8 bg-paper px-4 text-[0.8125rem] text-ground hover:bg-paper/90"
+                    aria-label={busy ? "Running" : "Ask"}
+                    className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand text-brand-fg transition-colors hover:bg-brand-hover disabled:opacity-40 disabled:hover:bg-brand"
                   >
-                    Ask
-                  </Button>
-                )}
-              </span>
+                    {busy ? (
+                      <Loader2 aria-hidden className="size-4 animate-spin" />
+                    ) : (
+                      <ArrowUp aria-hidden className="size-4" strokeWidth={2.25} />
+                    )}
+                  </button>
+                </span>
+              </div>
             </div>
-          </div>
-        </form>
+          </form>
+        </div>
       </div>
     </div>
   );
 }
 
-/** The empty state. An invitation to act, and a route out when there is nothing to act on. */
+/** One question and everything the agent handed back for it. */
+function Turn({
+  turn,
+  initials,
+  onCancel,
+  live,
+}: {
+  turn: RunState;
+  initials: string;
+  onCancel?: () => void;
+  live?: boolean;
+}) {
+  // Ask before laying out: ResultChart returns null when the spec cannot be drawn honestly,
+  // and without this the table would sit half-width beside an empty column.
+  const plottable =
+    turn.chart !== null &&
+    turn.result !== null &&
+    buildChart(turn.chart, turn.result).kind !== "none";
+
+  return (
+    <div className="flex flex-col gap-6">
+      <TurnRow avatar={<UserAvatar initials={initials} />}>
+        <p className="text-[0.9375rem] leading-[1.6] font-medium text-ink">{turn.question}</p>
+      </TurnRow>
+
+      <TurnRow avatar={<AgentAvatar />}>
+        <div className="flex flex-col gap-5">
+          <RunTimeline state={turn} onCancel={live ? onCancel : undefined} />
+
+          {turn.sql ? <SqlBlock sql={turn.sql} /> : null}
+
+          {plottable && turn.chart && turn.result ? (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <div className="min-w-0">
+                <ResultChart spec={turn.chart} result={turn.result} />
+              </div>
+              <div className="min-w-0">
+                <ResultTable result={turn.result} />
+              </div>
+            </div>
+          ) : turn.result ? (
+            <ResultTable result={turn.result} />
+          ) : null}
+
+          {turn.answer ? (
+            <p className="max-w-[68ch] text-[0.9375rem] leading-[1.7] text-ink">{turn.answer}</p>
+          ) : null}
+
+          {turn.error ? <RunErrorPanel error={turn.error} /> : null}
+
+          {turn.phase === "cancelled" ? (
+            <p className="text-[0.875rem] text-ink-muted">You stopped this run.</p>
+          ) : null}
+        </div>
+      </TurnRow>
+    </div>
+  );
+}
+
+function TurnRow({ avatar, children }: { avatar: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3.5">
+      <div className="shrink-0 pt-0.5">{avatar}</div>
+      {/* min-w-0, or a wide result table stretches the whole transcript. */}
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+function UserAvatar({ initials }: { initials: string }) {
+  return (
+    <span
+      aria-hidden
+      className="flex size-7 items-center justify-center rounded-full bg-surface-sunk font-mono text-[0.625rem] font-medium text-ink-muted"
+    >
+      {initials}
+    </span>
+  );
+}
+
+/** A mark, not a monogram: this product has no logo and is not about to grow one here. */
+function AgentAvatar() {
+  return (
+    <span
+      aria-hidden
+      className="flex size-7 items-center justify-center rounded-full bg-brand-soft text-brand"
+    >
+      <Sparkles className="size-3.5" strokeWidth={2} />
+    </span>
+  );
+}
+
+/**
+ * The connection selector. Still a native select, laid transparently over a chip: no portal,
+ * no open state, and the platform's own picker and keyboard handling on every device.
+ */
+function ConnectionChip({
+  connections,
+  value,
+  onChange,
+  active,
+}: {
+  connections: Connection[];
+  value: string;
+  onChange: (id: string) => void;
+  active: Connection | null;
+}) {
+  if (connections.length === 0) {
+    return (
+      <Link
+        href="/connections"
+        className="inline-flex items-center gap-2 rounded-md border border-dashed border-line-strong px-2.5 py-1.5 text-[0.8125rem] text-ink-muted transition-colors hover:border-brand hover:text-brand"
+      >
+        <Database aria-hidden className="size-3.5" strokeWidth={1.75} />
+        Connect a database
+      </Link>
+    );
+  }
+
+  const many = connections.length > 1;
+
+  return (
+    <div
+      className={cn(
+        "relative inline-flex items-center gap-2 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[0.8125rem] text-ink",
+        many && "focus-within:ring-2 focus-within:ring-brand/25",
+      )}
+    >
+      <Database aria-hidden className="size-3.5 shrink-0 text-brand" strokeWidth={1.75} />
+      <span className="max-w-[14rem] truncate font-medium">{active?.name}</span>
+      {many ? (
+        <>
+          <ChevronDown aria-hidden className="size-3.5 shrink-0 text-ink-muted" strokeWidth={2} />
+          <select
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            aria-label="Data source"
+            className="absolute inset-0 size-full cursor-pointer appearance-none opacity-0"
+          >
+            {connections.map((connection) => (
+              <option key={connection.id} value={connection.id}>
+                {connection.name}
+              </option>
+            ))}
+          </select>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function Opening({ connections }: { connections: Connection[] }) {
   if (connections.length === 0) {
     return (
-      <div className="bg-paper p-8">
-        <h1 className="text-[1.5rem] font-normal text-ink">Connect a database first</h1>
-        <p className="mt-2 max-w-[52ch] text-[0.9375rem] leading-relaxed text-ink-muted">
-          Point this at a Postgres database and you can ask it questions in plain English. It
-          only ever reads.
+      <div className="py-16 text-center">
+        <h1 className="text-xl font-semibold tracking-tight text-ink">Connect a database first</h1>
+        <p className="mx-auto mt-2 max-w-[46ch] text-[0.9375rem] leading-relaxed text-ink-muted">
+          Point the agent at a Postgres database with a read-only role and you can start asking
+          questions of it in plain English.
         </p>
         <Link
           href="/connections"
-          className="mt-6 inline-block bg-ground px-4 py-2 text-[0.875rem] text-paper"
+          className="mt-6 inline-block rounded-md bg-brand px-4 py-2 text-[0.875rem] font-medium text-brand-fg transition-colors hover:bg-brand-hover"
         >
           Add a connection
         </Link>
@@ -179,11 +354,11 @@ function Opening({ connections }: { connections: Connection[] }) {
   }
 
   return (
-    <div className="bg-paper p-8">
-      <h1 className="text-[1.5rem] font-normal text-ink">Ask a question</h1>
-      <p className="mt-2 max-w-[54ch] text-[0.9375rem] leading-relaxed text-ink-muted">
-        Write it the way you would ask a colleague. You will see the SQL it wrote, the rows it
-        returned, and what it makes of them.
+    <div className="py-16 text-center">
+      <h1 className="text-xl font-semibold tracking-tight text-ink">Ask a question</h1>
+      <p className="mx-auto mt-2 max-w-[46ch] text-[0.9375rem] leading-relaxed text-ink-muted">
+        In plain English. The agent writes the SQL, checks it, runs it read-only, and shows you
+        both the query and the rows it came back with.
       </p>
     </div>
   );
