@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, PostgresDsn, SecretStr
+from pydantic import Field, PostgresDsn, RedisDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,7 +31,37 @@ class Settings(BaseSettings):
     max_tool_calls: int = 6
 
     session_store_dir: str = "./sessions"
+    file_store_dir: str = "./uploads"
+    # Bounds resident memory per concurrent run, because an upload is materialised in full.
+    max_upload_bytes: int = 25 * 1024 * 1024
     playwright_headless: bool = True
+    # Which of a dashboard's XHR responses carries the data. Narrow it as far as the site
+    # allows: every matching body is read, and a wider match can pick up an auth response.
+    web_data_url_match: str = "/api/"
+    # The Intellicar dashboard pulls in Google Maps, Firebase and reCAPTCHA before it is
+    # interactive, and gets slower under repeated sign-ins. 30s was not enough.
+    web_nav_timeout_ms: int = 60_000
+    # How long to wait for the dashboard's own data call, which only starts after its
+    # scripts boot. Waiting is polled, so a fast dashboard does not pay the whole budget.
+    web_data_timeout_ms: int = 25_000
+    web_settle_ms: int = 1_500
+
+    # 127.0.0.1, not localhost: Memurai binds IPv4 only, while `localhost` resolves to ::1
+    # first on Windows, so the client spends its whole connect timeout on IPv6 and fails.
+    redis_url: RedisDsn = RedisDsn("redis://127.0.0.1:6379/0")
+    # Off by default so local development and the test suite need no Redis at all.
+    queue_enabled: bool = False
+    run_timeout_s: int = 180
+    run_heartbeat_s: float = 2.0
+    # How long the reader waits with no entry at all before calling the worker dead.
+    run_stall_timeout_s: float = 15.0
+    run_stream_ttl_s: int = 900
+    # Not arq's default of 10: each job holds an App DB session, a checkpoint connection and a
+    # customer DB connection, against a pool of 5 plus 10 overflow.
+    worker_max_jobs: int = 4
+
+    max_runs_per_minute: int = 10
+    max_concurrent_runs: int = 3
 
     langsmith_tracing: bool = False
     langsmith_api_key: SecretStr | None = None

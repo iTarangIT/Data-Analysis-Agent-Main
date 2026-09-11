@@ -4,19 +4,33 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import routes_connections, routes_health, routes_runs
+from app import queue
+from app.api import routes_connections, routes_health, routes_runs, routes_usage
 from app.config import get_settings
+from app.db.session import SessionLocal
 from app.llm import configure_tracing
 from app.logging import configure_logging, log
 from app.services.errors import DomainError
+from app.services.runs import reap_stale_runs
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
     configure_tracing()
-    log.info("startup", env=get_settings().env)
+    s = get_settings()
+    if s.queue_enabled:
+        # Fail the boot rather than the first question if Redis is not running.
+        await queue.connect()
+    db = SessionLocal()
+    try:
+        # Covers a process killed mid-run, which no in-process teardown can reach.
+        reap_stale_runs(db)
+    finally:
+        db.close()
+    log.info("startup", env=s.env, queue=s.queue_enabled)
     yield
+    await queue.close()
     log.info("shutdown")
 
 
@@ -36,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_health.router)
     app.include_router(routes_connections.router, prefix="/connections", tags=["connections"])
     app.include_router(routes_runs.router, prefix="/runs", tags=["runs"])
+    app.include_router(routes_usage.router, prefix="/usage", tags=["usage"])
     return app
 
 

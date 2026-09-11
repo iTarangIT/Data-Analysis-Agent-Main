@@ -1,0 +1,40 @@
+# Golden questions for a file source, run against evals/fixtures/sales.csv.
+#
+#   $env:CONN="<a file connection id>"
+#   python evals/run_evals.py --cases golden_file.yaml       # live
+#   python evals/recorded.py --replay --cases golden_file.yaml
+#
+# Register the connection first by uploading the fixture:
+#   curl -X POST localhost:8000/connections/file -H "Authorization: Bearer $env:TOKEN" `
+#        -F name="sales" -F file=@evals/fixtures/sales.csv
+#
+# The fixture is committed and deliberately tie-free: every superlative below has one winner
+# with a clear margin, so a model that answers correctly is never marked wrong. West leads
+# revenue with 12,100 against East's 8,550; Cell leads products with 16,500 against Pack's 9,450.
+
+- q: What is the total revenue in this file?
+  expect_value: 28200
+
+- q: How many orders came from the West region?
+  expect_value: 5
+
+- q: Which product earned the most revenue?
+  expect_contains: Cell
+
+- q: Show revenue by month.
+  expect_type: rows
+  expect_chart: line
+
+- q: What is the revenue for each region?
+  expect_type: rows
+  expect_chart: bar
+
+- q: What is the average number of units per order?
+  expect_type: number
+
+# The empty-result path, which the prompt explicitly instructs on. Asserted on the answer, not
+# on the rows: a model that finds nothing legitimately runs a second query to see what regions
+# do exist, so the last `rows` event holds those region names rather than a count. Asserting
+# `expect_type: number` here failed an answer that was completely correct.
+- q: How many orders came from Antarctica?
+  expect_contains: Antarctica

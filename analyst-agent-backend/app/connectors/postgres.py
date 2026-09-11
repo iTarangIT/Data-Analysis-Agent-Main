@@ -15,6 +15,7 @@ class PostgresConnector:
     """
 
     kind = "postgres"
+    dialect = "postgres"
 
     def __init__(self, dsn: str):
         s = get_settings()

@@ -8,10 +8,10 @@ Source of truth for the active phase. Phase N+1 does not begin until phase N's l
 | 0 | repos, Compose, stub graph, SSE endpoint | `curl -N /runs` streams a stub, trace in LangSmith | **done**, tracing dormant | 2026-09-10 |
 | 1 | SQL tool on our own IoT DB, guard, evals | `evals/run_evals.py` >= 25/30 | code complete, **gate paused** | 2026-09-10 |
 | 2 | JWT auth, vault, `/connections`, then frontend Part B | second person connects a DB without help | not started | — |
-| 3 | web tool (Playwright) | Intellicar live query works for two tenants with separate sessions | not started | — |
-| 4 | Redis workers, limits, usage, Docker deploy | killing a worker mid-run gives a clean `error` event | not started | — |
-| 5 | file tool (DuckDB), charts | spreadsheet-only customer gets value | not started | — |
-| 6 | billing | paid plan sets `daily_token_budget` | not started | — |
+| 3 | web tool (Playwright) | Intellicar live query works for two tenants with separate sessions | **done**, verified live | 2026-09-11 |
+| 4 | Redis workers, limits, usage, ~~Docker deploy~~ | killing a worker mid-run gives a clean `error` event | **done**, verified live, Docker cut | 2026-09-11 |
+| 5 | file tool (DuckDB), charts | spreadsheet-only customer gets value | **done** | 2026-09-10 |
+| 6 | billing | paid plan sets `daily_token_budget` | deferred by decision | — |
 
 ## Verified
 
@@ -87,14 +87,45 @@ Apoorv chose to fix the IoT data pipeline before writing the 30 golden cases, ra
 scope them to the four usable tables. The agent code is complete and tested; only the eval
 gate waits. It can resume once telemetry is backfilled and the empty tables are populated.
 
-### Outstanding obligation under hard rule 6
+### Outstanding obligation under hard rule 6, corrected 2026-09-10
 
-`SQL_SYSTEM` in `app/agent/prompts.py` gained guidance about statement timeouts, time-range
-constraints, rollup tables and entity-first indexes, written tenant-neutrally because that file
-serves every customer. Hard rule 6 requires evals to be run and a before/after pass rate
-reported for any prompt change. **That has not been done**, because no `OPENROUTER_API_KEY` is
-configured and the gate is paused. Run the evals and record both rates before this prompt
-change is considered merged.
+This entry named `SQL_SYSTEM` and asked for a before/after pass rate on the statement-timeout
+and rollup guidance. Two things about it were wrong, and a third makes the measurement it asks
+for worthless where it can actually be run.
+
+1. **The symbol is gone.** `SQL_SYSTEM` was deleted with the five-node graph in `8ac6e69`. The
+   guidance now lives in the "Writing SQL" block of `AGENT_SYSTEM`, the only prompt left.
+2. **There is no "before" in git.** `git log -- app/agent/prompts.py` has three commits, and the
+   timeout and rollup lines are already present in the first of them, `c6fc6a0`. The only
+   pre-change text is the manual's §7.2, which belongs to an architecture that no longer exists.
+   There is no like-for-like earlier prompt to record.
+3. **An A/B on `demo` would measure nothing.** The guidance says a query that scans a whole
+   table will be killed, so prefer a rollup. The largest table in the demo fixture is
+   `telemetry` at 240 rows. Nothing there can time out, so the instruction is inert and the
+   result would read 4/4 against 4/4. Publishing that would satisfy the rule on paper while
+   proving nothing, and would close an item that is not closed.
+
+The guidance is about an 8s timeout against 45.9M rows with only a `(vehicleno, time)` index.
+It can only be evaluated against the IoT database, which is exactly what the phase 1 gate is
+paused on.
+
+**The obligation stands and is now scheduled rather than blocked.** `evals/recorded.py` makes
+the eventual A/B two commands: record a cassette with the timeout bullet removed, record another
+with it present, replay both. Until the telemetry backfill lands there is nothing honest to
+report, and this entry stays open.
+
+## Phases 3 to 5 begin with phases 1 and 2 still open, by decision
+
+`DEVELOPMENT.md` §2 and the table at the top of this file both say phase N+1 does not begin
+until phase N's line reads done. Apoorv asked for the remaining backend anyway, and confirmed
+after the conflict was raised under §9. Recorded here rather than left implicit.
+
+What is actually outstanding in the two open phases is not backend code. Phase 1 waits on the
+IoT data, and phase 2's done-line, "second person connects a DB without help", is a frontend
+milestone: the backend half of phase 2, tenant JWTs, the vault and `/connections`, shipped in
+phase 0 and 1 commits. `analyst-web` does not exist yet.
+
+Phase 6, billing, is deferred. Docker is cut from phase 4; see that phase's section.
 
 ## The agent: create_agent, per the LangChain v1 documentation
 
@@ -205,12 +236,22 @@ the 30 IoT cases.
 
 ## Open checks
 
-| # | Blocked on | Unblocks |
-|---|---|---|
-| 1 | `OPENROUTER_API_KEY` | every model call: the SQL path, the 2 skipped tests, the eval gate |
-| 2 | `analyst_ro` on `itarang` | registering the IoT connection at all |
-| 3 | `LANGSMITH_API_KEY` | the "trace in LangSmith" half of phase 0's done-line |
-| 4 | items 1 and 2 | writing the 30 golden cases against the real schema |
+Items 1 and 2 below were closed on 2026-09-10 and are kept for the record.
+
+| # | Blocked on | Unblocks | State |
+|---|---|---|---|
+| 1 | ~~`OPENROUTER_API_KEY`~~ `GEMINI_API_KEY` | every model call | **closed**, key configured |
+| 2 | `analyst_ro` on `itarang` | registering the IoT connection | **closed**, role created |
+| 3 | `LANGSMITH_API_KEY` | the "trace in LangSmith" half of phase 0's done-line | open |
+| 4 | the telemetry backfill | writing the 30 golden cases against real data | open |
+
+Item 4 was "blocked on items 1 and 2". Both are closed and it is still blocked, because the
+real obstacle was never the key or the role: 7 of the 15 IoT tables are empty and the telemetry
+pipeline stopped in early July. Cases written against that today would encode the outage.
+
+The **20 requests per day per model** free-tier limit no longer blocks the harness itself.
+`evals/recorded.py` records once and replays offline, so everything downstream of the model is
+gated for free. It does not gate a prompt change; see the hard rule 6 entry above.
 
 ### 4. The IoT eval target
 
@@ -254,3 +295,214 @@ Two manual simplifications are kept and flagged rather than fixed. `graph.stream
 inside an async generator and holds the event loop for the length of a run; it moves to an `arq`
 worker in phase 4. And `answer` emits one `token` event carrying the whole answer rather than
 per-chunk streaming, which the frozen SSE contract permits.
+
+## Phases 3 to 5, built 2026-09-10
+
+265 tests pass, 6 skip (2 need a model key, 4 need Intellicar). Lint clean. Coverage 91% overall
+against a 70% floor; `sql_guard.py` and `app/security/` are both at 100% against an 85% floor.
+
+Evals were run at every step that touched the guard or a prompt: 4/4 before and 4/4 after, every
+time, replayed from a cassette with no drift reported. A new seven-case file suite records and
+replays 7/7.
+
+### Phase 3, the web tool: done, verified live on 2026-09-11
+
+`kind="web"` was accepted by the API from phase 2 but `connector_for` raised for it, so a web
+connection could be created and then failed as a 500 on the first run. That is closed.
+
+**The done-line passes against the real dashboard.** Two tenants, two session files in two
+tenant directories, six cookies each, byte-different from one another, and neither containing
+the plaintext password. Byte-different is the part that matters: it is what distinguishes two
+independent sessions from one shared cookie jar copied twice.
+
+To re-run it, export the four variables and run that one file. `MSYS_NO_PATHCONV=1` matters in
+Git Bash, which otherwise rewrites the leading slash of the match string into a Windows path and
+produces a confusing "no dashboard data matched 'C:/Program Files/Git/api/...'":
+
+```bash
+export MSYS_NO_PATHCONV=1 PLAYWRIGHT_BROWSERS_PATH="D:\ms-playwright"
+export INTELLICAR_URL=... INTELLICAR_ID=... INTELLICAR_PASSWORD=...
+export INTELLICAR_DATA_MATCH=/api/group/listevgroups
+pytest tests/integration/test_web_runs.py
+```
+
+It drives a scripted model, so the check costs no model quota; only the dashboard has to be real.
+
+**The sign-in was a guess, and the guess was wrong in every particular.** The original code
+filled a username and password on the page. The real dashboard has no inline form: it has one
+button, which opens a popup to a separate single sign-on host, which asks for an identifier,
+then for a password on a second screen, then closes itself.
+
+The closing is the mechanism, not a detail. The popup hands a token back to the window that
+opened it, so driving the sign-in URL directly mints a valid token that nothing consumes. The
+popup must be opened from the dashboard. A rejected credential leaves it open, which is exactly
+how the two failure paths are told apart.
+
+The old code could never have worked, and the tests passed anyway, because the fake driver
+modelled the guess rather than the site. That is the lesson worth keeping from this phase: a
+fake built from an assumption tests the assumption.
+
+**A race only visible against the real site.** After the token goes back, the dashboard reloads
+itself. Issuing a reload at that same moment killed it with `ERR_ABORTED`. The code now waits for
+the dashboard's own reload and navigates only if none arrives.
+
+**Two timeouts were guesses too.** Navigation was 30s against a page that loads Google Maps,
+Firebase and reCAPTCHA before it is interactive, and it timed out repeatedly; it is 60s. Waiting
+for data was a fixed 1.5s sleep, too short here and wasteful on a fast dashboard, so it polls up
+to `WEB_DATA_TIMEOUT_MS` and stops the moment the data lands.
+
+**The dashboard slows under repeated sign-ins.** Running the whole file back to back, the first
+test fails on a navigation timeout while the rest pass, and it recovers after a few minutes'
+pause. Production does not behave like this: the tests wipe the session store before each test
+and so force a fresh login every time, which is the worst case by construction. A real tenant
+signs in once and reuses the session until it expires. Re-run the file on its own, not in a loop.
+
+**`INTELLICAR_DATA_MATCH` must name one endpoint.** The dashboard calls about ten. The vehicle
+groups are at `/api/group/listevgroups`; a broad `/api/` match captures whichever happens to land
+last, which is not stable across loads. Every Intellicar endpoint returns
+`{"status", "data": [...], "err", "msg"}`, which the existing unwrapping already handled.
+
+The manual's 7.7 builds a graph node for the five-node architecture that no longer exists, so the
+capability is a `@tool` like every other one. It takes no arguments: a dashboard has one payload
+and no query language.
+
+**Playwright's sync API refuses to start on a thread that has a running event loop**, and the
+tool is called from inside `agent.stream`, which runs on one. So the browser runs on a worker
+thread, with the contextvars context copied across so its log lines keep `tenant_id` and
+`run_id`. A test calls the fetch from inside a running loop and fails without the hop. This
+survives the queue, because arq is asyncio too.
+
+`prepare_run` is async now and refreshes the schema through `asyncio.to_thread`.
+
+A web connection is deliberately not smoke-tested at creation: a browser launch would make that
+the most expensive endpoint in the service, and a wrong password still surfaces as a real 400
+from the first run, because `prepare_run` happens before the stream opens.
+
+### Phase 4, the queue: done, minus Docker
+
+Apoorv cut deployment. There is no Dockerfile, no production compose file, no Caddyfile and no
+container CI, and none is planned until there is a VPS. `docker-compose.dev.yml` is untouched.
+Manual section 9 is unimplemented; when it returns, the line that matters most is
+`flush_interval -1` in the Caddyfile, without which Caddy buffers the SSE stream and the chat UI
+shows nothing until a run ends.
+
+**The done-line passes against a real worker**, as of 2026-09-11. Memurai Developer 4.1.2 is
+installed and the check is one command:
+
+```powershell
+python scripts/check_killed_worker.py
+```
+
+It starts a real uvicorn and a real arq worker, opens the SSE stream, kills the worker mid-run,
+and asserts the stream ends with exactly one `error` event and the run row is not left
+`running`. Twice in a row: frames already published still arrive, then
+`error: the run stopped responding`, and the row reads `error` / `worker lost`.
+
+**Running this for the first time found the queue path completely broken against real Redis**,
+which is recorded under the bugs below. It is the single strongest argument in this project for
+doing the manual end-to-end checks rather than trusting a green suite.
+
+**Ctrl-C will not do**, and this is a trap worth remembering: `loop.add_signal_handler` is
+unsupported on Windows, so arq registers no handler and its shutdown waits for the running task.
+Ctrl-C would let the run finish and the check would falsely pass. The script kills by pid.
+
+**Two ways the check can pass without testing anything**, both learned the hard way and both
+guarded in the script. A single-tool question finishes in under two seconds, faster than a kill
+can land, so the question is heavy enough to need several tool calls. And looking the worker up
+with PowerShell costs the better part of a second, so it is killed by tracked pid instead.
+
+**Memurai installs only outside winget.** `winget install Memurai.MemuraiDeveloper` fails with
+MSI 1603, `SFXCA: Failed to create temp directory. Error code 5`, despite running elevated.
+Downloading the MSI and running `msiexec /i` directly succeeds.
+
+**The synchronous-stream deviation is resolved.** `agent.stream` no longer holds the event loop;
+`execute_run` runs under `asyncio.to_thread` in both modes. That is true with the queue off as
+well, so client disconnects are now observed and keep-alive pings fire. The fix is the threading,
+not the queue.
+
+One `sse_frame` builds both the Redis stream entry and the SSE frame, so the two transports
+cannot drift into producing different bytes.
+
+### Phase 5, files and charts: done
+
+Uploads become Parquet at ingest, so the Excel extension is never needed and CSV type sniffing
+happens once rather than per run. The connector materialises every source as a real table and
+*then* sets `enable_external_access=false` and `lock_configuration=true`. Verified against duckdb
+1.5.5: after that, `read_csv_auto`, `read_parquet`, `read_text`, `read_blob`, `ATTACH` of a file,
+`INSTALL` and `COPY ... TO` all raise, and the flag cannot be turned back on.
+
+`kind="file"` is deliberately **not** accepted on `POST /connections`. A client-supplied path
+would be an arbitrary-file-read primitive that no SQL guard could catch, because the path is
+inside the connector long before any SQL exists. Uploads go to `POST /connections/file`, where
+the server mints every path.
+
+Charts are inferred in code, not asked of the model. Section 16.2 put this in `answer_node`,
+which no longer exists, but its trigger was already deterministic. A model call would have cost
+half again as many requests against a 20-per-day quota and made charts impossible to gate offline.
+
+## Deviations from the manual, recorded deliberately (continued)
+
+8. **There is no `Usage` table.** Section 5.2 defines only Tenant, Connection and Run and says Run
+   is the ledger to price from; `Usage` survives only in a stale directory-tree comment.
+9. **`GET /usage` lives in the agent, not analyst-web.** The ownership table says the web app
+   reads `runs` aggregates itself, but `runs` is in the agent's App DB, not Supabase. The Next.js
+   route will proxy it. `pnpm gen:agent` must be re-run against this surface: it gained
+   `/usage`, `/runs/{id}` and `/connections/file`.
+10. **Rate limiting is DB-backed, not Redis-backed,** so it behaves identically with the queue
+    off. It costs nothing extra: it is a filter clause on the scan the budget check already did.
+11. **No `app/agent/nodes/web_tool.py`.** Section 7.7 targets the deleted five-node graph.
+12. **The SSE contract gained `chart`** before `analyst-web` existed, so there was no second repo
+    to update in the same PR. Additive, no new stage, both doc tables updated.
+
+## Bugs found and fixed while doing this
+
+1. **Token accounting was keyed on the configured model name** while `langchain-google-genai`
+   reports the resolved one. Any alias or dated variant recorded zero, and `daily_token_budget`
+   is enforced from exactly that number, so **the budget was unenforceable** whenever the two
+   differed. Tokens are now summed across every reported model, and the reported id is stored.
+2. **A disconnected client left its run `running` for ever.** `GeneratorExit` is a
+   `BaseException`, so `except Exception` never saw it. Both transports now abandon the run on
+   teardown, and a reaper sweeps what a killed process leaves behind. That reaper is
+   load-bearing: `max_concurrent_runs` counts running rows.
+3. **The guard's rejection for a table function said `tables not allowed: ['']`**, which told the
+   model nothing, so it reissued the same query until the tool budget ran out.
+4. **Every queued run reported a dead worker**, found the moment Memurai was installed and phase
+   4's done-line run for the first time. arq builds its pool with `decode_responses=False` and
+   has to, because its own job payloads are pickled bytes. So frames came back bytes-keyed, the
+   consumer's `"event" not in fields` test skipped all of them, the stall clock ran out, and a
+   run the worker had answered correctly in under two seconds was reported to the customer as a
+   worker that died. Silent by construction: nothing raises, frames are just dropped.
+
+   Both fakes were built `decode_responses=True`, so eighteen tests passed against a Redis that
+   behaved as the code assumed. They are `False` now; reverting the fix fails seven of them.
+   Same shape as phase 3's login fake. **A fake built from an assumption tests the assumption**,
+   and that sentence has now cost this project two live bugs.
+5. **The shipped `REDIS_URL` default could not work on Windows.** Memurai binds IPv4 only and
+   `localhost` resolves to `::1` first, so the client spent its whole connect timeout on IPv6.
+   The default is `127.0.0.1` now. `memurai-cli ping` answers normally throughout, which makes
+   this present as an application bug rather than a name-resolution one.
+
+## Known limits and open checks
+
+| # | Item | Blocked on |
+|---|---|---|
+| 1 | `LANGSMITH_API_KEY` | the tracing half of phase 0's done-line |
+| 2 | The 30 IoT golden cases | the telemetry backfill, unchanged |
+| 3 | The hard rule 6 A/B on the IoT prompt | item 2; the harness makes it two commands |
+
+Other things worth knowing rather than fixing:
+
+- **C: has no free space**, which this work did not cause. It broke the Chromium install at 80%
+  with `ENOSPC` and later broke writing a log file. Chromium therefore lives under
+  `D:\ms-playwright`, and `PLAYWRIGHT_BROWSERS_PATH` must point there. Anything that stages
+  through the temp directory needs `TEMP` on D: too.
+- **`secret_enc` appears in `/openapi.json`**, which fails the manual's 9.6 grep. It is only the
+  word, inside `ConnectionOut`'s docstring explaining that the model has no secret field; the
+  schema has exactly four properties and none is derived from a credential. Pre-existing.
+- **DuckDB sniffs a decimal CSV column as DOUBLE**, so it crosses the wire as a JSON number,
+  where a Postgres NUMERIC becomes a Decimal and crosses as an exact string. For a spreadsheet of
+  money that is a precision question worth revisiting.
+- **An eval suite trips the new rate limit.** That is the limit working; raise
+  `MAX_RUNS_PER_MINUTE` for a suite run.
+- **Aborting a queued run cannot interrupt the thread it runs on**, so an in-flight model call
+  finishes in the background. Its result is discarded by the guarded update.

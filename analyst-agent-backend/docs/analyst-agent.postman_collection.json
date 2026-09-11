@@ -16,6 +16,11 @@
     {
       "key": "connectionId",
       "value": "2b2c9f03-7036-4a68-b3d4-b90e3dd81d53"
+    },
+    {
+      "key": "runId",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -86,6 +91,44 @@
           ]
         },
         "description": "Only this tenant's connections. Another tenant's token returns an empty list."
+      }
+    },
+    {
+      "name": "Upload a spreadsheet",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "name",
+              "value": "sales",
+              "type": "text"
+            },
+            {
+              "key": "file",
+              "type": "file",
+              "src": "evals/fixtures/sales.csv"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/connections/file",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "connections",
+            "file"
+          ]
+        },
+        "description": "Register a CSV, TSV or XLSX as a connection. The file is converted to Parquet at ingest and stored under this tenant's directory; the server mints every path, which is why `kind: file` is not accepted on POST /connections. Returns 201 and a connection id you can ask questions against."
       }
     },
     {
@@ -202,6 +245,57 @@
           "mode": "raw",
           "raw": "{\n  \"connection_id\": \"does-not-exist\",\n  \"thread_id\": \"postman-x\",\n  \"question\": \"test this\"\n}"
         }
+      }
+    },
+    {
+      "name": "Read a run",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/runs/{{runId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "runs",
+            "{{runId}}"
+          ]
+        },
+        "description": "The outcome of a run, for a client that lost the stream. Returns 404 for another tenant's run, so existence does not leak. Set runId from a `done` event."
+      }
+    },
+    {
+      "name": "Usage",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/usage?days=30",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "usage"
+          ],
+          "query": [
+            {
+              "key": "days",
+              "value": "30"
+            }
+          ]
+        },
+        "description": "Per-day totals for this tenant, plus tokens_last_24h. The budget is enforced over a rolling 24 hours, so that field is the one an exhausted budget refers to, not the calendar day buckets."
       }
     }
   ]

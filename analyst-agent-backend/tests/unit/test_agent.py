@@ -29,14 +29,16 @@ class FakeToolModel(FakeMessagesListChatModel):
 
 class FakeConnector:
     kind = "postgres"
+    dialect = "postgres"
 
     def __init__(self, rows=(("KA01",), ("KA02",))):
         self.rows = [tuple(r) for r in rows]
+        self.columns = ["vehicleno"]
         self.executed: list[str] = []
 
     def run_select(self, sql, max_rows):
         self.executed.append(sql)
-        return ["vehicleno"], self.rows[:max_rows]
+        return self.columns, self.rows[:max_rows]
 
     def describe_schema(self):
         return SCHEMA
@@ -186,3 +188,143 @@ class TestContentBlocks:
         model = FakeToolModel(responses=[AIMessage(content="Plain string.")])
         events, _ = _run(model, FakeConnector())
         assert next(e for e in events if e["type"] == "token")["data"]["text"] == "Plain string."
+
+
+WEB_SCHEMA = {
+    "tables": [
+        {
+            "name": "dashboard",
+            "columns": [{"name": "vehicleno", "type": "str"}, {"name": "soc", "type": "int"}],
+            "sample": [],
+        }
+    ]
+}
+
+
+class FakeDashboard:
+    kind = "web"
+
+    def fetch_rows(self, max_rows):
+        return ["vehicleno", "soc"], [("KA01", 82), ("KA02", 61)][:max_rows]
+
+    def describe_schema(self):
+        return WEB_SCHEMA
+
+
+def _run_web(model, connector):
+    outcome = RunOutcome()
+    translator = EventTranslator(outcome)
+    events = []
+    with patch("app.agent.graph.get_llm", return_value=model):
+        agent = build_agent(connector, WEB_SCHEMA)
+        for chunk in agent.stream(
+            {"messages": [("user", "what does the dashboard show")]},
+            config={"recursion_limit": recursion_limit()},
+            stream_mode="updates",
+        ):
+            for node, update in chunk.items():
+                for msg in (update or {}).get("messages", []):
+                    events.extend(translator.for_message(node, msg))
+    return events, outcome
+
+
+class TestWebPath:
+    @pytest.fixture
+    def result(self):
+        model = FakeToolModel(
+            responses=[
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "fetch_dashboard", "args": {}, "id": "w1"}],
+                ),
+                AIMessage(content="Two vehicles are shown."),
+            ]
+        )
+        return _run_web(model, FakeDashboard())
+
+    def test_it_reports_the_web_tool_stage(self, result):
+        events, _ = result
+        assert _stages(events) == ["router", "web_tool", "answer"]
+
+    def test_the_stage_is_announced_before_the_browser_runs(self, result):
+        events, _ = result
+        # web_tool precedes rows, so the client is not left on `router` for the whole fetch.
+        types = [e["type"] for e in events]
+        assert types == ["status", "status", "rows", "chart", "status", "token"]
+
+    def test_no_sql_is_ever_reported_for_a_dashboard(self, result):
+        events, outcome = result
+        assert "sql" not in [e["type"] for e in events]
+        assert outcome.sql is None
+
+    def test_the_rows_reach_the_client(self, result):
+        events, outcome = result
+        rows = next(e for e in events if e["type"] == "rows")["data"]
+        assert rows["columns"] == ["vehicleno", "soc"]
+        assert rows["rows"] == [["KA01", 82], ["KA02", 61]]
+        assert outcome.tool == "web"
+
+    def test_a_browser_failure_still_ends_in_an_answer(self):
+        class Broken(FakeDashboard):
+            def fetch_rows(self, max_rows):
+                raise RuntimeError("login timed out")
+
+        model = FakeToolModel(
+            responses=[
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "fetch_dashboard", "args": {}, "id": "w1"}],
+                ),
+                AIMessage(content="The dashboard could not be read."),
+            ]
+        )
+        events, outcome = _run_web(model, Broken())
+
+        assert _stages(events) == ["router", "web_tool", "answer"]
+        assert "rows" not in [e["type"] for e in events]
+        assert outcome.answer == "The dashboard could not be read."
+
+
+class TestChartEvent:
+    """`chart` is a payload, not a stage. Adding a stage would break the frozen sequence and put
+    a second copy of the decision into the web client's state machine."""
+
+    def _chartable(self):
+        model = FakeToolModel(
+            responses=[
+                _tool_call("select vehicleno, soc from vehicles"),
+                AIMessage(content="West leads."),
+            ]
+        )
+        connector = FakeConnector(rows=(("KA01", 82), ("KA02", 61)))
+        connector.columns = ["vehicleno", "soc"]
+        return _run(model, connector)
+
+    def test_a_chartable_result_emits_a_chart_after_the_rows(self):
+        events, outcome = self._chartable()
+        types = [e["type"] for e in events]
+
+        assert types.index("chart") == types.index("rows") + 1
+        assert outcome.chart == {"type": "bar", "x": "vehicleno", "y": ["soc"]}
+
+    def test_the_stage_sequence_is_unchanged(self):
+        events, _ = self._chartable()
+
+        assert _stages(events) == ["router", "sql_gen", "sql_guard", "db_exec", "answer"]
+
+    def test_a_result_with_nothing_to_plot_emits_no_chart(self):
+        model = FakeToolModel(
+            responses=[_tool_call("select vehicleno from vehicles"), AIMessage(content="Two.")]
+        )
+        events, outcome = _run(model, FakeConnector())
+
+        assert "chart" not in [e["type"] for e in events]
+        assert outcome.chart is None
+
+    def test_a_refused_query_emits_no_chart(self):
+        model = FakeToolModel(
+            responses=[_tool_call("delete from vehicles"), AIMessage(content="No.")]
+        )
+        events, _ = _run(model, FakeConnector())
+
+        assert "chart" not in [e["type"] for e in events]

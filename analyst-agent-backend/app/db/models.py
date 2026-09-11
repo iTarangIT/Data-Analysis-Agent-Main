@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -48,9 +48,12 @@ class Run(Base):
     """One question answered for one tenant. Doubles as the usage ledger we price from."""
 
     __tablename__ = "runs"
+    # Every read of this table is "one tenant, recent rows": the budget check, the rate limits
+    # and the usage rollup. On tenant_id alone they scan the tenant's whole history.
+    __table_args__ = (Index("ix_runs_tenant_created", "tenant_id", "created_at"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"))
     connection_id: Mapped[str] = mapped_column(ForeignKey("connections.id"))
     thread_id: Mapped[str] = mapped_column(String(100), index=True)
     question: Mapped[str] = mapped_column(Text)
@@ -58,8 +61,12 @@ class Run(Base):
     tool: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sql: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The model the provider actually resolved, which is not always the one configured.
+    model: Mapped[str | None] = mapped_column(String(60), nullable=True)
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     rows_returned: Mapped[int] = mapped_column(Integer, default=0)
+    # So a past run can be re-rendered without re-running the customer's query.
+    chart: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

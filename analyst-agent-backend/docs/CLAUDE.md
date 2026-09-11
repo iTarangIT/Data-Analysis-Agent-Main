@@ -17,9 +17,9 @@ Extraction is lossy — it inserts a space after capitals (`Any` becomes `A ny`,
 
 ## Current state of the workspace
 
-Nothing is scaffolded. The repo holds only `DEVELOPMENT.md`, the PDF, an empty `docs/`, and this file. No commits on `main`. Neither `analyst-agent/` nor `analyst-web/` exists — creating them is phase 0.
+`analyst-agent/` is built through phase 5: three connector kinds (Postgres, a web dashboard, an uploaded file), the guard, the SSE contract, an arq worker behind a flag, per-tenant limits and usage, and an offline eval harness. `analyst-web/` does not exist yet, which is what phase 2 is still waiting on.
 
-`DEVELOPMENT.md` references three paths that do not exist: `docs/manual.md`, `docs/STATUS.md`, and `docs/analyst_saas_implementation_manual.pdf` (the PDF is at the repo root). Create `docs/STATUS.md` before starting work — it is the source of truth for the active phase, and phase N+1 must not begin until phase N's "done" line is true.
+`docs/STATUS.md` is the source of truth for the active phase. Phase N+1 must not begin until phase N's "done" line is true; phases 3 to 5 were built with 1 and 2 still open, on Apoorv's decision, and that deviation is recorded there.
 
 ## What we are building
 
@@ -35,10 +35,9 @@ Next.js (analyst-web) -- App Postgres (users, tenants, usage)
       |  HTTP + SSE   (OpenAPI contract, Bearer JWT carrying tenant_id)
       v
 analyst-agent (Python 3.12, FastAPI, LangGraph)
-      router -> sql_gen -> sql_guard -> db_exec -> answer
-                  ^           |  err     |  err
-                  +-----------+----------+   (retry, max_sql_retries=2)
-      router -> web_tool (Playwright) -> answer
+      create_agent:  model <--> tools   (loop until the model stops calling tools)
+                       query_database  -> sql_guard -> Postgres or DuckDB (read-only)
+                       fetch_dashboard -> Playwright, one session per tenant
       credential vault (Fernet, per tenant) | Postgres checkpointer | LangSmith
       |                    |                    |
       v                    v                    v
@@ -74,10 +73,40 @@ pytest -m "not integration"                      # fast, no DB
 pytest -m integration                            # needs the three local databases
 pytest tests/unit/test_sql_guard.py::test_name   # single test
 ruff check app tests; ruff format app tests
-$env:TOKEN="..."; $env:CONN="..."; python evals/run_evals.py   # >= 80% or the phase is not done
+$env:TOKEN="..."; $env:CONN="..."; python evals/run_evals.py   # live gate, >= 80% or not done
+python evals/recorded.py --record --only 0-9    # capture the model; the free tier is 20/day
+python evals/recorded.py --replay               # rerun the suite offline, no API calls
+$env:MAX_RUNS_PER_MINUTE="100"                  # a suite trips the per-tenant rate limit
 pip-compile --extra dev -o requirements.lock pyproject.toml    # after any dependency change
 playwright install chromium                      # no `install-deps` on Windows
 ```
+
+Chromium lives on D: because C: has no free space. Both the browser path and the download's
+temp directory must point there, or the install fails with `ENOSPC` after 80%:
+
+```powershell
+$env:PLAYWRIGHT_BROWSERS_PATH="D:\ms-playwright"
+$env:TEMP="D:\pwtmp"; $env:TMP="D:\pwtmp"
+playwright install chromium
+```
+
+The same `PLAYWRIGHT_BROWSERS_PATH` must be set when running anything that drives a browser.
+
+
+### The queue (phase 4)
+
+`QUEUE_ENABLED` defaults to false, which runs the agent in this process and needs no Redis.
+With it on, `POST /runs` enqueues and reads the run's frames back from `run:<id>`:
+
+```powershell
+$env:QUEUE_ENABLED="true"; arq app.workers.runs.WorkerSettings
+arq app.workers.runs.WorkerSettings --watch app     # reload on edit
+```
+
+Redis is **Memurai**, a native Windows service on 6379. Its CLI is `memurai-cli`, not
+`redis-cli`. Ctrl-C does **not** stop an in-flight arq job on Windows: `add_signal_handler` is
+unsupported there, so arq registers no handler and its shutdown waits for the running task. Use
+`Stop-Process -Force` to test what a lost worker looks like.
 
 analyst-web:
 ```bash
@@ -90,7 +119,7 @@ pnpm playwright test  # needs agent + local Postgres + pnpm dev running
 
 ## Architecture invariants
 
-**analyst-agent** — `app/api/` (HTTP only) · `app/services/` (business rules, domain errors) · `app/agent/` (`graph.py` builds the `create_agent` harness, `prompts.py`, `tools.py`, `nodes/sql_guard.py`) · `app/connectors/` (customer sources: `base.py` protocol, `postgres.py`, `registry.py`) · `app/security/` (`auth.py` JWT, `vault.py` Fernet) · `app/db/` (App DB session + models: Tenant, Connection, Run, Usage) · `app/workers/` · plus `evals/`, `scripts/`, `tests/{unit,integration}`. Nothing imports upward. `HTTPException` is raised only inside `app/api/`; everything else raises from `app/services/errors.py`.
+**analyst-agent** — `app/api/` (HTTP only) · `app/services/` (business rules, domain errors) · `app/agent/` (`graph.py` builds the `create_agent` harness, `prompts.py`, `tools.py`, `nodes/sql_guard.py`) · `app/connectors/` (customer sources: `base.py` protocols, `postgres.py`, `web.py`, `duckdb.py`, `registry.py`) · `app/security/` (`auth.py` JWT, `vault.py` Fernet) · `app/db/` (App DB session + models: Tenant, Connection, Run; `Run` is the usage ledger, there is no separate `Usage` table) · `app/workers/` (`web_session.py` Playwright, `runs.py` the arq worker) · `app/queue.py` · plus `evals/`, `scripts/`, `tests/{unit,integration}`. Nothing imports upward. `HTTPException` is raised only inside `app/api/`; everything else raises from `app/services/errors.py`.
 
 - The agent is built with `langchain.agents.create_agent`, whose graph is a `model` node and a `tools` node looping until the model stops calling tools. There is no hand-written router: the model decides whether a question needs a tool. The loop is bounded by `recursion_limit()`, derived from `max_sql_retries`.
 - Capabilities are LangChain tools defined with the `@tool` decorator in `app/agent/tools.py`, one per tenant connection. Each returns `content_and_artifact`, so the model sees a row preview while the caller keeps the full result for the `rows` event.
@@ -116,9 +145,17 @@ Changing it requires updating both repos in the same PR.
 | `status` | `{"stage": router\|sql_gen\|sql_guard\|db_exec\|web_tool\|answer}` |
 | `sql` | `{"sql": "..."}` |
 | `rows` | `{"columns": [...], "rows": [[...]], "truncated": bool}` |
+| `chart` | `{"type": bar\|line, "x": "col", "y": ["col"]}` — optional, always straight after a `rows` |
 | `token` | `{"text": "..."}` |
 | `done` | `{"run_id": "...", "duration_ms": n}` |
 | `error` | `{"message": "..."}` |
+
+`chart` was added in phase 5, before `analyst-web` existed, so there was no second repo to
+update in the same PR. It is additive: no existing event changed shape, it always follows a
+`rows` event for the same tool call, and it adds **no new stage** — the stage list is unchanged,
+because a chart is a payload rather than a step. A client that ignores unknown event names is
+unaffected. Note that `pnpm gen:agent` will not surface it: SSE events do not appear in
+`/openapi.json`.
 
 ## Hard rules
 

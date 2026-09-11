@@ -50,7 +50,7 @@ CHECKPOINT_DB_URL=postgresql://ckpt:ckpt@localhost:5432/checkpoints
 # demo connection DSN: postgresql+psycopg://analyst_ro:ro@localhost:5432/demo
 ```
 
-Redis is not installed and not needed before phase 4. When phase 4 starts, use Memurai or WSL2 `redis-server`; until then any code path that needs Redis must be behind a feature flag defaulting to off.
+Redis is **Memurai Developer 4.1.2**, installed and running as a Windows service on 6379. `winget install Memurai.MemuraiDeveloper` fails with MSI 1603 and `SFXCA: Failed to create temp directory. Error code 5` even elevated; download the MSI and run `msiexec /i` directly instead. Any code path that needs Redis still sits behind `QUEUE_ENABLED`, which defaults to off.
 
 `docker-compose.dev.yml` stays in the repo for CI and other developers — keep it in sync with these three databases, but never assume it is running.
 
@@ -69,10 +69,54 @@ alembic revision --autogenerate -m "msg"; alembic upgrade head
 pytest -m "not integration"                           # fast, no DB
 pytest -m integration                                 # needs the three local databases above
 ruff check app tests; ruff format app tests
-$env:TOKEN="..."; $env:CONN="..."; python evals/run_evals.py   # >= 80% or the phase is not done
+$env:TOKEN="..."; $env:CONN="..."; python evals/run_evals.py   # live gate, >= 80% or not done
+python evals/recorded.py --record --only 0-9    # capture the model; the free tier is 20/day
+python evals/recorded.py --replay               # rerun the suite offline, no API calls
+$env:MAX_RUNS_PER_MINUTE="100"                  # a suite trips the per-tenant rate limit
 pip-compile --extra dev -o requirements.lock pyproject.toml     # after any dependency change
 playwright install chromium                           # no `install-deps` on Windows
 ```
+
+Chromium lives on D: because C: has no free space. Both the browser path and the download's
+temp directory must point there, or the install fails with `ENOSPC` after 80%:
+
+```powershell
+$env:PLAYWRIGHT_BROWSERS_PATH="D:\ms-playwright"
+$env:TEMP="D:\pwtmp"; $env:TMP="D:\pwtmp"
+playwright install chromium
+```
+
+The same `PLAYWRIGHT_BROWSERS_PATH` must be set when running anything that drives a browser.
+
+
+### The queue (phase 4)
+
+`QUEUE_ENABLED` defaults to false, which runs the agent in this process and needs no Redis.
+With it on, `POST /runs` enqueues and reads the run's frames back from `run:<id>`:
+
+```powershell
+$env:QUEUE_ENABLED="true"; arq app.workers.runs.WorkerSettings
+arq app.workers.runs.WorkerSettings --watch app     # reload on edit
+```
+
+Redis is **Memurai**, a native Windows service on 6379. Its CLI is `memurai-cli`, not
+`redis-cli`. Ctrl-C does **not** stop an in-flight arq job on Windows: `add_signal_handler` is
+unsupported there, so arq registers no handler and its shutdown waits for the running task. Use
+`Stop-Process -Force` to test what a lost worker looks like.
+
+Use `127.0.0.1` in `REDIS_URL`, never `localhost`. Memurai binds IPv4 only while `localhost`
+resolves to `::1` first, so a client spends its whole connect timeout on IPv6 and fails, while
+`memurai-cli ping` answers normally and makes it look like an application bug.
+
+Phase 4's done-line is one command, and it starts and stops its own server and worker:
+
+```powershell
+python scripts/check_killed_worker.py
+```
+
+It kills the worker mid-run and asserts the client gets exactly one `error` event and the run
+row is not left `running`. Read its docstring before changing it: there are two ways to make it
+pass without testing anything.
 
 ### analyst-web
 ```bash
@@ -110,9 +154,17 @@ bounded by `recursion_limit()`, derived from `max_sql_retries`.
 | `status` | `{"stage": router\|sql_gen\|sql_guard\|db_exec\|web_tool\|answer}` |
 | `sql` | `{"sql": "..."}` |
 | `rows` | `{"columns": [...], "rows": [[...]], "truncated": bool}` |
+| `chart` | `{"type": bar\|line, "x": "col", "y": ["col"]}` — optional, always straight after a `rows` |
 | `token` | `{"text": "..."}` |
 | `done` | `{"run_id": "...", "duration_ms": n}` |
 | `error` | `{"message": "..."}` |
+
+`chart` was added in phase 5, before `analyst-web` existed, so there was no second repo to
+update in the same PR. It is additive: no existing event changed shape, it always follows a
+`rows` event for the same tool call, and it adds **no new stage** — the stage list is unchanged,
+because a chart is a payload rather than a step. A client that ignores unknown event names is
+unaffected. Note that `pnpm gen:agent` will not surface it: SSE events do not appear in
+`/openapi.json`.
 
 ## 6. Hard rules
 
