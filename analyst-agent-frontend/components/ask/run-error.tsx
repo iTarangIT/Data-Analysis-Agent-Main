@@ -1,3 +1,5 @@
+import { AlertTriangle } from "lucide-react";
+
 import type { RunError } from "@/features/ask/run-types";
 
 /**
@@ -33,9 +35,15 @@ export function RunErrorPanel({ error }: { error: RunError }) {
   const next = recovery(error);
 
   return (
-    <div role="alert" className="border-l-2 border-fault bg-paper-sunk px-4 py-3">
-      <p className="text-[0.9375rem] text-ink">{error.message}</p>
-      {next ? <p className="mt-1 text-[0.875rem] text-ink-muted">{next}</p> : null}
+    <div
+      role="alert"
+      className="flex items-start gap-3 rounded-xl border border-fault/30 bg-fault-soft px-4 py-3.5"
+    >
+      <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-fault" strokeWidth={2} />
+      <div className="min-w-0">
+        <p className="text-[0.875rem] font-medium text-fault">{error.message}</p>
+        {next ? <p className="mt-1 text-[0.875rem] text-ink-muted">{next}</p> : null}
+      </div>
     </div>
   );
 }
