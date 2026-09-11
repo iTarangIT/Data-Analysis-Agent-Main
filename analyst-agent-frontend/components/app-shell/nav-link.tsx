@@ -5,8 +5,26 @@ import { usePathname } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 
-/** The current section is marked by an underline rather than a filled pill, so the rail stays quiet. */
-export function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+/**
+ * A row in the sidebar. The current section is a filled pill in the brand's soft tint,
+ * which is the one place that tint is used, so "where am I" never has to compete with
+ * anything else on the page for attention.
+ *
+ * `icon` takes a rendered element rather than a component. The shell is a server component
+ * and this is a client one, so a component reference would be a bare function crossing the
+ * boundary, which React refuses to serialise. Lucide's icons carry no "use client" banner,
+ * so they are not client references either -- rendering them on the server and sending the
+ * SVG is the way across. They stroke with `currentColor`, so the pill still tints them.
+ */
+export function NavLink({
+  href,
+  icon,
+  children,
+}: {
+  href: string;
+  icon?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
   const active = pathname === href || pathname.startsWith(`${href}/`);
 
@@ -15,13 +33,18 @@ export function NavLink({ href, children }: { href: string; children: React.Reac
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "rounded-sm px-2.5 py-1.5 text-[0.8125rem] transition-colors",
+        "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
         active
-          ? "text-ground-ink underline decoration-ground-muted underline-offset-[6px]"
-          : "text-ground-muted hover:text-ground-ink",
+          ? "bg-brand-soft font-medium text-brand"
+          : "text-ink-muted hover:bg-surface-sunk hover:text-ink",
       )}
     >
-      {children}
+      {icon ? (
+        <span aria-hidden className="flex size-4 shrink-0 items-center justify-center">
+          {icon}
+        </span>
+      ) : null}
+      <span className="truncate">{children}</span>
     </Link>
   );
 }
