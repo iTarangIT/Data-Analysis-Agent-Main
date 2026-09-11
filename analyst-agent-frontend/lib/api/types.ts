@@ -84,3 +84,26 @@ export type Thread = {
   last_status: string;
   connection_id: string;
 };
+
+/** One calendar day of the tenant's activity, as the agent buckets it. */
+export type UsageDay = {
+  /** `YYYY-MM-DD`, UTC. */
+  day: string;
+  runs: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  rows_returned: number;
+  errors: number;
+};
+
+export type Usage = {
+  daily_token_budget: number;
+  /**
+   * A rolling window, not a calendar day. This is the figure the agent compares against
+   * the budget when it refuses a run, so it is the only one a capacity bar may use --
+   * summing the last `UsageDay` instead would disagree with the error people actually hit.
+   */
+  tokens_last_24h: number;
+  runs_last_24h: number;
+  days: UsageDay[];
+};
