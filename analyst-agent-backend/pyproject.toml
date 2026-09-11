@@ -34,6 +34,11 @@ dependencies = [
     "arq>=0.26",
     # arq pins redis below 6; without the ceiling pip-compile resolves a redis arq cannot use.
     "redis>=5,<6",
+    # Password hashing. Argon2id is the current OWASP first choice, and argon2-cffi
+    # owns the PHC string format so nothing here hand-rolls salt or encoding.
+    "argon2-cffi>=23.1",
+    # Backs pydantic's EmailStr, which the auth schemas use.
+    "email-validator>=2.2",
 ]
 
 [project.optional-dependencies]

@@ -44,15 +44,16 @@ analyst-agent (Python 3.12, FastAPI, LangGraph)
 Customer DB (read-only)  Customer dashboard   Uploaded files
 ```
 
-The browser never holds a long-lived secret for the Python service. It calls a Next.js route handler that mints a 15-minute HS256 agent JWT server-side, then uses that token for the SSE call.
+The browser never holds a token at all. It talks only to Next.js route handlers, which hold the access token in an httpOnly cookie and attach it server-side. Identity moved into this service: it owns the `users` table, hashes passwords with Argon2id, and mints the 15-minute access token itself.
 
 ### Who owns what
 
 | Concern | analyst-web (Next.js) | analyst-agent (Python) |
 |---|---|---|
-| Sign-up / login | Supabase Auth | — |
-| Tenant + membership | app tables in Supabase Postgres | reads `tenant_id` from the JWT only |
-| Agent JWT | mints HS256 `{tenant_id, sub}`, 15-min expiry | verifies it |
+| Sign-up / login | forms, cookies, proxying | **owns it**: `users`, Argon2id, `/auth/*` |
+| Tenant + membership | — | a signup creates a tenant; `tenant_id` still only ever comes from the JWT |
+| Agent JWT | never sees the signing secret | mints and verifies HS256 `{tenant_id, sub}`, 15-min expiry |
+| Sessions | stores both tokens in httpOnly cookies | rotates a revocable refresh token, with a reuse-detection family |
 | Connections | form UI, calls `POST /connections` | validates, encrypts, stores |
 | Chat | SSE client, renders events | streams events |
 | Billing | Razorpay/Stripe checkout + webhooks, sets `plan` | reads `daily_token_budget` |
@@ -129,7 +130,7 @@ pnpm playwright test  # needs agent + local Postgres + pnpm dev running
 - Three distinct databases, never conflated: **App DB** (ours, Alembic-migrated), **Checkpoint DB** (LangGraph-managed, disposable), **Customer DB** (theirs — read-only role, never migrated, never written).
 - Customer DB read-only is enforced at three independent layers: the Postgres role (`default_transaction_read_only=on`), the connector's `connect_args`, and the guard. Verify with a DELETE that must fail.
 
-**analyst-web** — `src/app/(auth)/` · `src/app/(app)/{chat,connections,usage,billing}` · `src/app/api/{agent-token,connections,billing/webhook}` · `src/components/{ui,chat,connections}` · `src/lib/{env,supabase,agent,tenant}` · `src/hooks/` · `src/middleware.ts` (refreshes the Supabase session on every request).
+**analyst-agent-frontend** — Next.js 16, App Router, no `src/`. `app/(auth)/{login,register}` · `app/(app)/{ask,connections,runs}` · `app/api/` (the only place the access token is attached) · `components/{ui,app-shell,auth,connections,ask}` · `features/ask/` (the SSE state machine) · `lib/{api,auth,sse}` · `proxy.ts`, which is what Next 16 calls middleware and which only ever reads the cookie.
 
 - Route handlers under `src/app/api/` are the only files holding `SUPABASE_SERVICE_ROLE_KEY` and `AGENT_JWT_SECRET`.
 - `src/lib/agent/` (`openapi.d.ts` generated · `client.ts` openapi-fetch · `token.ts` jose, server-only · `sse.ts`) is the single boundary to the Python service. If the contract changes, only this folder and the generated types change.

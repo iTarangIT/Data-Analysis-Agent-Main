@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -12,6 +13,8 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.errors import GraphRecursionError
 from sqlalchemy import func, select, update
+from sqlalchemy import tuple_ as sa_tuple
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import Session
 
 from app import queue
@@ -250,6 +253,7 @@ async def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> Prepa
 
     run = Run(
         tenant_id=ctx.tenant_id,
+        user_id=ctx.user_id,
         connection_id=conn.id,
         thread_id=body.thread_id,
         question=body.question,
@@ -327,6 +331,9 @@ def execute_run(db: Session, run: Run, connector: Connector, schema: dict, emit:
         duration_ms=duration_ms,
         tool=outcome.tool,
         sql=outcome.sql,
+        # `or None`, so a run that produced no narrative reads as "not recorded" rather than
+        # as an empty answer, which is the same thing every pre-existing run says.
+        answer=outcome.answer or None,
         rows_returned=len(outcome.rows),
         chart=outcome.chart,
         model=next(iter(usage.usage_metadata), None),
@@ -408,6 +415,120 @@ def get_run(db: Session, tenant_id: str, run_id: str) -> Run:
     if run is None or run.tenant_id != tenant_id:
         raise NotFound("run not found")  # 404 for both, so existence does not leak
     return run
+
+
+TITLE_CHARS = 120
+
+
+def _encode_cursor(run: Run) -> str:
+    return base64.urlsafe_b64encode(f"{run.created_at.isoformat()}|{run.id}".encode()).decode()
+
+
+def _decode_cursor(cursor: str) -> tuple[datetime, str]:
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+        ts, _, run_id = raw.partition("|")
+        return datetime.fromisoformat(ts), run_id
+    except (ValueError, UnicodeDecodeError) as e:
+        raise DomainError("that page cursor is not valid") from e
+
+
+def list_runs(
+    db: Session,
+    tenant_id: str,
+    *,
+    thread_id: str | None = None,
+    status: str | None = None,
+    connection_id: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """One page of a tenant's history, newest first.
+
+    Keyset rather than offset: runs insert at the head of this ordering, so an offset page
+    would repeat and skip rows while someone is reading. The connection name comes from a join
+    in this same statement, never from `run.connection.name` per row.
+    """
+    stmt = (
+        select(Run, Connection.name)
+        .join(Connection, Connection.id == Run.connection_id, isouter=True)
+        .where(Run.tenant_id == tenant_id)
+        .order_by(Run.created_at.desc(), Run.id.desc())
+        .limit(limit + 1)  # one extra, purely to learn whether another page exists
+    )
+    if thread_id:
+        stmt = stmt.where(Run.thread_id == thread_id)
+    if status:
+        stmt = stmt.where(Run.status == status)
+    if connection_id:
+        stmt = stmt.where(Run.connection_id == connection_id)
+    if cursor:
+        ts, run_id = _decode_cursor(cursor)
+        stmt = stmt.where(sa_tuple(Run.created_at, Run.id) < sa_tuple(ts, run_id))
+
+    rows = db.execute(stmt).all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    items = [
+        {
+            "id": run.id,
+            "thread_id": run.thread_id,
+            "question": run.question,
+            "status": run.status,
+            "tool": run.tool,
+            "connection_id": run.connection_id,
+            "connection_name": conn_name,
+            "rows_returned": run.rows_returned,
+            "duration_ms": run.duration_ms,
+            "created_at": run.created_at,
+            "has_sql": run.sql is not None,
+            "has_answer": run.answer is not None,
+        }
+        for run, conn_name in rows
+    ]
+    next_cursor = _encode_cursor(rows[-1][0]) if has_more and rows else None
+    return items, next_cursor
+
+
+def list_threads(db: Session, tenant_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
+    """Every conversation the tenant has had, newest activity first.
+
+    One statement, not a query per thread: `array_agg` with an ordering picks the first
+    question as the title and the newest row's status, which is what the sidebar shows.
+    """
+    first_question = func.array_agg(aggregate_order_by(Run.question, Run.created_at.asc()))[1]
+    last_status = func.array_agg(aggregate_order_by(Run.status, Run.created_at.desc()))[1]
+    last_connection = func.array_agg(aggregate_order_by(Run.connection_id, Run.created_at.desc()))[
+        1
+    ]
+
+    rows = db.execute(
+        select(
+            Run.thread_id,
+            func.count().label("run_count"),
+            func.max(Run.created_at).label("last_run_at"),
+            first_question,
+            last_status,
+            last_connection,
+        )
+        .where(Run.tenant_id == tenant_id)
+        .group_by(Run.thread_id)
+        .order_by(func.max(Run.created_at).desc())
+        .limit(limit)
+    ).all()
+
+    return [
+        {
+            "thread_id": thread_id,
+            "title": (question or "")[:TITLE_CHARS],
+            "run_count": run_count,
+            "last_run_at": last_run_at,
+            "last_status": status,
+            "connection_id": connection_id,
+        }
+        for thread_id, run_count, last_run_at, question, status, connection_id in rows
+    ]
 
 
 def usage_summary(db: Session, tenant: Tenant, days: int) -> dict[str, Any]:

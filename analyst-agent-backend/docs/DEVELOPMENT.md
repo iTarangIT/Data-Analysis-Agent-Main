@@ -12,9 +12,9 @@ Two repos, one workspace:
 | Repo | Stack | Role |
 |---|---|---|
 | `analyst-agent/` | Python 3.12, FastAPI, LangGraph, SQLAlchemy, Alembic, Playwright, sqlglot | the agent — routing, SQL generation, guard, execution, streaming |
-| `analyst-web/` | Next.js 15 App Router, TypeScript strict, Supabase Auth, TanStack Query, shadcn, Tailwind | product shell — auth, tenants, connections UI, chat, billing |
+| `analyst-web/` | Next.js 16 App Router, TypeScript strict, SWR, shadcn, Tailwind v4 | product shell — auth screens, connections UI, ask workspace, history |
 
-They talk over one contract: `POST /runs` (SSE) and `/connections` on the agent, authenticated with an HS256 JWT `{tenant_id, sub}` minted by the web app. **Backend is built first; frontend is generated from the backend's `/openapi.json`.**
+They talk over one contract: `POST /runs` (SSE), `/connections` and `/runs` history on the agent, authenticated with an HS256 JWT `{tenant_id, sub}` **minted by the agent** at `/auth/login`. The web app holds that token in an httpOnly cookie and attaches it server-side; it never holds the signing secret. **Backend is built first; frontend is generated from the backend's `/openapi.json`.**
 
 ## 2. Current phase
 

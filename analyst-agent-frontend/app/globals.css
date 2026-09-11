@@ -1,0 +1,202 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Registry components carry `dark:` utilities. Redefining the variant as a class that
+   nothing ever sets is what keeps them inert; without this line `dark:` would fall back
+   to prefers-color-scheme and the product would go dark on someone's OS setting. */
+@custom-variant dark (&:is(.dark *));
+
+/* ---------------------------------------------------------------------------
+   Read-only
+
+   The product only ever reads. Three independent layers in the backend enforce
+   that, and the interface carries the same idea: every surface the agent hands
+   you is a card you can lift off the page and read on its own.
+
+   Surfaces are layered rather than flat. `bg` is the page, `surface` is a card
+   sitting on it, `surface-sunk` is anything recessed into a card — an input, a
+   chip, a table header. Separation is a hairline plus a shadow so faint it
+   reads as a lift rather than a drop.
+
+   `brand` is the one accent. It marks the primary action and the machine
+   working, and nothing else. `code-bg` is the only dark surface in the product
+   and exists because SQL is the one thing users read as code.
+--------------------------------------------------------------------------- */
+
+:root {
+  /* surfaces, page outward */
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-sunk: #f1f2f6;
+  --surface-hover: #eceef3;
+
+  /* text */
+  --ink: #111827;
+  --ink-muted: #6b7280;
+  --ink-faint: #9ca3af;
+
+  /* hairlines */
+  --line: #e5e7eb;
+  --line-strong: #d1d5db;
+
+  /* the one accent */
+  --brand: #5b4be8;
+  --brand-hover: #4a3ad4;
+  --brand-soft: #eeecfd;
+  --brand-fg: #ffffff;
+
+  /* status */
+  --success: #10b981;
+  --warning: #f59e0b;
+  --fault: #ef4444;
+  --fault-soft: #fef2f2;
+
+  /* the only dark surface in the product */
+  --code-bg: #1e1b31;
+  --code-fg: #e4e4e7;
+
+  --radius: 0.5rem;
+
+  /* shadcn primitives read these. Mapped onto the palette above so an
+     out-of-the-box component lands on a card and already looks like the rest.
+     Note `--accent` is shadcn's hover surface, not our brand colour. */
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--brand);
+  --primary-foreground: var(--brand-fg);
+  --secondary: var(--surface-sunk);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface-sunk);
+  --muted-foreground: var(--ink-muted);
+  --accent: var(--surface-sunk);
+  --accent-foreground: var(--ink);
+  --destructive: var(--fault);
+  --destructive-foreground: #ffffff;
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--brand);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-sunk: var(--surface-sunk);
+  --color-surface-hover: var(--surface-hover);
+
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-fg: var(--brand-fg);
+
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-fault: var(--fault);
+  --color-fault-soft: var(--fault-soft);
+
+  --color-code-bg: var(--code-bg);
+  --color-code-fg: var(--code-fg);
+
+  /* One hue, dark to light, for chart series. Three steps is the ceiling: a
+     fourth lands at ΔE 13 against its neighbour, which is below the threshold
+     where full-colour vision can separate them. Past three series the table
+     carries the values instead. `MAX_SERIES` in features/ask/chart.ts is the
+     enforcement; this is only the palette. */
+  --color-series-1: #5b4be8;
+  --color-series-2: #8f85f0;
+  --color-series-3: #c7c1f8;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Inter for the interface, JetBrains Mono for anything that is genuinely
+     monospace content: SQL, result-table cells, figures, the wordmark. */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono", monospace;
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+
+  /* Faint enough to read as a lift off the page rather than a drop onto it.
+     The hairline does most of the separating; the shadow only stops a white
+     card from dissolving into a near-white ground. */
+  --shadow-sm: 0 1px 2px 0 rgb(16 24 40 / 0.05);
+  --shadow-card: 0 1px 3px 0 rgb(16 24 40 / 0.06), 0 1px 2px -1px rgb(16 24 40 / 0.04);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--brand) 22%, transparent);
+  }
+}
+
+/* The one piece of non-user-triggered motion in the product: the stage spine
+   turning as the agent works. It answers the machine's action, and it stops the
+   moment the run settles. */
+@keyframes spin-live {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.is-live {
+  animation: spin-live 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-live {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

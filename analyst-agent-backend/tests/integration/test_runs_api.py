@@ -163,6 +163,11 @@ class TestFullStackWithAScriptedModel:
 
         run = clean_app_db.query(Run).order_by(Run.created_at.desc()).first()
         assert run.status == "done" and run.tool == "sql" and run.rows_returned == 1
+        # The narrative is persisted, which is the whole reason history can show an answer.
+        # `_for_model` assigns rather than appends, so this is the final answer, not the first.
+        assert run.answer == "There are three dealers."
+        # And the run knows who asked, which is what makes "my history" possible later.
+        assert run.user_id == "u_test"
 
     def test_a_write_is_refused_by_the_guard_inside_the_tool(
         self, client, token, connection_id, clean_app_db

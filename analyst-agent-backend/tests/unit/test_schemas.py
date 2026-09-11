@@ -1,7 +1,13 @@
 import pytest
 from pydantic import ValidationError
 
-from app.api.schemas import ConnectionCreate, ConnectionOut, RunCreate
+from app.api.schemas import (
+    ConnectionCreate,
+    ConnectionOut,
+    RegisterIn,
+    RunCreate,
+    UserOut,
+)
 
 
 class TestConnectionCreate:
@@ -31,6 +37,38 @@ class TestConnectionOut:
         fields = set(ConnectionOut.model_fields)
         assert fields == {"id", "name", "kind", "has_schema_cache"}
         assert not fields & {"secret", "secret_enc", "dsn", "password"}
+
+
+class TestUserOut:
+    def test_carries_no_password_field(self):
+        fields = set(UserOut.model_fields)
+        assert fields == {
+            "id",
+            "email",
+            "name",
+            "role",
+            "tenant_id",
+            "tenant_name",
+            "plan",
+            "created_at",
+        }
+        assert not fields & {"password", "password_hash", "hashed_password"}
+
+
+class TestRegisterIn:
+    @pytest.mark.parametrize("password", ["", "short", "x" * 11])
+    def test_rejects_a_password_that_is_too_short(self, password):
+        with pytest.raises(ValidationError):
+            RegisterIn(email="a@example.com", password=password)
+
+    def test_rejects_a_password_long_enough_to_be_a_cpu_bomb(self):
+        # Argon2 has no input ceiling of its own, so an unbounded password burns 64MiB a go.
+        with pytest.raises(ValidationError):
+            RegisterIn(email="a@example.com", password="x" * 129)
+
+    def test_rejects_a_malformed_email(self):
+        with pytest.raises(ValidationError):
+            RegisterIn(email="not-an-email", password="a-long-enough-password")
 
 
 class TestRunCreate:
