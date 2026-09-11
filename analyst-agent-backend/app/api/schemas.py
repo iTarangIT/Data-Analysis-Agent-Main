@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 # A file connection is never created from a client-supplied body: `kind="file"` there would
 # let any tenant register a path of their choosing, which no SQL guard could catch, because
@@ -66,6 +66,8 @@ class RunOut(BaseModel):
     status: str
     tool: str | None
     sql: str | None
+    # NULL for any run that predates this column, which is why it is not defaulted to "".
+    answer: str | None
     error: str | None
     model: str | None
     prompt_tokens: int
@@ -92,3 +94,100 @@ class UsageOut(BaseModel):
     tokens_last_24h: int
     runs_last_24h: int
     days: list[UsageDay]
+
+
+# --- authentication -------------------------------------------------------------------
+
+# Argon2 has no input ceiling of its own, so without a cap a multi-megabyte "password" is a
+# free way to burn 64MiB and a CPU core per request.
+_Password = Field(min_length=12, max_length=128)
+
+
+class RegisterIn(BaseModel):
+    email: EmailStr
+    password: str = _Password
+    name: str | None = Field(default=None, max_length=200)
+    # Signing up creates the tenant, so this names it. Falls back to the email address.
+    tenant_name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
+
+
+class RefreshIn(BaseModel):
+    refresh_token: str = Field(min_length=1, max_length=512)
+
+
+class LogoutIn(BaseModel):
+    refresh_token: str = Field(min_length=1, max_length=512)
+    all_devices: bool = False
+
+
+class UserOut(BaseModel):
+    """Deliberately has no password field. Nothing derived from `password_hash` may be returned."""
+
+    id: str
+    email: str
+    name: str | None
+    role: str
+    tenant_id: str
+    tenant_name: str
+    plan: str
+    created_at: datetime
+
+
+class AuthOut(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    # Seconds, so the caller can schedule a refresh without decoding the token, and so the
+    # proxy can set a cookie Max-Age without parsing an opaque string.
+    expires_in: int
+    refresh_token: str
+    refresh_expires_in: int
+    user: UserOut
+
+
+# --- run history ----------------------------------------------------------------------
+
+
+class RunSummaryOut(BaseModel):
+    """One row of the history list.
+
+    Carries neither `sql`, `answer` nor `error`: all three are unbounded text, and a page of
+    fifty would be a heavy payload for what is only a navigation surface. The two booleans let
+    the list show what a run produced without shipping it.
+    """
+
+    id: str
+    thread_id: str
+    question: str
+    status: str
+    tool: str | None
+    connection_id: str
+    connection_name: str | None
+    rows_returned: int
+    duration_ms: int
+    created_at: datetime
+    has_sql: bool
+    has_answer: bool
+
+
+class RunPage(BaseModel):
+    items: list[RunSummaryOut]
+    # Keyset, not an offset: runs insert at the head of this list, so offset paging would
+    # repeat and skip rows while someone reads. None means the end.
+    next_cursor: str | None
+
+
+class ThreadOut(BaseModel):
+    """One conversation, for the sidebar."""
+
+    thread_id: str
+    # The first question asked, truncated, so the sidebar need not fetch a thread to name it.
+    title: str
+    run_count: int
+    last_run_at: datetime
+    last_status: str
+    connection_id: str

@@ -7,7 +7,7 @@ Source of truth for the active phase. Phase N+1 does not begin until phase N's l
 |---|---|---|---|---|
 | 0 | repos, Compose, stub graph, SSE endpoint | `curl -N /runs` streams a stub, trace in LangSmith | **done**, tracing dormant | 2026-09-10 |
 | 1 | SQL tool on our own IoT DB, guard, evals | `evals/run_evals.py` >= 25/30 | code complete, **gate paused** | 2026-09-10 |
-| 2 | JWT auth, vault, `/connections`, then frontend Part B | second person connects a DB without help | not started | — |
+| 2 | JWT auth, vault, `/connections`, then frontend Part B | second person connects a DB without help | **in progress** | backend auth, history and delete shipped 2026-09-11; frontend building |
 | 3 | web tool (Playwright) | Intellicar live query works for two tenants with separate sessions | **done**, verified live | 2026-09-11 |
 | 4 | Redis workers, limits, usage, ~~Docker deploy~~ | killing a worker mid-run gives a clean `error` event | **done**, verified live, Docker cut | 2026-09-11 |
 | 5 | file tool (DuckDB), charts | spreadsheet-only customer gets value | **done** | 2026-09-10 |
@@ -453,6 +453,28 @@ half again as many requests against a 20-per-day quota and made charts impossibl
 11. **No `app/agent/nodes/web_tool.py`.** Section 7.7 targets the deleted five-node graph.
 12. **The SSE contract gained `chart`** before `analyst-web` existed, so there was no second repo
     to update in the same PR. Additive, no new stage, both doc tables updated.
+13. **Sign-up and sign-in live in the agent, not the web app.** The ownership table assigned
+    identity to Supabase inside analyst-web. Owner's call on 2026-09-11: put identity beside
+    the data it protects. The cost is a `users` table, Argon2id and `/auth/*` here; the payoff
+    is that the browser never holds a token, the web app never holds the signing secret, and
+    `decode_token`, `TenantContext` and every existing route were untouched, because the new
+    endpoints mint exactly the claim shape this service already accepted. Hand-minted tokens
+    therefore still work everywhere, which is what keeps the eval harness running.
+14. **Refresh tokens are opaque, not JWTs.** `decode_token` accepts any correctly signed token
+    carrying `tenant_id` and `sub`, so a JWT refresh token would be accepted as a bearer and
+    hand out thirty days of access to the whole API. Adding a `typ` claim would have broken
+    every hand-minted token. A random string is not a decodable JWT, so the problem disappears.
+    `tests/integration/test_auth_api.py` asserts this, and is what fails if anyone "simplifies"
+    it later.
+15. **Run history carries no result rows, by design.** `runs` records `rows_returned`, an
+    integer, and the grid is discarded when the stream ends. Storing it would put customer rows
+    in the App DB permanently, which is exactly what `SCHEMA_SAMPLE_ROWS=0` exists to prevent.
+    History shows the question, the SQL and the answer; a past result is re-read by re-running.
+16. **Deleting a connection is a soft delete that blanks the credential.** `runs.connection_id`
+    has no `ondelete`, so a hard delete fails for any connection ever used, and cascading would
+    destroy the ledger we price from. The row survives so history can still name the source,
+    but `secret_enc` is emptied, because "delete this connection" has to mean the customer's
+    password is gone.
 
 ## Bugs found and fixed while doing this
 

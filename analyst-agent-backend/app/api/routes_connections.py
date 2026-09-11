@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_tenant
@@ -77,3 +77,19 @@ def create_from_file(
     finally:
         staged.unlink(missing_ok=True)
     return _out(conn)
+
+
+@router.delete("/{connection_id}", status_code=204, response_class=Response)
+def delete(
+    connection_id: str,
+    ctx: TenantContext = Depends(current_tenant),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Retire a connection and destroy its stored credential.
+
+    404 for unknown, another tenant's, and already-deleted alike, so a second delete is a 404
+    rather than a 204. Consistent with every other lookup here, which is worth more than
+    idempotence.
+    """
+    svc.delete_connection(db, ctx.tenant_id, connection_id)
+    return Response(status_code=204)

@@ -10,6 +10,17 @@ class Forbidden(DomainError):
     status_code = 403
 
 
+class Unauthorized(DomainError):
+    """Bad credentials, as opposed to a missing or malformed bearer, which `deps` raises as an
+    HTTPException. Both are 401, but only this one renders as {"error": ...}."""
+
+    status_code = 401
+
+
+class Conflict(DomainError):
+    status_code = 409
+
+
 class GuardRejected(DomainError):
     """SQL failed the safety guard."""
 
