@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { agentJson } from "@/lib/api/agent-client";
 import { ApiError } from "@/lib/api/errors";
-import type { Connection } from "@/lib/api/types";
+import type { Connection, ConnectionTables, TablesRefresh } from "@/lib/api/types";
 import { getSession } from "@/lib/auth/dal";
 
 import type { FormState } from "./auth";
@@ -73,6 +73,67 @@ export async function createConnection(
   revalidatePath("/connections");
   revalidatePath("/ask");
   return {};
+}
+
+const TableNames = z.array(z.string().min(1).max(200)).max(1000);
+
+/** What a refresh changed, so the confirmation can say so rather than only "done". */
+export type RefreshState = FormState & { added?: string[]; removed?: string[] };
+
+/** The tables page, the cards that count its tables, and the composer that checks them. */
+function revalidateTables(connectionId: string) {
+  revalidatePath(`/connections/${connectionId}/tables`);
+  revalidatePath("/connections");
+  revalidatePath("/ask");
+}
+
+export async function saveTableSelection(
+  connectionId: string,
+  tables: string[],
+): Promise<FormState> {
+  const session = await getSession();
+  if (!session) return { message: "Your session has ended. Sign in again." };
+
+  const parsed = TableNames.safeParse(tables);
+  if (!parsed.success) return { message: "That list of tables could not be read." };
+
+  try {
+    await agentJson<ConnectionTables>(
+      `/connections/${encodeURIComponent(connectionId)}/tables`,
+      {
+        method: "PUT",
+        token: session.accessToken,
+        body: { tables: parsed.data },
+        // Saving reads the chosen tables' structure from the customer's database first.
+        timeoutMs: 20_000,
+      },
+    );
+  } catch (error) {
+    const api = error as ApiError;
+    return { message: api.message ?? "Could not save that choice." };
+  }
+
+  revalidateTables(connectionId);
+  return {};
+}
+
+export async function refreshTables(connectionId: string): Promise<RefreshState> {
+  const session = await getSession();
+  if (!session) return { message: "Your session has ended. Sign in again." };
+
+  let result: TablesRefresh;
+  try {
+    result = await agentJson<TablesRefresh>(
+      `/connections/${encodeURIComponent(connectionId)}/tables/refresh`,
+      { method: "POST", token: session.accessToken, timeoutMs: 20_000 },
+    );
+  } catch (error) {
+    const api = error as ApiError;
+    return { message: api.message ?? "Could not refresh the tables." };
+  }
+
+  revalidateTables(connectionId);
+  return { added: result.added, removed: result.removed };
 }
 
 export async function deleteConnection(connectionId: string): Promise<FormState> {

@@ -13,7 +13,7 @@ import { ApiError, normalizeAgentError } from "./errors";
  */
 
 type Options = {
-  method?: "GET" | "POST" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: unknown;
   token?: string;
   signal?: AbortSignal;

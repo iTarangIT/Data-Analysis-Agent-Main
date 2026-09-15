@@ -1,6 +1,7 @@
 "use client";
 
 import { Database, FileSpreadsheet, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -14,11 +15,18 @@ import { cn } from "@/lib/utils";
 /**
  * A grid of cards, one per database.
  *
- * The badge reads `has_schema_cache`, which is a real field: the agent cannot write SQL
- * against a database whose shape it has not read yet, so "schema learned" is the closest
- * thing this product has to a health check. It is not a liveness probe and does not claim
- * to be one. The connection string is never shown because the agent never returns it.
+ * The badge reads how many of the source's tables the agent may use, from `selected_tables`
+ * and `total_tables`. None chosen out of some is the one state that stops a question from
+ * being answered, so it is the one drawn as a warning. It is not a liveness probe and does not
+ * claim to be one. The connection string is never shown because the agent never returns it.
  */
+
+function badge(connection: Connection): { label: string; tone: string } {
+  const { selected_tables: chosen, total_tables: total } = connection;
+  if (total === 0) return { label: "Tables not read yet", tone: "bg-surface-sunk text-ink-muted" };
+  if (chosen === 0) return { label: "No tables chosen", tone: "bg-warning/10 text-warning" };
+  return { label: `${chosen} of ${total} tables`, tone: "bg-success/10 text-success" };
+}
 
 const ICON: Record<ConnectionKind, React.ReactNode> = {
   postgres: <Database className="size-4" strokeWidth={1.75} />,
@@ -62,12 +70,10 @@ export function ConnectionList({
             <span
               className={cn(
                 "shrink-0 rounded-full px-2 py-0.5 text-[0.625rem] font-semibold tracking-[0.06em] uppercase",
-                connection.has_schema_cache
-                  ? "bg-success/10 text-success"
-                  : "bg-surface-sunk text-ink-muted",
+                badge(connection).tone,
               )}
             >
-              {connection.has_schema_cache ? "Schema learned" : "No schema yet"}
+              {badge(connection).label}
             </span>
           </div>
 
@@ -96,14 +102,22 @@ export function ConnectionList({
                 </Button>
               </span>
             ) : (
-              <Button
-                variant="ghost"
-                onClick={() => setConfirming(connection.id)}
-                aria-label={`Remove ${connection.name}`}
-                className="h-8 px-2 text-ink-muted hover:text-fault"
-              >
-                <Trash2 className="size-4" strokeWidth={1.75} />
-              </Button>
+              <>
+                <Link
+                  href={`/connections/${connection.id}/tables`}
+                  className="text-[0.8125rem] font-medium text-brand transition-colors hover:text-brand-hover"
+                >
+                  Choose tables
+                </Link>
+                <Button
+                  variant="ghost"
+                  onClick={() => setConfirming(connection.id)}
+                  aria-label={`Remove ${connection.name}`}
+                  className="ml-auto h-8 px-2 text-ink-muted hover:text-fault"
+                >
+                  <Trash2 className="size-4" strokeWidth={1.75} />
+                </Button>
+              </>
             )}
           </div>
         </Panel>

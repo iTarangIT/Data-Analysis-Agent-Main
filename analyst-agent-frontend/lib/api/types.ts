@@ -6,7 +6,72 @@ export type Connection = {
   id: string;
   name: string;
   kind: ConnectionKind;
-  has_schema_cache: boolean;
+  selected_tables: number;
+  total_tables: number;
+  catalog_refreshed_at: string | null;
+};
+
+export type ColumnDefinition = {
+  name: string;
+  type: string;
+  nullable: boolean;
+  comment: string | null;
+};
+
+export type ForeignKey = {
+  columns: string[];
+  ref_table: string;
+  ref_columns: string[];
+};
+
+/** A table's structure as the agent reads it: columns and keys, never rows. */
+export type TableDefinition = {
+  name: string;
+  comment: string | null;
+  columns: ColumnDefinition[];
+  primary_key: string[];
+  uniques: string[][];
+  foreign_keys: ForeignKey[];
+  checks: string[];
+};
+
+/** What a table holds, measured from the catalog. Postgres only; a spreadsheet reports none. */
+export type TableStats = {
+  rows: "empty" | "few" | "thousands" | "millions" | "nonempty" | "unknown";
+  rows_approx?: number;
+  rows_at_least?: boolean;
+  covered_to?: string;
+};
+
+export type SourceTable = {
+  name: string;
+  selected: boolean;
+  /** Both null unless the table is chosen: the agent keeps no structure it may not use. */
+  definition: TableDefinition | null;
+  stats: TableStats | null;
+};
+
+export type Relationship = {
+  from_table: string;
+  from_columns: string[];
+  to_table: string;
+  to_columns: string[];
+  /** `inferred` is a match of column names with no key declared behind it. */
+  origin: "declared" | "inferred";
+  cardinality: "many_to_one" | "one_to_one";
+};
+
+export type ConnectionTables = {
+  max_selected: number;
+  refreshed_at: string | null;
+  tables: SourceTable[];
+  /** Between chosen tables only. */
+  relationships: Relationship[];
+};
+
+export type TablesRefresh = ConnectionTables & {
+  added: string[];
+  removed: string[];
 };
 
 export type User = {

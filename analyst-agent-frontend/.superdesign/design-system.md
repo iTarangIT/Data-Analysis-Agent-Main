@@ -17,6 +17,7 @@ database, and every query the agent ran is shown next to its answer.
 |---|---|
 | `/ask` | Ask, watch the machine work, read the result. The main screen. |
 | `/connections` | The databases you can ask about. Add and remove them. |
+| `/connections/[id]/tables` | Choose which tables the agent may read, and see what it is shown about them. |
 | `/runs` | Everything the organisation has asked, what it spent, and the audit table. |
 | `/login`, `/register` | Get in. One organisation per account at registration. |
 
@@ -61,7 +62,7 @@ one thing here people read as code.
 | `--brand-hover` | `#4a3ad4` | its hover |
 | `--brand-soft` | `#eeecfd` | active nav pill, avatars, icon tiles |
 | `--brand-fg` | `#ffffff` | text on brand |
-| `--success` | `#10b981` | schema learned, read-only confirmed |
+| `--success` | `#10b981` | tables chosen, read-only confirmed |
 | `--warning` | `#f59e0b` | approaching a limit, capped results |
 | `--fault` | `#ef4444` | errors and destructive confirmation |
 | `--fault-soft` | `#fef2f2` | the ground of an error card |
@@ -153,6 +154,11 @@ reveals or hover lifts.
   a five-hundred-column result stretches the layout instead of scrolling inside its box.
   This is what makes a sidebar affordable at all.
 - **SQL sits on `--code-bg`** with a copy button that appears on hover.
+- **A guessed join looks like a guess.** On the tables screen a relationship inferred from
+  matching column names carries a dashed underline and says "inferred" in words; a declared
+  key is drawn plain. The difference never rests on the line alone.
+- **The table picker never evicts.** At the cap an unticked box is disabled rather than
+  letting a new choice push an old one out, and nothing is saved until Save.
 - **Errors map a code to a concrete recovery sentence**, not a generic apology.
 - **Only what the data supports gets drawn.** The budget bar reads `tokens_last_24h`
   against `daily_token_budget`, both real fields. There is no per-user attribution in the

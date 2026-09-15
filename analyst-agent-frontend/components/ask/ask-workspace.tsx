@@ -54,10 +54,17 @@ export function AskWorkspace({
   const [connectionId, setConnectionId] = useState(connections[0]?.id ?? "");
 
   const busy = isRunning(state.phase);
-  const canAsk = question.trim().length >= 3 && connectionId !== "" && !busy;
   const started = state.phase !== "idle";
   const empty = !started && turns.length === 0 && history.length === 0;
   const activeConnection = connections.find((c) => c.id === connectionId) ?? null;
+  // The agent refuses a connection whose tables were listed but none chosen, so the composer
+  // says so before a question is typed rather than after it is sent. Zero listed means the
+  // tables have not been read yet, which the first question does itself.
+  const needsTables =
+    activeConnection !== null &&
+    activeConnection.total_tables > 0 &&
+    activeConnection.selected_tables === 0;
+  const canAsk = question.trim().length >= 3 && connectionId !== "" && !needsTables && !busy;
 
   async function submit(event: { preventDefault: () => void }) {
     event.preventDefault();
@@ -82,6 +89,15 @@ export function AskWorkspace({
             onChange={setConnectionId}
             active={activeConnection}
           />
+
+          {needsTables ? (
+            <Link
+              href={`/connections/${connectionId}/tables`}
+              className="text-[0.8125rem] font-medium text-brand transition-colors hover:text-brand-hover"
+            >
+              Choose its tables
+            </Link>
+          ) : null}
 
           {started && !busy ? (
             <Button
@@ -135,12 +151,14 @@ export function AskWorkspace({
                   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void submit(event);
                 }}
                 rows={2}
-                disabled={connections.length === 0}
+                disabled={connections.length === 0 || needsTables}
                 aria-label="Your question"
                 placeholder={
                   connections.length === 0
                     ? "Connect a database before asking anything"
-                    : started
+                    : needsTables
+                      ? "Choose which tables the agent may read before asking"
+                      : started
                       ? "Ask a follow-up"
                       : "Ask a question about your data"
                 }
