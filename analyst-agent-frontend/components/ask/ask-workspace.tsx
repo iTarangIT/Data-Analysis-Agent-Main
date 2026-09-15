@@ -16,6 +16,7 @@ import { buildChart } from "@/features/ask/chart";
 import type { RunState } from "@/features/ask/run-types";
 import { isRunning } from "@/features/ask/run-types";
 import { useRun } from "@/features/ask/use-run";
+import { useTypedAnswer } from "@/features/ask/use-typed-answer";
 import type { Connection, RunSummary, Thread } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -213,6 +214,7 @@ function Turn({
   onCancel?: () => void;
   live?: boolean;
 }) {
+  const answer = useTypedAnswer(turn.answer, Boolean(live));
   // Ask before laying out: ResultChart returns null when the spec cannot be drawn honestly,
   // and without this the table would sit half-width beside an empty column.
   const plottable =
@@ -248,7 +250,10 @@ function Turn({
           ) : null}
 
           {turn.answer ? (
-            <p className="max-w-[68ch] text-[0.9375rem] leading-[1.7] text-ink">{turn.answer}</p>
+            <p className="max-w-[68ch] text-[0.9375rem] leading-[1.7] whitespace-pre-wrap text-ink">
+              <span aria-hidden>{answer}</span>
+              <span className="sr-only">{turn.answer}</span>
+            </p>
           ) : null}
 
           {turn.error ? <RunErrorPanel error={turn.error} /> : null}

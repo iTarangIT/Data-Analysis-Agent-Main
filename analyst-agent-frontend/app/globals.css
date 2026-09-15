@@ -174,8 +174,9 @@
   }
 }
 
-/* Run feedback only: the live asterisk turns until the run settles.
-   Reduced motion freezes the asterisk. Process stage marks stay static. */
+/* Run feedback only: the live asterisk turns until the run settles. The newest
+   answer also reveals words for at most 1.5s after its final text arrives.
+   Reduced motion freezes the asterisk; the typing hook reveals text instantly. */
 @keyframes spin-live {
   to {
     transform: rotate(360deg);

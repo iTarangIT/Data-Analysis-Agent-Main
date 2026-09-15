@@ -128,9 +128,11 @@ text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink-muted
 ## Motion
 
 Automatic motion is limited to run feedback: `.is-live` is a 0.9s linear rotation on
-the brand-coloured loader asterisk. The composer has no second spinner, and the
-process panel's stage marks are static. A `prefers-reduced-motion: reduce` block
-disables CSS motion.
+the brand-coloured loader asterisk, and the newest answer reveals words at about 30ms
+per word, capped at 1.5s after the final text arrives. Earlier answers appear instantly.
+The composer has no second spinner, and the process panel's stage marks are static.
+A `prefers-reduced-motion: reduce` block disables CSS motion; the typing hook also
+observes this preference and immediately reveals the complete available answer.
 
 No animation library is installed. Do not add entrance animations, parallax, scroll
 reveals or hover lifts.
