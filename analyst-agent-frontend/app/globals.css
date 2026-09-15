@@ -174,9 +174,8 @@
   }
 }
 
-/* The one piece of non-user-triggered motion in the product: the stage spine
-   turning as the agent works. It answers the machine's action, and it stops the
-   moment the run settles. */
+/* Run feedback only: the live asterisk turns until the run settles.
+   Reduced motion freezes the asterisk. Process stage marks stay static. */
 @keyframes spin-live {
   to {
     transform: rotate(360deg);

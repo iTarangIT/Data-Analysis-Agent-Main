@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, ChevronDown, Database, Loader2, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowUp, ChevronDown, Database, ShieldCheck, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -8,8 +8,8 @@ import { PastTurn } from "@/components/ask/past-turn";
 import { ResultChart } from "@/components/ask/result-chart";
 import { ResultTable } from "@/components/ask/result-table";
 import { RunErrorPanel } from "@/components/ask/run-error";
-import { RunTimeline } from "@/components/ask/run-timeline";
-import { SqlBlock } from "@/components/ask/sql-block";
+import { RunProcess } from "@/components/ask/run-process";
+import { RunStatus } from "@/components/ask/run-status";
 import { ThreadList } from "@/components/ask/thread-list";
 import { Button } from "@/components/ui/button";
 import { buildChart } from "@/features/ask/chart";
@@ -186,7 +186,7 @@ export function AskWorkspace({
                     className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand text-brand-fg transition-colors hover:bg-brand-hover disabled:opacity-40 disabled:hover:bg-brand"
                   >
                     {busy ? (
-                      <Loader2 aria-hidden className="size-4 animate-spin" />
+                      <span aria-hidden className="size-2.5 rounded-sm bg-current" />
                     ) : (
                       <ArrowUp aria-hidden className="size-4" strokeWidth={2.25} />
                     )}
@@ -228,9 +228,11 @@ function Turn({
 
       <TurnRow avatar={<AgentAvatar />}>
         <div className="flex flex-col gap-5">
-          <RunTimeline state={turn} onCancel={live ? onCancel : undefined} />
-
-          {turn.sql ? <SqlBlock sql={turn.sql} /> : null}
+          {isRunning(turn.phase) ? (
+            <RunStatus state={turn} onCancel={live ? onCancel : undefined} />
+          ) : (
+            <RunProcess state={turn} />
+          )}
 
           {plottable && turn.chart && turn.result ? (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">

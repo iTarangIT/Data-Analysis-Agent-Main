@@ -118,6 +118,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       return {
         ...state,
         phase: "error",
+        durationMs: elapsed(state),
         error: { kind: "agent", message: action.data.message },
       };
 
@@ -125,6 +126,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       return {
         ...state,
         phase: "error",
+        durationMs: elapsed(state),
         error: {
           kind: "http",
           message: action.message,
@@ -137,6 +139,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       return {
         ...state,
         phase: "error",
+        durationMs: elapsed(state),
         error: { kind: "transport", message: action.message },
       };
 
@@ -144,6 +147,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       return {
         ...state,
         phase: "error",
+        durationMs: elapsed(state),
         error: {
           kind: "truncated",
           message: "the connection closed before the run finished",
@@ -152,7 +156,7 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case "@abort":
       // Deliberately no error: the person asked for this, so nothing should turn red.
-      return { ...state, phase: "cancelled" };
+      return { ...state, phase: "cancelled", durationMs: elapsed(state) };
 
     case "@reset":
       return IDLE_RUN;
@@ -160,4 +164,8 @@ export function runReducer(state: RunState, action: RunAction): RunState {
     default:
       return state;
   }
+}
+
+function elapsed(state: RunState): number {
+  return state.startedAt === null ? 0 : Math.max(0, Date.now() - state.startedAt);
 }

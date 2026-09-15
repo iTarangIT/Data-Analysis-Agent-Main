@@ -127,10 +127,10 @@ text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink-muted
 
 ## Motion
 
-`.is-live` is a 0.9s linear rotation on the running stage mark. Everything else is
-`transition-colors`. A `prefers-reduced-motion: reduce` block kills all animation and
-transition durations; the stage marks still read correctly frozen, because check, ring
-and hollow are three different shapes and not three different animations.
+Automatic motion is limited to run feedback: `.is-live` is a 0.9s linear rotation on
+the brand-coloured loader asterisk. The composer has no second spinner, and the
+process panel's stage marks are static. A `prefers-reduced-motion: reduce` block
+disables CSS motion.
 
 No animation library is installed. Do not add entrance animations, parallax, scroll
 reveals or hover lifts.

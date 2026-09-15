@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { runReducer } from "./run-machine";
 import { IDLE_RUN, type RunAction, type RunState } from "./run-types";
@@ -32,6 +32,23 @@ const HAPPY: RunAction[] = [
 ];
 
 describe("runReducer", () => {
+  it.each<RunAction>([
+    { type: "error", data: { message: "Rejected" } },
+    { type: "@http", status: 500, message: "Unavailable" },
+    { type: "@transport", message: "Disconnected" },
+    { type: "@closed" }, { type: "@abort" },
+  ])("freezes elapsed time for $type", (action) => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1000);
+      const running = drive([submit]);
+      vi.advanceTimersByTime(3200);
+      const settled = runReducer(running, action);
+      expect(settled.durationMs).toBe(3200);
+      vi.advanceTimersByTime(5000);
+      expect(runReducer(settled, { type: "@closed" }).durationMs).toBe(3200);
+    } finally { vi.useRealTimers(); }
+  });
   describe("the happy path", () => {
     it("ends done with the sql, the rows and the answer", () => {
       const s = drive(HAPPY);

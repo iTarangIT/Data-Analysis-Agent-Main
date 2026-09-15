@@ -3,7 +3,7 @@
 import { ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { SqlBlock } from "@/components/ask/sql-block";
+import { RunProcess } from "@/components/ask/run-process";
 import type { RunDetail, RunSummary } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -43,12 +43,13 @@ function Detail({ runId }: { runId: string }) {
 
   return (
     <div className="flex flex-col gap-3 pt-3">
-      {detail.sql ? <SqlBlock sql={detail.sql} /> : null}
+      <RunProcess detail={detail} />
       {detail.answer ? (
-        <p className="max-w-[68ch] text-[0.9375rem] leading-[1.65] text-ink">{detail.answer}</p>
+        <p className="max-w-[68ch] text-[0.9375rem] leading-[1.65] whitespace-pre-wrap text-ink">{detail.answer}</p>
       ) : (
         <p className="text-[0.875rem] text-ink-muted">No answer was recorded for this run.</p>
       )}
+      {detail.error ? <p className="text-[0.875rem] text-fault">{detail.error}</p> : null}
       <p className="text-[0.75rem] text-ink-muted">
         Results are not stored. Ask it again for fresh numbers.
       </p>
