@@ -51,7 +51,9 @@ class ChartSpec(BaseModel):
 
 
 class RunCreate(BaseModel):
-    connection_id: str
+    # Optional, because the router picks the source when the client does not. A client that
+    # names one still gets it: the eval harness and the worker-kill harness both do.
+    connection_id: str | None = None
     thread_id: str = Field(min_length=1, max_length=100)
     question: str = Field(min_length=3, max_length=2000)
 

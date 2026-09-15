@@ -30,3 +30,19 @@
 
 - q: What is the average temperature in telemetry over the last 24 hours?
   expect_type: number
+
+# Missing-data cases, added with the handling policy. They run against the two fixture tables
+# `scripts/demo_customer.sql` gained for the purpose: `trips`, which is empty, and `gps_pings`,
+# whose data stops on 2026-07-02 with a partition already created ahead of it.
+#
+# The assertions are deliberately loose, for the reason the Antarctica case in golden_file.yaml
+# records: a model that finds nothing legitimately runs a second query to see what does exist,
+# so the rows are unpredictable and only the answer can be asserted on. What they distinguish
+# is an answer that engages with the gap from one that says "no data found" and stops. They
+# are weaker than the IoT cases will be and are not a substitute for them.
+
+- q: How many trips have we recorded?
+  expect_contains: trips
+
+- q: What was the average GPS latitude in August 2026?
+  expect_contains: july

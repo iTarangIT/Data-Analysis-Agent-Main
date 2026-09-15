@@ -15,7 +15,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 const RunBody = z.object({
-  connection_id: z.string().min(1),
+  // Optional: the agent routes between the two fixed sources when none is named.
+  connection_id: z.string().min(1).optional(),
   thread_id: z.string().min(1).max(100),
   question: z.string().min(3).max(2000),
 });

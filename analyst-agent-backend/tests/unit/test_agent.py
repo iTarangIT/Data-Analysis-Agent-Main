@@ -328,3 +328,162 @@ class TestChartEvent:
         events, _ = _run(model, FakeConnector())
 
         assert "chart" not in [e["type"] for e in events]
+
+
+class TestFallbackToTheDatabase:
+    """A live question whose dashboard gives nothing is answered from the database instead.
+
+    The database tool is not bound at the start of the run: `app/agent/fallback.py` adds it
+    only after the dashboard has actually failed, so the agent can never offer a source it
+    has no way to reach. These tests are what hold that timing in place.
+    """
+
+    class EmptyDashboard(FakeDashboard):
+        def fetch_rows(self, max_rows):
+            return ["vehicleno", "soc"], []
+
+    class BrokenDashboard(FakeDashboard):
+        def fetch_rows(self, max_rows):
+            raise RuntimeError("login timed out")
+
+    def _fell_back(self, dashboard):
+        connector = FakeConnector()
+        model = FakeToolModel(
+            responses=[
+                AIMessage(
+                    content="", tool_calls=[{"name": "fetch_dashboard", "args": {}, "id": "w1"}]
+                ),
+                _tool_call("select vehicleno from vehicles"),
+                AIMessage(content="The live dashboard was unavailable, so from recorded data: 2."),
+            ]
+        )
+        outcome = RunOutcome()
+        translator = EventTranslator(outcome)
+        events = []
+        with patch("app.agent.graph.get_llm", return_value=model):
+            agent = build_agent(dashboard, WEB_SCHEMA, backup=(connector, SCHEMA))
+            for chunk in agent.stream(
+                {"messages": [("user", "what is the charge right now")]},
+                config={"recursion_limit": recursion_limit()},
+                stream_mode="updates",
+            ):
+                for node, update in chunk.items():
+                    for msg in (update or {}).get("messages", []):
+                        events.extend(translator.for_message(node, msg))
+        return events, outcome, connector
+
+    def test_an_empty_dashboard_reaches_the_database(self):
+        _, outcome, connector = self._fell_back(self.EmptyDashboard())
+
+        assert connector.executed, "the database was never queried"
+        assert outcome.tool == "sql"
+
+    def test_a_broken_dashboard_reaches_the_database(self):
+        _, outcome, connector = self._fell_back(self.BrokenDashboard())
+
+        assert connector.executed
+        assert outcome.tool == "sql"
+
+    def test_the_customer_sees_one_answer_not_two(self):
+        events, _, _ = self._fell_back(self.EmptyDashboard())
+
+        # A second agent run would have streamed the dashboard's own failure as a finished
+        # answer first, then overwritten it. One `answer` stage is what says that did not
+        # happen.
+        assert _stages(events).count("answer") == 1
+        assert len([e for e in events if e["type"] == "token"]) == 1
+
+    def test_the_stage_sequence_stays_inside_the_frozen_contract(self):
+        events, _, _ = self._fell_back(self.EmptyDashboard())
+
+        assert _stages(events) == [
+            "router",
+            "web_tool",
+            "sql_gen",
+            "sql_guard",
+            "db_exec",
+            "answer",
+        ]
+
+    def test_a_dashboard_that_answers_never_sees_the_database(self):
+        connector = FakeConnector()
+        model = FakeToolModel(
+            responses=[
+                AIMessage(
+                    content="", tool_calls=[{"name": "fetch_dashboard", "args": {}, "id": "w1"}]
+                ),
+                AIMessage(content="Two vehicles are shown."),
+            ]
+        )
+        with patch("app.agent.graph.get_llm", return_value=model):
+            agent = build_agent(FakeDashboard(), WEB_SCHEMA, backup=(connector, SCHEMA))
+            list(
+                agent.stream(
+                    {"messages": [("user", "what does the dashboard show")]},
+                    config={"recursion_limit": recursion_limit()},
+                    stream_mode="updates",
+                )
+            )
+
+        assert connector.executed == []
+
+    def test_a_tenant_with_no_database_still_runs(self):
+        model = FakeToolModel(
+            responses=[
+                AIMessage(
+                    content="", tool_calls=[{"name": "fetch_dashboard", "args": {}, "id": "w1"}]
+                ),
+                AIMessage(content="The dashboard is showing nothing right now."),
+            ]
+        )
+        outcome = RunOutcome()
+        translator = EventTranslator(outcome)
+        with patch("app.agent.graph.get_llm", return_value=model):
+            agent = build_agent(self.EmptyDashboard(), WEB_SCHEMA, backup=None)
+            for chunk in agent.stream(
+                {"messages": [("user", "what is the charge right now")]},
+                config={"recursion_limit": recursion_limit()},
+                stream_mode="updates",
+            ):
+                for node, update in chunk.items():
+                    for msg in (update or {}).get("messages", []):
+                        list(translator.for_message(node, msg))
+
+        assert outcome.tool == "web"
+
+    def test_the_model_is_not_offered_the_database_until_the_dashboard_fails(self):
+        """The invariant the whole design exists for.
+
+        `app/agent/router.py` binds a run to one source so the agent cannot offer to consult
+        something it has no tool for. The database tool is registered with the agent from the
+        start, because a tool cannot be executed otherwise, but it must stay out of what the
+        model is shown until the dashboard has actually come back empty.
+        """
+        offered = []
+
+        class Spy(FakeToolModel):
+            def bind_tools(self, tools, **kwargs):
+                offered.append(sorted(t.name for t in tools))
+                return self
+
+        model = Spy(
+            responses=[
+                AIMessage(
+                    content="", tool_calls=[{"name": "fetch_dashboard", "args": {}, "id": "w1"}]
+                ),
+                _tool_call("select vehicleno from vehicles"),
+                AIMessage(content="From recorded data instead: 2."),
+            ]
+        )
+        with patch("app.agent.graph.get_llm", return_value=model):
+            agent = build_agent(self.EmptyDashboard(), WEB_SCHEMA, backup=(FakeConnector(), SCHEMA))
+            list(
+                agent.stream(
+                    {"messages": [("user", "what is the charge right now")]},
+                    config={"recursion_limit": recursion_limit()},
+                    stream_mode="updates",
+                )
+            )
+
+        assert offered[0] == ["fetch_dashboard"]
+        assert offered[-1] == ["fetch_dashboard", "query_database"]

@@ -17,7 +17,7 @@ def test_rejects_a_malformed_token(client):
     assert r.status_code == 401
 
 
-@pytest.mark.parametrize("bad", [{"question": "hi"}, {"thread_id": ""}, {"connection_id": None}])
+@pytest.mark.parametrize("bad", [{"question": "hi"}, {"thread_id": ""}, {"connection_id": 7}])
 def test_rejects_an_invalid_body_before_touching_the_database(client, token, bad):
     r = client.post("/runs", json=_body(**bad), headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 422

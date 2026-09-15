@@ -1,7 +1,6 @@
 "use client";
 
-import { ArrowUp, ChevronDown, Database, Loader2, ShieldCheck, Sparkles } from "lucide-react";
-import Link from "next/link";
+import { ArrowUp, Loader2, ShieldCheck, Sparkles } from "lucide-react";
 import { useState } from "react";
 
 import { PastTurn } from "@/components/ask/past-turn";
@@ -9,20 +8,24 @@ import { ResultChart } from "@/components/ask/result-chart";
 import { ResultTable } from "@/components/ask/result-table";
 import { RunErrorPanel } from "@/components/ask/run-error";
 import { RunTimeline } from "@/components/ask/run-timeline";
-import { SqlBlock } from "@/components/ask/sql-block";
 import { ThreadList } from "@/components/ask/thread-list";
 import { Button } from "@/components/ui/button";
 import { buildChart } from "@/features/ask/chart";
+import { SOURCE_LABEL, sourceOf } from "@/features/ask/source";
 import type { RunState } from "@/features/ask/run-types";
 import { isRunning } from "@/features/ask/run-types";
 import { useRun } from "@/features/ask/use-run";
-import type { Connection, RunSummary, Thread } from "@/lib/api/types";
-import { cn } from "@/lib/utils";
+import type { RunSummary, Thread } from "@/lib/api/types";
 
 /**
  * The ask screen: threads, the conversation, and the composer.
  *
- * Three things are worth knowing before changing anything here.
+ * There is no source picker. This deployment answers from two fixed sources and the agent
+ * routes between them on whether the question is about now or about what has been recorded,
+ * so choosing is not a decision to put in front of anyone. The transcript says which source
+ * answered instead, after the fact, because nobody selected it.
+ *
+ * Three further things are worth knowing before changing anything here.
  *
  * A run is started from the submit handler and never from an effect. React double-invokes
  * effects in development and a run costs tokens against the tenant's daily budget.
@@ -37,13 +40,11 @@ import { cn } from "@/lib/utils";
  */
 
 export function AskWorkspace({
-  connections,
   threadId,
   threads,
   history,
   userInitials,
 }: {
-  connections: Connection[];
   threadId: string;
   threads: Thread[];
   history: RunSummary[];
@@ -51,13 +52,11 @@ export function AskWorkspace({
 }) {
   const { state, turns, ask, cancel, reset } = useRun();
   const [question, setQuestion] = useState("");
-  const [connectionId, setConnectionId] = useState(connections[0]?.id ?? "");
 
   const busy = isRunning(state.phase);
-  const canAsk = question.trim().length >= 3 && connectionId !== "" && !busy;
+  const canAsk = question.trim().length >= 3 && !busy;
   const started = state.phase !== "idle";
   const empty = !started && turns.length === 0 && history.length === 0;
-  const activeConnection = connections.find((c) => c.id === connectionId) ?? null;
 
   async function submit(event: { preventDefault: () => void }) {
     event.preventDefault();
@@ -65,7 +64,8 @@ export function AskWorkspace({
     const asked = question.trim();
     // Cleared before the await, so the composer empties the instant you send.
     setQuestion("");
-    await ask({ connectionId, question: asked, threadId });
+    // No connection id: the agent routes this to whichever source can answer it.
+    await ask({ question: asked, threadId });
   }
 
   return (
@@ -75,19 +75,12 @@ export function AskWorkspace({
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-5 sm:px-6">
-          <ConnectionChip
-            connections={connections}
-            value={connectionId}
-            onChange={setConnectionId}
-            active={activeConnection}
-          />
-
+        <header className="flex h-14 shrink-0 items-center justify-end gap-3 border-b border-line bg-surface px-5 sm:px-6">
           {started && !busy ? (
             <Button
               variant="ghost"
               onClick={reset}
-              className="ml-auto h-8 px-2.5 text-[0.8125rem] text-ink-muted hover:bg-surface-sunk hover:text-ink"
+              className="h-8 px-2.5 text-[0.8125rem] text-ink-muted hover:bg-surface-sunk hover:text-ink"
             >
               New question
             </Button>
@@ -97,7 +90,7 @@ export function AskWorkspace({
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-6">
             {empty ? (
-              <Opening connections={connections} />
+              <Opening />
             ) : (
               <div className="flex flex-col gap-8">
                 {history.length > 0 ? (
@@ -135,15 +128,8 @@ export function AskWorkspace({
                   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void submit(event);
                 }}
                 rows={2}
-                disabled={connections.length === 0}
                 aria-label="Your question"
-                placeholder={
-                  connections.length === 0
-                    ? "Connect a database before asking anything"
-                    : started
-                      ? "Ask a follow-up"
-                      : "Ask a question about your data"
-                }
+                placeholder={started ? "Ask a follow-up" : "Ask a question about your data"}
                 className="w-full resize-none border-0 bg-transparent px-1 py-1 text-[0.9375rem] text-ink placeholder:text-ink-faint focus-visible:outline-none disabled:opacity-60"
               />
 
@@ -202,6 +188,9 @@ function Turn({
     turn.result !== null &&
     buildChart(turn.chart, turn.result).kind !== "none";
 
+  // Nobody chose the source, so the turn has to say which one answered.
+  const source = sourceOf(turn);
+
   return (
     <div className="flex flex-col gap-6">
       <TurnRow avatar={<UserAvatar initials={initials} />}>
@@ -212,7 +201,12 @@ function Turn({
         <div className="flex flex-col gap-5">
           <RunTimeline state={turn} onCancel={live ? onCancel : undefined} />
 
-          {turn.sql ? <SqlBlock sql={turn.sql} /> : null}
+          {source ? (
+            <p className="flex items-center gap-1.5 text-[0.75rem] text-ink-muted">
+              <Sparkles aria-hidden className="size-3 shrink-0 text-brand" strokeWidth={2} />
+              {SOURCE_LABEL[source]}
+            </p>
+          ) : null}
 
           {plottable && turn.chart && turn.result ? (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -275,90 +269,14 @@ function AgentAvatar() {
   );
 }
 
-/**
- * The connection selector. Still a native select, laid transparently over a chip: no portal,
- * no open state, and the platform's own picker and keyboard handling on every device.
- */
-function ConnectionChip({
-  connections,
-  value,
-  onChange,
-  active,
-}: {
-  connections: Connection[];
-  value: string;
-  onChange: (id: string) => void;
-  active: Connection | null;
-}) {
-  if (connections.length === 0) {
-    return (
-      <Link
-        href="/connections"
-        className="inline-flex items-center gap-2 rounded-md border border-dashed border-line-strong px-2.5 py-1.5 text-[0.8125rem] text-ink-muted transition-colors hover:border-brand hover:text-brand"
-      >
-        <Database aria-hidden className="size-3.5" strokeWidth={1.75} />
-        Connect a database
-      </Link>
-    );
-  }
-
-  const many = connections.length > 1;
-
-  return (
-    <div
-      className={cn(
-        "relative inline-flex items-center gap-2 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[0.8125rem] text-ink",
-        many && "focus-within:ring-2 focus-within:ring-brand/25",
-      )}
-    >
-      <Database aria-hidden className="size-3.5 shrink-0 text-brand" strokeWidth={1.75} />
-      <span className="max-w-[14rem] truncate font-medium">{active?.name}</span>
-      {many ? (
-        <>
-          <ChevronDown aria-hidden className="size-3.5 shrink-0 text-ink-muted" strokeWidth={2} />
-          <select
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            aria-label="Data source"
-            className="absolute inset-0 size-full cursor-pointer appearance-none opacity-0"
-          >
-            {connections.map((connection) => (
-              <option key={connection.id} value={connection.id}>
-                {connection.name}
-              </option>
-            ))}
-          </select>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-function Opening({ connections }: { connections: Connection[] }) {
-  if (connections.length === 0) {
-    return (
-      <div className="py-16 text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Connect a database first</h1>
-        <p className="mx-auto mt-2 max-w-[46ch] text-[0.9375rem] leading-relaxed text-ink-muted">
-          Point the agent at a Postgres database with a read-only role and you can start asking
-          questions of it in plain English.
-        </p>
-        <Link
-          href="/connections"
-          className="mt-6 inline-block rounded-md bg-brand px-4 py-2 text-[0.875rem] font-medium text-brand-fg transition-colors hover:bg-brand-hover"
-        >
-          Add a connection
-        </Link>
-      </div>
-    );
-  }
-
+function Opening() {
   return (
     <div className="py-16 text-center">
       <h1 className="text-xl font-semibold tracking-tight text-ink">Ask a question</h1>
-      <p className="mx-auto mt-2 max-w-[46ch] text-[0.9375rem] leading-relaxed text-ink-muted">
-        In plain English. The agent writes the SQL, checks it, runs it read-only, and shows you
-        both the query and the rows it came back with.
+      <p className="mx-auto mt-2 max-w-[48ch] text-[0.9375rem] leading-relaxed text-ink-muted">
+        In plain English. Questions about what is happening now are read live from the
+        dashboard; anything already recorded is answered from the IoT database. The agent picks,
+        and every answer says which one it came from.
       </p>
     </div>
   );

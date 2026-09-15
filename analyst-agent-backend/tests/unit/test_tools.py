@@ -3,7 +3,13 @@ import json
 import pytest
 from langchain_core.tools import BaseTool
 
-from app.agent.tools import PREVIEW_ROWS, WEB_TOOL_NAME, make_query_tool, make_web_tool
+from app.agent.tools import (
+    PREVIEW_ROWS,
+    WEB_TOOL_NAME,
+    _table_list,
+    make_query_tool,
+    make_web_tool,
+)
 
 SCHEMA = {
     "tables": [
@@ -194,3 +200,56 @@ class TestWebTool:
 
         assert artifact["truncated"] is True
         assert len(artifact["rows"]) == 1
+
+
+class TestTableAnnotations:
+    """What the model is told each table holds, before it writes a query.
+
+    Without this the model cannot tell an empty table from a filter that matched nothing, and
+    answers both with a shrug. The wording is load-bearing: it has to be exact about
+    emptiness and vague about size.
+    """
+
+    def _rendered(self, stats):
+        schema = {
+            "tables": [
+                {"name": "trips", "columns": [{"name": "id", "type": "BIGINT"}], "stats": stats}
+            ]
+        }
+        return _table_list(schema)
+
+    def test_an_empty_table_says_so_in_words_the_model_cannot_miss(self):
+        assert "EMPTY, holds no rows at all" in self._rendered({"rows": "empty"})
+
+    def test_a_table_proven_to_hold_rows_is_not_called_empty(self):
+        # `reltuples` is -1 until a table is analysed, and 0 for one analysed while empty and
+        # bulk-loaded since. Neither proves emptiness, so neither may be rendered as it.
+        rendered = self._rendered({"rows": "nonempty"})
+
+        assert "EMPTY" not in rendered
+        assert "has rows" in rendered
+
+    def test_a_size_is_a_bucket_rather_than_a_count(self):
+        rendered = self._rendered({"rows": "millions", "rows_approx": 46_000_000})
+
+        assert "about 46,000,000 rows" in rendered
+
+    def test_a_partial_estimate_says_it_is_a_floor(self):
+        rendered = self._rendered(
+            {"rows": "millions", "rows_approx": 46_000_000, "rows_at_least": True}
+        )
+
+        assert "at least about 46,000,000 rows" in rendered
+
+    def test_stale_data_is_reported_as_where_the_rows_sit(self):
+        # Not "data up to X": a partition bound is the edge of the partition, not the newest
+        # row, and the description should not claim more than was measured.
+        rendered = self._rendered({"rows": "millions", "covered_to": "2026-07-06"})
+
+        assert "newest data sits in a partition ending 2026-07-06" in rendered
+
+    def test_a_schema_cached_before_statistics_existed_still_renders(self):
+        # The cache has a six hour life, so a deployment serves pre-change entries for a while.
+        schema = {"tables": [{"name": "old", "columns": [{"name": "id", "type": "INTEGER"}]}]}
+
+        assert _table_list(schema) == "TABLE old (id INTEGER)"

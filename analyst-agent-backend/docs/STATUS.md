@@ -504,6 +504,121 @@ half again as many requests against a 20-per-day quota and made charts impossibl
    The default is `127.0.0.1` now. `memurai-cli ping` answers normally throughout, which makes
    this present as an application bug rather than a name-resolution one.
 
+## Missing-data handling, built 2026-09-12
+
+The agent had one instruction for an empty result, "say so plainly and suggest one reason", and
+no way to tell an empty table from a filter that matched nothing from a period after the data
+ends. On this customer's data that is most of the product: 7 of 15 tables hold nothing and
+telemetry stopped in early July. The reason it offered was a guess.
+
+**The connector now reports what each table holds.** `describe_schema` carries a row bucket and,
+for a time-partitioned table, how far its data runs. `app/connectors/pg_stats.py` is where that
+is worked out, and everything in it reads the catalog or stops at one row; nothing scans, because
+the tables this matters most for are the ones that cannot be scanned inside the timeout.
+
+Three things about it are load-bearing and were all nearly got wrong:
+
+1. **`reltuples` cannot prove a table is empty.** It is -1 until a table is analysed and 0 for
+   one analysed while empty and bulk-loaded since. Measured on the local `demo` database, four
+   of five tables read -1. Emptiness is settled by an `EXISTS` probe or reported as unknown.
+2. **Summing partition children with `GREATEST(reltuples, 0)` reports a populated table as
+   empty.** `readings` holds 3 rows and the sum reads 0, because its children were never
+   analysed either. Telling the model a populated table is empty is the exact fabrication this
+   work exists to prevent.
+3. **The newest partition bound is not where the data ends.** Partitions are created weeks
+   ahead, so a pipeline that stopped on 2026-07-02 would advertise coverage to 07-13. Only the
+   newest *non-empty* child's bound is reported, and a DEFAULT partition suppresses the claim
+   entirely.
+
+**Recency is partition bounds only, never `max(ts)`.** The gate is not just cost. A bound is DDL
+the customer's DBA wrote; a `max(ts)` is a value read out of a row and pasted into every prompt
+for six hours, which under a strict reading of `SCHEMA_SAMPLE_ROWS=0` is a sample of size one.
+Owner's call on 2026-09-12: bounds only. Unpartitioned tables report no coverage date.
+
+**The prompts encode the policy.** The answering block now requires every figure to come from a
+returned row, requires an empty result to be explained rather than reported, requires a derived
+answer to be called an estimate, and keeps the answer in prose because the client renders one
+paragraph with no markdown. `SQL_CAPABILITY` lost the line that read "if the question is not
+about the customer's data at all, answer in one sentence without calling a tool", which was the
+one place in the service that invited an answer from outside the customer's data.
+
+### Rule 5 of the policy, combining sources: a deviation, recorded
+
+The policy asks for several sources to be consulted and merged. `app/agent/router.py` binds a run
+to one source on purpose. That stands; what was added is a one-directional fallback, live to
+historic only. An empty database result is answered from related tables inside the same source,
+never by putting a historic question to a dashboard that only knows the present moment.
+
+It is done with `create_agent` middleware rather than a second agent run. `app/agent/fallback.py`
+registers the database tool with the agent but takes it back out of what the model is shown,
+until the dashboard has actually been called and come back empty or broken. That keeps the
+router's real objection intact, that the agent cannot offer a source it has no tool for, while
+the run stays one stream, one answer, one thread.
+
+A second agent run was the obvious alternative and was rejected after being costed: the first leg
+only ends when the model writes an answer, so the customer would watch "the dashboard could not
+be read" stream in and then be overwritten, and the second leg would have to resume a thread
+holding a `fetch_dashboard` call it had no tool for.
+
+The stage sequence is `router, web_tool, sql_gen, sql_guard, db_exec, answer`. No new stage, no
+new event, so the frozen SSE contract is untouched and the frontend needs no change.
+
+`prepare_run` covers the half the middleware cannot: when the dashboard's schema cannot be read
+at all the agent does not exist yet, so the run becomes a database run outright and is told to
+say so. It still refuses when there is nothing to fall back to.
+
+### Rule 9, confidence: no field, by decision
+
+No `HIGH`/`MEDIUM`/`LOW` column, no badge, no SSE event, no migration. Confidence is carried in
+the wording of the answer. This follows the frontend's own rule that only what the data supports
+gets drawn, and it is the reason this change touches one repo instead of two.
+
+### Two defects found while building this
+
+1. **`Row.t` is a SQLAlchemy built-in.** The emptiness probe aliased its column `t`, and
+   SQLAlchemy exposes `.t` as a synonym for `.tuple()`, so `row.t` returned the whole row and
+   every probe result was keyed by a tuple. Silent: the dict was populated, the lookups just
+   never matched, and every partitioned table reported no coverage.
+2. **Registering a tool with middleware also advertises it.** `wrap_model_call(tools=[...])`
+   puts the tool in front of the model from the first turn, which is exactly what the router
+   exists to prevent. The middleware now removes it from `request.tools` until the fallback
+   fires. A test asserts the model is offered `["fetch_dashboard"]` on the first call and both
+   tools on the last; without it the regression is invisible, because a scripted model ignores
+   the tool list.
+
+### A pre-existing bug fixed on the way
+
+`app/workers/runs.py` called `connector.describe_schema()` directly, bypassing the six-hour
+cache. With the queue on, every run re-introspected: a second full browser sign-in for a web run
+whose schema `prepare_run` had just refreshed, and it would have run the new statistics queries
+on every run rather than every six hours. It goes through `refresh_schema_cache` now.
+
+### The fixture gained the two shapes being tested for
+
+`scripts/demo_customer.sql` had no empty table and no stale one, so a missing-data eval against
+it would have measured nothing, the same trap this file already records for the
+statement-timeout guidance. It now seeds an empty `trips` and a `gps_pings` whose data stops on
+2026-07-02 with a partition already created ahead of it, and runs `ANALYZE`, without which every
+table reports as never analysed and the tool description changes under the eval cassettes the
+moment autovacuum catches up. The stray `data` table that survived every reseed is dropped.
+
+### State
+
+433 tests pass, 6 skipped. Lint and format clean. Coverage 70% overall against the 70% floor,
+with `sql_guard.py` and `app/security/` still at 100% against theirs. `app/agent/fallback.py` is
+at 100%.
+
+**Two things are not done, and neither is optional.**
+
+1. **The demo database has not been reseeded.** `scripts/demo_customer.sql` is written but needs
+   the postgres superuser password, so `tests/integration/test_schema_stats.py` has never run.
+   Reseed, then run it.
+2. **There is no before/after eval pass rate, so hard rule 6 is not satisfied.** The prompt hash
+   moved from `de39cc3c` to `8c37188a`, so both cassettes are unfindable and replay fails loudly
+   by design. Recording the pair needs a billed `GEMINI_API_KEY`. The baseline must be recorded
+   against an untouched tree: the tool description changes three times in this work, and
+   `_tools_sha` drifts any cassette taken part-way through.
+
 ## Known limits and open checks
 
 | # | Item | Blocked on |
@@ -511,6 +626,8 @@ half again as many requests against a 20-per-day quota and made charts impossibl
 | 1 | `LANGSMITH_API_KEY` | the tracing half of phase 0's done-line |
 | 2 | The 30 IoT golden cases | the telemetry backfill, unchanged |
 | 3 | The hard rule 6 A/B on the IoT prompt | item 2; the harness makes it two commands |
+| 4 | Reseeding `demo`, so `test_schema_stats.py` can run at all | the postgres superuser password |
+| 5 | The hard rule 6 A/B on the missing-data prompts | a billed `GEMINI_API_KEY`; record the baseline on an untouched tree |
 
 Other things worth knowing rather than fixing:
 

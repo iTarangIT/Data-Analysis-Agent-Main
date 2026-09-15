@@ -4,6 +4,11 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 
 from app.config import get_settings
+from app.connectors import pg_stats
+
+# Bumped when the shape of what `describe_schema` returns changes, so a cache written by an
+# older build is refreshed rather than served for another six hours.
+SCHEMA_VERSION = 2
 
 
 class PostgresConnector:
@@ -38,6 +43,11 @@ class PostgresConnector:
 
         Sample rows help the model see value formats, but they are real customer rows and end
         up in every generation prompt, so `schema_sample_rows` may switch them off entirely.
+
+        Each table also carries what it holds: a size bucket and, where the table is
+        partitioned by time, how far its data actually runs. That is catalog metadata rather
+        than row contents, so it stands apart from `schema_sample_rows`, and without it the
+        model cannot tell an empty table from a filter that matched nothing.
         """
         if sample_rows is None:
             sample_rows = get_settings().schema_sample_rows
@@ -45,7 +55,9 @@ class PostgresConnector:
         insp = inspect(self.engine)
         tables: list[dict[str, Any]] = []
         with self.engine.connect() as conn:
-            for table in self._visible_tables(conn):
+            names = self._visible_tables(conn)
+            stats = pg_stats.collect(conn, names)
+            for table in names:
                 cols = [
                     {"name": c["name"], "type": str(c["type"])} for c in insp.get_columns(table)
                 ]
@@ -53,8 +65,11 @@ class PostgresConnector:
                 if sample_rows > 0:
                     rows = conn.execute(text(f'SELECT * FROM "{table}" LIMIT {sample_rows}'))
                     sample = [[str(v) for v in row] for row in rows]
-                tables.append({"name": table, "columns": cols, "sample": sample})
-        return {"tables": tables}
+                entry: dict[str, Any] = {"name": table, "columns": cols, "sample": sample}
+                if table in stats:
+                    entry["stats"] = stats[table]
+                tables.append(entry)
+        return {"v": SCHEMA_VERSION, "tables": tables}
 
     @staticmethod
     def _visible_tables(conn) -> list[str]:

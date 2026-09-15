@@ -3,7 +3,6 @@
 import { ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { SqlBlock } from "@/components/ask/sql-block";
 import type { RunDetail, RunSummary } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -42,9 +41,7 @@ function Detail({ runId }: { runId: string }) {
   if (!detail) return <p className="pt-3 text-[0.875rem] text-ink-muted">Loading</p>;
 
   return (
-    <div className="flex flex-col gap-3 pt-3">
-      {detail.sql ? <SqlBlock sql={detail.sql} /> : null}
-      {detail.answer ? (
+    <div className="flex flex-col gap-3 pt-3">      {detail.answer ? (
         <p className="max-w-[68ch] text-[0.9375rem] leading-[1.65] text-ink">{detail.answer}</p>
       ) : (
         <p className="text-[0.875rem] text-ink-muted">No answer was recorded for this run.</p>

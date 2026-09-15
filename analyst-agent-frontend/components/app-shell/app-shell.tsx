@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Database, LogOut, MessagesSquare, ScrollText } from "lucide-react";
+import { LogOut, MessagesSquare, ScrollText } from "lucide-react";
 
 import { logout } from "@/actions/auth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -26,9 +26,11 @@ import { NavLink } from "./nav-link";
  * Icons are rendered here and passed down as elements. See the note in nav-link.tsx.
  */
 
+// Connections is deliberately absent. This deployment answers from two fixed sources and the
+// agent picks between them per question, so there is nothing for a person to manage. The route
+// and its components still exist and still render if typed directly.
 const NAV = [
   { href: "/ask", label: "Ask", icon: <MessagesSquare className="size-4" strokeWidth={1.75} /> },
-  { href: "/connections", label: "Connections", icon: <Database className="size-4" strokeWidth={1.75} /> },
   { href: "/runs", label: "Runs", icon: <ScrollText className="size-4" strokeWidth={1.75} /> },
 ];
 

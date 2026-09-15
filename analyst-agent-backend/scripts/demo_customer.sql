@@ -3,10 +3,15 @@
 --   & "D:\postgres\bin\psql.exe" -U postgres -d demo -f scripts\demo_customer.sql
 -- Idempotent: safe to re-run.
 
+DROP TABLE IF EXISTS gps_pings;
+DROP TABLE IF EXISTS trips;
 DROP TABLE IF EXISTS readings;
 DROP TABLE IF EXISTS telemetry;
 DROP TABLE IF EXISTS batteries;
 DROP TABLE IF EXISTS dealers;
+-- Not created here, but it was in the database and survived every reseed, so it turned up in
+-- the tool description on every run. The script defines the fixture; it has to own removal too.
+DROP TABLE IF EXISTS data;
 
 CREATE TABLE dealers (
     id         SERIAL PRIMARY KEY,
@@ -74,6 +79,48 @@ SELECT b.id,
        48 + random() * 6,
        25 + random() * 15
   FROM batteries b, generate_series(1, 48) g;
+
+-- The two shapes the agent has to tell apart on the real IoT database, where 7 of 15 tables
+-- hold nothing and the telemetry pipeline stopped in early July. Without them a missing-data
+-- eval against this fixture would pass or fail for reasons unrelated to what it is testing.
+
+-- Never populated, like `trips` and `telemetry_fuel` upstream.
+CREATE TABLE trips (
+    id         BIGSERIAL PRIMARY KEY,
+    battery_id INT REFERENCES batteries (id),
+    started_at TIMESTAMPTZ NOT NULL,
+    ended_at   TIMESTAMPTZ,
+    distance_km NUMERIC(8, 2)
+);
+
+-- Stopped feeding in early July, with a partition already created ahead of the data. That
+-- empty partition is the point: reading the newest bound rather than the newest bound that
+-- holds rows would advertise coverage to 07-13 for a table that ends on 07-02.
+CREATE TABLE gps_pings (
+    id         BIGSERIAL,
+    battery_id INT NOT NULL,
+    ts         TIMESTAMPTZ NOT NULL,
+    lat        NUMERIC(9, 6),
+    lon        NUMERIC(9, 6)
+) PARTITION BY RANGE (ts);
+
+CREATE TABLE gps_pings_p20260622 PARTITION OF gps_pings
+    FOR VALUES FROM ('2026-06-22 00:00:00+00') TO ('2026-06-29 00:00:00+00');
+CREATE TABLE gps_pings_p20260629 PARTITION OF gps_pings
+    FOR VALUES FROM ('2026-06-29 00:00:00+00') TO ('2026-07-06 00:00:00+00');
+CREATE TABLE gps_pings_p20260706 PARTITION OF gps_pings
+    FOR VALUES FROM ('2026-07-06 00:00:00+00') TO ('2026-07-13 00:00:00+00');
+
+INSERT INTO gps_pings (battery_id, ts, lat, lon) VALUES
+    (1, '2026-06-23 08:00+00', 28.459497, 77.026638),
+    (2, '2026-06-27 14:30+00', 22.589800, 88.310600),
+    (3, '2026-07-01 09:15+00', 19.997500, 73.789800),
+    (4, '2026-07-02 17:45+00', 28.459497, 77.026638);
+
+-- Without this every table reports as never analysed, so the row buckets in the tool
+-- description would flip from "nonempty" to "few" the moment autovacuum caught up, and the
+-- eval cassettes fingerprint that description.
+ANALYZE;
 
 DO $$
 BEGIN

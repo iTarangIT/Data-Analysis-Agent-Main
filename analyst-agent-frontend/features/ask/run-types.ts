@@ -39,7 +39,9 @@ export type RunEvent =
 
 /** Client-side lifecycle facts, which the stream itself cannot report. */
 export type RunAction =
-  | { type: "@submit"; question: string; connectionId: string; threadId: string }
+  // `connectionId` is null when the agent is left to route between the tenant's sources,
+  // which is what every question from the product does.
+  | { type: "@submit"; question: string; connectionId: string | null; threadId: string }
   | { type: "@open" }
   | { type: "@http"; status: number; message: string; code?: string }
   | { type: "@transport"; message: string }

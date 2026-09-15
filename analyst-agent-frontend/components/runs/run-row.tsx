@@ -17,6 +17,13 @@ import { cn } from "@/lib/utils";
  * came back, not what they were.
  */
 
+/** `Run.tool` as the agent records it. `clarify` means it answered without reading anything. */
+const TOOL_LABEL: Record<string, string> = {
+  web: "live dashboard",
+  sql: "IoT database",
+  clarify: "answered without a source",
+};
+
 function Detail({ runId }: { runId: string }) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +101,10 @@ export function RunRow({ run }: { run: RunSummary }) {
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[0.875rem] text-ink">{run.question}</span>
           <span className="mt-0.5 block font-mono text-[0.75rem] text-ink-muted">
-            {run.connection_name ?? "connection removed"}
+            {/* Which tool answered, not which source was selected: nobody selects one. The
+                agent routes each question, so this is the only record of where a number
+                came from. */}
+            {TOOL_LABEL[run.tool ?? ""] ?? run.connection_name ?? "connection removed"}
             {" · "}
             {run.rows_returned === 1 ? "1 row" : `${run.rows_returned} rows`}
             {" · "}

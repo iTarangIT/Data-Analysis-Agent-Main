@@ -72,6 +72,16 @@ class TestRegisterIn:
 
 
 class TestRunCreate:
+    # `connection_id` used to be required. The router picks the source when the client does not
+    # name one, so an omitted id has to be a valid body rather than a 422.
+    @pytest.mark.parametrize("over", [{}, {"connection_id": None}])
+    def test_a_question_need_not_name_a_source(self, over):
+        body = RunCreate(thread_id="t", question="how many dealers", **over)
+        assert body.connection_id is None
+
+    def test_a_named_source_is_still_carried(self):
+        assert RunCreate(connection_id="c", thread_id="t", question="how many").connection_id == "c"
+
     @pytest.mark.parametrize("question", ["", "hi"])
     def test_rejects_a_question_that_is_too_short(self, question):
         with pytest.raises(ValidationError):

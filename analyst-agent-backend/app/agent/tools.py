@@ -22,12 +22,46 @@ class QueryDatabaseArgs(BaseModel):
     sql: str = Field(description=QUERY_TOOL_SQL_ARG)
 
 
+_ROW_PHRASE = {
+    "empty": "EMPTY, holds no rows at all",
+    "few": "a few rows",
+    "nonempty": "has rows, how many is not known",
+    "unknown": "row count not known",
+}
+
+
+def _stats_line(stats: dict[str, Any]) -> str:
+    """What the table holds, in words the model can act on.
+
+    Deliberately vague about size and exact about emptiness. A bucket is all the model needs
+    to judge whether a query will survive the statement timeout, whereas an exact-looking
+    count invites it to answer "there are 45,899,998 readings" without querying anything.
+    """
+    rows = stats.get("rows", "unknown")
+    if rows in _ROW_PHRASE:
+        said = _ROW_PHRASE[rows]
+    else:
+        approx = stats.get("rows_approx")
+        said = f"about {approx:,} rows" if approx else "row count not known"
+        if stats.get("rows_at_least"):
+            said = said.replace("about", "at least about")
+
+    if covered := stats.get("covered_to"):
+        said += f"; its newest data sits in a partition ending {covered}"
+    return said
+
+
 def _table_list(schema: dict[str, Any]) -> str:
     """The tool carries the schema so it is usable on its own, not only from the agent."""
     parts = []
     for t in schema.get("tables", []):
         cols = ", ".join(f"{c['name']} {c['type']}" for c in t["columns"])
-        parts.append(f"TABLE {t['name']} ({cols})")
+        line = f"TABLE {t['name']} ({cols})"
+        # `.get`, like `sample` below: a schema cached before statistics existed still renders,
+        # just without them, rather than failing every run until the cache ages out.
+        if stats := t.get("stats"):
+            line += f"  -- {_stats_line(stats)}"
+        parts.append(line)
         if t.get("sample"):
             parts.append(f"  sample rows: {json.dumps(t['sample'][:3])}")
     return "\n".join(parts)
