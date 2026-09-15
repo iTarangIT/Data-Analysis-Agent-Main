@@ -9,6 +9,7 @@ Called from `app.agent.tools`, which every model-issued query must pass through.
 
 import sqlglot
 from sqlglot import exp
+from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
 
 # Anything that writes, changes structure or changes permissions. `Into` is here because
 # `SELECT ... INTO t` parses as an ordinary Select yet creates a table. `Copy`, `Attach` and
@@ -32,6 +33,21 @@ FORBIDDEN = (
     exp.Install,
 )
 
+# Each takes a table name or a whole query as a string, so the allowlist never sees the table it
+# reads. Called in FROM they already fail as unnamed tables; this catches them in an expression.
+READS_BY_NAME = (
+    "query_to_xml",
+    "table_to_xml",
+    "cursor_to_xml",
+    "schema_to_xml",
+    "database_to_xml",
+    "dblink",
+    "ts_stat",
+)
+
+# Where an unqualified name resolves. The Postgres connector pins its search_path to match.
+DEFAULT_SCHEMA = {"postgres": "public", "duckdb": "main"}
+
 
 def _local_aliases(tree: exp.Expression) -> set[str]:
     """Names that resolve inside the query itself: CTE and derived-table aliases.
@@ -39,10 +55,8 @@ def _local_aliases(tree: exp.Expression) -> set[str]:
     Without this, `WITH recent AS (...) SELECT * FROM recent` is rejected because `recent`
     is not in the customer's schema.
     """
-    aliases = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
-    aliases |= {
-        sub.alias_or_name.lower() for sub in tree.find_all(exp.Subquery) if sub.alias_or_name
-    }
+    aliases = {cte.alias_or_name for cte in tree.find_all(exp.CTE)}
+    aliases |= {sub.alias_or_name for sub in tree.find_all(exp.Subquery) if sub.alias_or_name}
     return aliases
 
 
@@ -82,12 +96,35 @@ def validate_sql(
         if isinstance(node, FORBIDDEN):
             return sql, f"forbidden operation: {type(node).__name__}"
 
+    # Names are compared the way the database resolves them: `PUBLIC.x` is `public.x`, while a
+    # quoted `"Public".x` is another schema. A copy, so the SQL that runs is what the model wrote.
+    checked = normalize_identifiers(tree.copy(), dialect=dialect)
+
+    by_name = sorted(
+        {
+            f.name.lower()
+            for f in checked.find_all(exp.Anonymous)
+            if f.name.lower().startswith(READS_BY_NAME)
+        }
+    )
+    if by_name:
+        return sql, f"functions that read tables by name are not allowed: {by_name}"
+
+    schema = DEFAULT_SCHEMA[dialect]
+    elsewhere = sorted(
+        t.sql(dialect=dialect)
+        for t in checked.find_all(exp.Table)
+        if t.catalog or t.db not in ("", schema)
+    )
+    if elsewhere:
+        return sql, f"only tables in the {schema} schema are allowed, got {elsewhere}"
+
     # A table function such as read_csv_auto('...') is a Table node with an empty name, so the
     # allowlist already rejects it. Naming it in the message matters: the reason is fed back as a
     # retry hint, and "tables not allowed: ['']" tells the model nothing, so it reissues the same
     # query until the tool budget runs out.
-    used = {t.name.lower() or t.sql(dialect=dialect) for t in tree.find_all(exp.Table)}
-    unknown = used - {t.lower() for t in allowed_tables} - _local_aliases(tree)
+    used = {t.name or t.sql(dialect=dialect) for t in checked.find_all(exp.Table)}
+    unknown = used - set(allowed_tables) - _local_aliases(checked)
     if unknown:
         return sql, f"tables not allowed: {sorted(unknown)}"
 

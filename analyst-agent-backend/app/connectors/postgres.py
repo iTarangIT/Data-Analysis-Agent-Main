@@ -30,9 +30,12 @@ class PostgresConnector:
             pool_size=2,
             max_overflow=2,
             connect_args={
+                # search_path is pinned so a bare table name can only mean the `public` table
+                # the guard allowed, whatever the customer's role has set.
                 "options": (
                     f"-c statement_timeout={s.statement_timeout_ms} "
-                    f"-c default_transaction_read_only=on"
+                    "-c default_transaction_read_only=on "
+                    "-c search_path=public"
                 )
             },
         )

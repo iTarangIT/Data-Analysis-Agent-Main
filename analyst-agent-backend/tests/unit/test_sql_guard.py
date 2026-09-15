@@ -189,3 +189,68 @@ class TestDuckDBDialect:
         _, err = validate_sql("select * from sales", FILES, 500)
 
         assert err is None
+
+
+class TestSchemaQualifiedNames:
+    """A person chooses which tables the agent may use, so a qualifier must not reach around
+    that choice to a same-named table somewhere else."""
+
+    def test_an_allowed_name_in_another_schema_is_rejected(self):
+        assert "other.dealers" in _rejected("select name from other.dealers")
+
+    def test_a_catalog_qualified_table_is_rejected(self):
+        _rejected("select name from demo.public.dealers")
+
+    def test_system_catalogs_are_rejected_by_schema_rather_than_by_luck(self):
+        # `information_schema.tables` used to pass only because no customer table is named
+        # `tables`. One that is would have opened the whole catalog.
+        _, err = validate_sql("select table_name from information_schema.tables", {"tables"}, 100)
+
+        assert err is not None
+
+    @pytest.mark.parametrize(
+        "sql", ["select name from PUBLIC.dealers", 'select name from "public".dealers']
+    )
+    def test_public_is_accepted_however_it_is_written(self, sql):
+        _ok(sql)
+
+    def test_a_quoted_schema_keeps_its_case(self):
+        # Postgres folds unquoted names only, so "Public" is a different schema from public.
+        _rejected('select name from "Public".dealers')
+
+    def test_duckdb_accepts_its_main_schema_and_nothing_else(self):
+        assert validate_sql("select * from main.sales", FILES, 500, "duckdb")[1] is None
+        assert validate_sql("select * from other.sales", FILES, 500, "duckdb")[1] is not None
+
+
+class TestFunctionsThatReadTablesByName:
+    """These take a table name or a query as a string, so the allowlist never sees the table
+    they read. Used in FROM they already fail as unnamed tables; in an expression they did not.
+    """
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "select query_to_xml('select * from secrets', true, false, '')",
+            "select query_to_xml_and_xmlschema('select * from secrets', true, false, '')",
+            "select table_to_xml('secrets', true, false, '')",
+            "select cursor_to_xml('c', 10, true, false, '')",
+            "select schema_to_xml('public', true, false, '')",
+            "select database_to_xml(true, false, '')",
+            "select dblink('dbname=other', 'select * from secrets')",
+            "select ts_stat('select body from secrets')",
+            "select pg_catalog.query_to_xml('select * from secrets', true, false, '')",
+            (
+                "select name from dealers "
+                "where exists (select table_to_xml('secrets', true, false, ''))"
+            ),
+        ],
+    )
+    def test_is_rejected(self, sql):
+        _rejected(sql)
+
+    def test_the_rejection_names_the_function_so_the_model_can_correct_it(self):
+        assert "table_to_xml" in _rejected("select table_to_xml('secrets', true, false, '')")
+
+    def test_an_ordinary_function_is_still_accepted(self):
+        _ok("select date_trunc('month', created_at), count(*) from dealers group by 1")
