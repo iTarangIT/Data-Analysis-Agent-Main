@@ -10,13 +10,12 @@ UPLOAD_SUFFIXES = {".csv", ".tsv", ".xlsx", ".parquet"}
 
 REQUIRED_SECRET_FIELDS: dict[str, set[str]] = {
     "postgres": {"dsn"},
-    "web": {"url", "username", "password"},
 }
 
 
 class ConnectionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
-    kind: Literal["postgres", "web"]
+    kind: Literal["postgres"]
     secret: dict
 
     @field_validator("secret")
@@ -51,9 +50,7 @@ class ChartSpec(BaseModel):
 
 
 class RunCreate(BaseModel):
-    # Optional, because the router picks the source when the client does not. A client that
-    # names one still gets it: the eval harness and the worker-kill harness both do.
-    connection_id: str | None = None
+    connection_id: str
     thread_id: str = Field(min_length=1, max_length=100)
     question: str = Field(min_length=3, max_length=2000)
 

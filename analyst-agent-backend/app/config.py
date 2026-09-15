@@ -59,21 +59,9 @@ class Settings(BaseSettings):
     # legitimately query more than once to answer, without any of them having been rejected.
     max_tool_calls: int = 6
 
-    session_store_dir: str = "./sessions"
     file_store_dir: str = "./uploads"
     # Bounds resident memory per concurrent run, because an upload is materialised in full.
     max_upload_bytes: int = 25 * 1024 * 1024
-    playwright_headless: bool = True
-    # Which of a dashboard's XHR responses carries the data. Narrow it as far as the site
-    # allows: every matching body is read, and a wider match can pick up an auth response.
-    web_data_url_match: str = "/api/"
-    # The Intellicar dashboard pulls in Google Maps, Firebase and reCAPTCHA before it is
-    # interactive, and gets slower under repeated sign-ins. 30s was not enough.
-    web_nav_timeout_ms: int = 60_000
-    # How long to wait for the dashboard's own data call, which only starts after its
-    # scripts boot. Waiting is polled, so a fast dashboard does not pay the whole budget.
-    web_data_timeout_ms: int = 25_000
-    web_settle_ms: int = 1_500
 
     # 127.0.0.1, not localhost: Memurai binds IPv4 only, while `localhost` resolves to ::1
     # first on Windows, so the client spends its whole connect timeout on IPv6 and fails.

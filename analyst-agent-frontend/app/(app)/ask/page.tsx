@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { AskWorkspace } from "@/components/ask/ask-workspace";
 import { agentJson } from "@/lib/api/agent-client";
 import { initialsOf } from "@/lib/initials";
-import type { RunPage, Thread } from "@/lib/api/types";
+import type { Connection, RunPage, Thread } from "@/lib/api/types";
 import { getCurrentUser, requireSession } from "@/lib/auth/dal";
 
 export const metadata = { title: "Ask" };
@@ -23,14 +23,13 @@ export default async function AskPage({ searchParams }: PageProps<"/ask">) {
   const threadId = typeof thread === "string" && thread.length > 0 ? thread : randomUUID();
   const continuing = typeof thread === "string" && thread.length > 0;
 
-  // Connections are deliberately not read here. This deployment has two fixed sources and the
-  // agent routes between them per question, so the page has nothing to choose and nothing to
-  // show. `POST /runs` omits the connection id and the router picks.
-  //
   // Read straight from the agent. Going through our own route handlers would add a round trip
-  // between the handler and this render for nothing. Neither read is load-bearing: an
-  // unreachable agent still renders the page.
-  const [threads, history] = await Promise.all([
+  // between the handler and this render for nothing. None of the three is load-bearing: an
+  // unreachable agent still renders the page, and the composer says why.
+  const [connections, threads, history] = await Promise.all([
+    agentJson<Connection[]>("/connections", { token: session.accessToken }).catch(
+      (): Connection[] => [],
+    ),
     agentJson<Thread[]>("/runs/threads?limit=30", { token: session.accessToken }).catch(
       (): Thread[] => [],
     ),
@@ -46,6 +45,7 @@ export default async function AskPage({ searchParams }: PageProps<"/ask">) {
 
   return (
     <AskWorkspace
+      connections={connections}
       threadId={threadId}
       threads={threads}
       // The agent returns newest first; a transcript reads oldest first.

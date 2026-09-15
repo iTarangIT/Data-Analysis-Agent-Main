@@ -58,11 +58,9 @@ async def run_question(ctx: dict, run_id: str) -> None:
             return
         conn = db.get(Connection, run.connection_id)
         connector = connector_for(conn)
-        # Through the cache, not straight to the source. Introspecting here as well would sign
-        # into the dashboard a second time for a run whose schema `prepare_run` just refreshed.
+        # Through the cache, not straight to the source: `prepare_run` has just refreshed it.
         schema = await svc.refresh_schema_cache(db, conn, connector)
-        backup = await svc.resolve_backup(db, conn)
-        await asyncio.to_thread(svc.execute_run, db, run, connector, schema, emit, backup)
+        await asyncio.to_thread(svc.execute_run, db, run, connector, schema, emit)
     except asyncio.CancelledError:
         # The client went away, or the job timed out. Report it before the task dies, using the
         # synchronous client: an await inside an already-cancelled coroutine may never resume.

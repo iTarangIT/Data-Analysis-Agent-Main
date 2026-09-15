@@ -1,6 +1,6 @@
 /** Mirrors the agent's `app/api/schemas.py`. Kept narrow: only what the UI actually reads. */
 
-export type ConnectionKind = "postgres" | "web" | "file";
+export type ConnectionKind = "postgres" | "file";
 
 export type Connection = {
   id: string;

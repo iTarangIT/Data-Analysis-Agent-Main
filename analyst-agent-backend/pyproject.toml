@@ -26,7 +26,6 @@ dependencies = [
     "langgraph-checkpoint-postgres>=2.0",
     "langsmith>=0.1",
     "structlog>=24",
-    "playwright>=1.47",
     "duckdb>=1.1",
     "pandas>=2.2",
     "openpyxl>=3.1",

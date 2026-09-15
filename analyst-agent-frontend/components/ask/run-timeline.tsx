@@ -28,7 +28,6 @@ const LABEL: Record<Stage, string> = {
   sql_gen: "Writing the query",
   sql_guard: "Checking the query",
   db_exec: "Running on database",
-  web_tool: "Reading the dashboard",
   answer: "Writing the answer",
 };
 

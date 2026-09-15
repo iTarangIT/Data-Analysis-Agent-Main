@@ -19,9 +19,13 @@ class TestConnectionCreate:
         with pytest.raises(ValidationError, match="secret missing"):
             ConnectionCreate(name="demo", kind="postgres", secret={"host": "h"})
 
-    def test_rejects_a_web_secret_missing_credentials(self):
-        with pytest.raises(ValidationError, match=r"secret missing \['password', 'username'\]"):
-            ConnectionCreate(name="dash", kind="web", secret={"url": "https://x"})
+    def test_rejects_a_web_dashboard(self):
+        with pytest.raises(ValidationError):
+            ConnectionCreate(
+                name="dash",
+                kind="web",
+                secret={"url": "https://x", "username": "u", "password": "p"},
+            )
 
     def test_rejects_an_unknown_kind(self):
         with pytest.raises(ValidationError):
@@ -72,15 +76,10 @@ class TestRegisterIn:
 
 
 class TestRunCreate:
-    # `connection_id` used to be required. The router picks the source when the client does not
-    # name one, so an omitted id has to be a valid body rather than a 422.
     @pytest.mark.parametrize("over", [{}, {"connection_id": None}])
-    def test_a_question_need_not_name_a_source(self, over):
-        body = RunCreate(thread_id="t", question="how many dealers", **over)
-        assert body.connection_id is None
-
-    def test_a_named_source_is_still_carried(self):
-        assert RunCreate(connection_id="c", thread_id="t", question="how many").connection_id == "c"
+    def test_a_question_must_name_its_connection(self, over):
+        with pytest.raises(ValidationError):
+            RunCreate(thread_id="t", question="how many dealers", **over)
 
     @pytest.mark.parametrize("question", ["", "hi"])
     def test_rejects_a_question_that_is_too_short(self, question):

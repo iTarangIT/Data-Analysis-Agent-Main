@@ -5,7 +5,6 @@ import pytest
 
 from app.connectors.postgres import PostgresConnector
 from app.connectors.registry import connector_for
-from app.connectors.web import WebConnector
 from app.db.models import Connection
 from app.security import vault
 
@@ -16,24 +15,7 @@ def _connection(kind: str, secret: dict) -> Connection:
     )
 
 
-def test_a_web_connection_builds_a_web_connector():
-    conn = _connection("web", {"url": "https://d.example", "username": "u", "password": "p"})
-
-    connector = connector_for(conn)
-
-    assert isinstance(connector, WebConnector)
-    assert connector.kind == "web"
-
-
-def test_the_web_connector_is_scoped_to_the_row_it_came_from():
-    conn = _connection("web", {"url": "https://d.example", "username": "u", "password": "p"})
-
-    connector = connector_for(conn)
-
-    assert (connector.tenant_id, connector.connection_id) == ("t_a", "c1")
-
-
-def test_a_postgres_connection_still_builds_a_postgres_connector():
+def test_a_postgres_connection_builds_a_postgres_connector():
     conn = _connection(
         "postgres", {"dsn": "postgresql+psycopg://analyst_ro:ro@localhost:5432/demo"}
     )

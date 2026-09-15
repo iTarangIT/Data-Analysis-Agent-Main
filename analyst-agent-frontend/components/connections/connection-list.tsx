@@ -1,6 +1,6 @@
 "use client";
 
-import { Database, FileSpreadsheet, Globe, Trash2 } from "lucide-react";
+import { Database, FileSpreadsheet, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -22,7 +22,6 @@ import { cn } from "@/lib/utils";
 
 const ICON: Record<ConnectionKind, React.ReactNode> = {
   postgres: <Database className="size-4" strokeWidth={1.75} />,
-  web: <Globe className="size-4" strokeWidth={1.75} />,
   file: <FileSpreadsheet className="size-4" strokeWidth={1.75} />,
 };
 

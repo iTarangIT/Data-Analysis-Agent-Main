@@ -1,14 +1,14 @@
 import type { ChartSpec } from "@/lib/api/types";
 
 /**
- * The agent's five contract stages, plus `web_tool` for a dashboard source.
+ * The agent's five contract stages.
  *
  * These are not a ladder. With bounded SQL retries the agent can go
  * `sql_gen -> sql_guard -> sql_gen` when the guard rejects a query and the model tries again,
  * so anything that renders them as a fixed five-step progress bar will lie on exactly the
  * runs worth looking at.
  */
-export type Stage = "router" | "sql_gen" | "sql_guard" | "db_exec" | "web_tool" | "answer";
+export type Stage = "router" | "sql_gen" | "sql_guard" | "db_exec" | "answer";
 
 /**
  * A single table cell.
@@ -39,9 +39,7 @@ export type RunEvent =
 
 /** Client-side lifecycle facts, which the stream itself cannot report. */
 export type RunAction =
-  // `connectionId` is null when the agent is left to route between the tenant's sources,
-  // which is what every question from the product does.
-  | { type: "@submit"; question: string; connectionId: string | null; threadId: string }
+  | { type: "@submit"; question: string; connectionId: string; threadId: string }
   | { type: "@open" }
   | { type: "@http"; status: number; message: string; code?: string }
   | { type: "@transport"; message: string }
@@ -57,7 +55,6 @@ export type RunPhase =
   | "generating"
   | "guarding"
   | "executing"
-  | "browsing"
   | "answering"
   | "done"
   | "error"

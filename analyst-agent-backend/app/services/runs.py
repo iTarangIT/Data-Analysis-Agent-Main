@@ -18,10 +18,7 @@ from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import Session
 
 from app import queue
-from app.agent import router
 from app.agent.graph import build_agent, recursion_limit
-from app.agent.router import choose_source
-from app.agent.tools import WEB_TOOL_NAME
 from app.api.schemas import RunCreate
 from app.config import get_settings
 from app.connectors.base import Connector
@@ -33,7 +30,6 @@ from app.security.auth import TenantContext
 from app.services import connections as conn_svc
 from app.services.charts import infer_chart
 from app.services.errors import BudgetExceeded, DomainError, NotFound, RateLimited
-from app.workers.web_session import DashboardUnavailable
 
 SCHEMA_CACHE_TTL = timedelta(hours=6)
 
@@ -41,23 +37,10 @@ Emit = Callable[[dict], None]
 
 
 @dataclass(frozen=True)
-class Backup:
-    """The tenant's database, standing by for a dashboard run that comes back empty."""
-
-    connection_id: str
-    connector: Connector
-    schema: dict
-
-
-@dataclass(frozen=True)
 class PreparedRun:
     run: Run
     connector: Connector
     schema: dict
-    backup: Backup | None = None
-    # True when the dashboard could not even be introspected, so this run is already the
-    # database standing in for it and should say so.
-    fell_back: bool = False
 
 
 @dataclass
@@ -77,9 +60,6 @@ class EventTranslator:
     `create_agent` has two nodes, but the contract names five stages, so each step is reported
     as the stage it actually performs: the first model call is the routing decision, a model
     call that emits a tool call is generation, and the tool guards then executes.
-
-    A web tool call is announced at the model step rather than when the tool returns, because
-    the browser work is the slow part and the client would otherwise sit on `router` for it.
     """
 
     def __init__(self, outcome: RunOutcome):
@@ -98,9 +78,8 @@ class EventTranslator:
             yield {"type": "status", "data": {"stage": "router"}}
 
         if message.tool_calls:
-            web = message.tool_calls[0]["name"] == WEB_TOOL_NAME
-            self.outcome.tool = "web" if web else "sql"
-            yield {"type": "status", "data": {"stage": "web_tool" if web else "sql_gen"}}
+            self.outcome.tool = "sql"
+            yield {"type": "status", "data": {"stage": "sql_gen"}}
             return
 
         # Gemini 3 returns a list of content blocks rather than a string, so read `.text`,
@@ -116,11 +95,6 @@ class EventTranslator:
         result = message.artifact or {}
         if not result:
             return  # an unknown tool name or an exception escaping one carries no artifact
-
-        if message.name == WEB_TOOL_NAME:
-            if not result.get("error"):
-                yield from self._rows(result)
-            return  # the stage was reported before the browser ran, and no SQL exists to report
 
         yield {"type": "status", "data": {"stage": "sql_guard"}}
         if result.get("error"):
@@ -239,60 +213,10 @@ async def refresh_schema_cache(db: Session, conn: Connection, connector: Connect
         datetime.now(UTC) - conn.schema_cached_at > SCHEMA_CACHE_TTL
     )
     if conn.schema_cache is None or stale:
-        # A web source introspects by signing in and driving a browser, which would hold the
-        # event loop for tens of seconds. Postgres introspection comes off the loop with it.
         conn.schema_cache = await asyncio.to_thread(connector.describe_schema)
         conn.schema_cached_at = datetime.now(UTC)
         db.commit()
     return conn.schema_cache
-
-
-async def _resolve_source(db: Session, ctx: TenantContext, body: RunCreate) -> Connection:
-    """Which source answers this question.
-
-    A client may still name one, and the eval harness and the worker-kill harness both do. When
-    none is named the router decides, which is the path every question from the product takes:
-    there are two fixed sources and the choice between them is mechanical.
-
-    Routing costs one model call, inside the POST and before the stream opens. That is the same
-    side of the response as the schema introspection already awaited below, and for the same
-    reason: everything that can still fail as a plain status belongs before the first frame.
-    """
-    if body.connection_id:
-        return conn_svc.get_connection(db, ctx.tenant_id, body.connection_id)
-
-    sources = conn_svc.list_connections(db, ctx.tenant_id)
-    if not sources:
-        raise DomainError("no data source is connected for this organisation")
-
-    route = await asyncio.to_thread(choose_source, body.question, sources)
-    log.info("run.routed", reason=route.reason, connection_id=route.connection.id)
-    return route.connection
-
-
-async def resolve_backup(db: Session, conn: Connection) -> Backup | None:
-    """The database a dashboard run falls back to, or None when there is nothing to fall to.
-
-    Resolved before the stream opens so the agent already holds it, but never allowed to fail
-    the run: a tenant whose database is unreachable should still get whatever the dashboard
-    can tell them, which is the source their question was routed to in the first place.
-    """
-    if conn.kind not in router.LIVE_KINDS:
-        return None
-
-    others = [c for c in conn_svc.list_connections(db, conn.tenant_id) if c.id != conn.id]
-    standby = router.pick(others, live=False)
-    if standby is None:
-        return None
-
-    try:
-        connector = connector_for(standby)
-        schema = await refresh_schema_cache(db, standby, connector)
-    except Exception as e:
-        log.warning("run.backup_unavailable", connection_id=standby.id, error=str(e))
-        return None
-
-    return Backup(connection_id=standby.id, connector=connector, schema=schema)
 
 
 async def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> PreparedRun:
@@ -304,23 +228,9 @@ async def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> Prepa
     tenant = conn_svc.ensure_tenant(db, ctx.tenant_id)
     check_limits(db, tenant)
 
-    conn = await _resolve_source(db, ctx, body)
+    conn = conn_svc.get_connection(db, ctx.tenant_id, body.connection_id)
     connector = connector_for(conn)
-    backup = await resolve_backup(db, conn)
-    fell_back = False
-    try:
-        schema = await refresh_schema_cache(db, conn, connector)
-    except DashboardUnavailable as e:
-        # A web connection is not smoke-tested when it is created, so a wrong password surfaces
-        # here, on a cold cache. The agent does not exist yet, so the middleware that normally
-        # handles a dead dashboard cannot: this run becomes a database run outright.
-        log.warning("connection.dashboard_failed", connection_id=conn.id, error=str(e))
-        if backup is None:
-            raise DomainError(
-                "could not read the live dashboard, so this question cannot be answered right now"
-            ) from e
-        conn = conn_svc.get_connection(db, ctx.tenant_id, backup.connection_id)
-        connector, schema, backup, fell_back = backup.connector, backup.schema, None, True
+    schema = await refresh_schema_cache(db, conn, connector)
 
     run = Run(
         tenant_id=ctx.tenant_id,
@@ -336,9 +246,7 @@ async def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> Prepa
     if get_settings().queue_enabled:
         await queue.pool().enqueue_job("run_question", run.id, _job_id=run.id)
 
-    return PreparedRun(
-        run=run, connector=connector, schema=schema, backup=backup, fell_back=fell_back
-    )
+    return PreparedRun(run=run, connector=connector, schema=schema)
 
 
 def execute_run(
@@ -347,8 +255,6 @@ def execute_run(
     connector: Connector,
     schema: dict,
     emit: Emit,
-    backup: "Backup | None" = None,
-    fell_back: bool = False,
 ) -> None:
     """Drive the agent and report what it does. Synchronous, because `agent.stream` is.
 
@@ -368,13 +274,7 @@ def execute_run(
 
     try:
         with PostgresSaver.from_conn_string(str(s.checkpoint_db_url)) as saver:
-            agent = build_agent(
-                connector,
-                schema,
-                checkpointer=saver,
-                backup=(backup.connector, backup.schema) if backup else None,
-                fell_back=fell_back,
-            )
+            agent = build_agent(connector, schema, checkpointer=saver)
             config = {
                 "configurable": {"thread_id": f"{run.tenant_id}:{run.thread_id}"},
                 "callbacks": [usage],
@@ -410,17 +310,9 @@ def execute_run(
     # name. Keying on that name recorded zero tokens whenever the two differed, and the daily
     # budget is enforced from exactly this number.
     totals = list(usage.usage_metadata.values())
-    settled: dict[str, Any] = {}
-    if backup and outcome.tool == "sql":
-        # The middleware handed the run to the database part-way through, so the history row
-        # has to name the source that actually answered. `run` itself is left alone: it belongs
-        # to the request's session, and this runs on another thread.
-        log.info("run.answered_by_backup", connection_id=backup.connection_id)
-        settled["connection_id"] = backup.connection_id
     finish_run(
         db,
         run.id,
-        **settled,
         status=status,
         error=error,
         duration_ms=duration_ms,
@@ -457,15 +349,7 @@ async def _stream_inline(prepared: PreparedRun) -> AsyncIterator[dict[str, str]]
     def work() -> None:
         db = SessionLocal()
         try:
-            execute_run(
-                db,
-                run,
-                prepared.connector,
-                prepared.schema,
-                emit,
-                backup=prepared.backup,
-                fell_back=prepared.fell_back,
-            )
+            execute_run(db, run, prepared.connector, prepared.schema, emit)
         finally:
             db.close()
             loop.call_soon_threadsafe(frames.put_nowait, None)

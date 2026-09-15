@@ -13,7 +13,6 @@ const PHASE_FOR: Record<Stage, RunPhase> = {
   sql_gen: "generating",
   sql_guard: "guarding",
   db_exec: "executing",
-  web_tool: "browsing",
   answer: "answering",
 };
 

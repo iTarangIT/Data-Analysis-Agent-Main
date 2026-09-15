@@ -14,8 +14,7 @@ export type UseRun = {
   state: RunState;
   /** Earlier turns in this sitting, oldest first. Never includes `state`. */
   turns: RunState[];
-  /** `connectionId` is optional: omit it and the agent picks the source for the question. */
-  ask: (input: { connectionId?: string; question: string; threadId: string }) => Promise<void>;
+  ask: (input: { connectionId: string; question: string; threadId: string }) => Promise<void>;
   cancel: () => void;
   reset: () => void;
 };
@@ -56,7 +55,7 @@ export function useRun(): UseRun {
       setTurns((current) => [...current, state]);
     }
 
-    dispatch({ type: "@submit", question, connectionId: connectionId ?? null, threadId });
+    dispatch({ type: "@submit", question, connectionId, threadId });
 
     let response: Response;
     try {
@@ -64,8 +63,7 @@ export function useRun(): UseRun {
         method: "POST",
         headers: { "content-type": "application/json", accept: "text/event-stream" },
         body: JSON.stringify({
-          // Omitted rather than null, so the field is simply absent for a routed question.
-          ...(connectionId ? { connection_id: connectionId } : {}),
+          connection_id: connectionId,
           thread_id: threadId,
           question,
         }),

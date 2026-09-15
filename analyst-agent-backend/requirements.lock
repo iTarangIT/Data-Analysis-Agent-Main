@@ -81,9 +81,7 @@ google-auth[requests]==2.58.0
 google-genai==2.22.0
     # via langchain-google-genai
 greenlet==3.5.5
-    # via
-    #   playwright
-    #   sqlalchemy
+    # via sqlalchemy
 h11==0.16.0
     # via
     #   httpcore
@@ -188,8 +186,6 @@ pathspec==1.1.1
     # via mypy
 pip-tools==7.6.1
     # via analyst-agent (pyproject.toml)
-playwright==1.62.0
-    # via analyst-agent (pyproject.toml)
 pluggy==1.6.0
     # via
     #   pytest
@@ -228,8 +224,6 @@ pydantic-core==2.46.5
     # via pydantic
 pydantic-settings==2.15.0
     # via analyst-agent (pyproject.toml)
-pyee==13.0.1
-    # via playwright
 pygments==2.21.0
     # via pytest
 pyjwt==2.13.0
@@ -326,7 +320,6 @@ typing-extensions==4.16.0
     #   psycopg-pool
     #   pydantic
     #   pydantic-core
-    #   pyee
     #   pytest-asyncio
     #   sqlalchemy
     #   starlette
