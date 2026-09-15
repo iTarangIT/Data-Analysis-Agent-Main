@@ -133,6 +133,8 @@ per word, capped at 1.5s after the final text arrives. Earlier answers appear in
 The composer has no second spinner, and the process panel's stage marks are static.
 A `prefers-reduced-motion: reduce` block disables CSS motion; the typing hook also
 observes this preference and immediately reveals the complete available answer.
+Auto-scroll follows content without smooth-scroll animation and pauses when the reader
+scrolls more than 48px from the bottom.
 
 No animation library is installed. Do not add entrance animations, parallax, scroll
 reveals or hover lifts.

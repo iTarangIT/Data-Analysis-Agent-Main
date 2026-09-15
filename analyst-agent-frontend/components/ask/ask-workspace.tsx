@@ -16,6 +16,7 @@ import { buildChart } from "@/features/ask/chart";
 import type { RunState } from "@/features/ask/run-types";
 import { isRunning } from "@/features/ask/run-types";
 import { useRun } from "@/features/ask/use-run";
+import { useTranscriptScroll } from "@/features/ask/use-transcript-scroll";
 import { useTypedAnswer } from "@/features/ask/use-typed-answer";
 import type { Connection, RunSummary, Thread } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -51,6 +52,7 @@ export function AskWorkspace({
   userInitials: string;
 }) {
   const { state, turns, ask, cancel, reset } = useRun();
+  const { viewportRef, contentRef, onSubmit: followSubmittedQuestion } = useTranscriptScroll();
   const [question, setQuestion] = useState("");
   const [connectionId, setConnectionId] = useState(connections[0]?.id ?? "");
 
@@ -73,6 +75,7 @@ export function AskWorkspace({
     const asked = question.trim();
     // Cleared before the await, so the composer empties the instant you send.
     setQuestion("");
+    followSubmittedQuestion();
     await ask({ connectionId, question: asked, threadId });
   }
 
@@ -111,8 +114,8 @@ export function AskWorkspace({
           ) : null}
         </header>
 
-        <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-6">
+        <div ref={viewportRef} className="flex-1 overflow-y-auto [overflow-anchor:none]">
+          <div ref={contentRef} className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-6">
             {empty ? (
               <Opening connections={connections} />
             ) : (
