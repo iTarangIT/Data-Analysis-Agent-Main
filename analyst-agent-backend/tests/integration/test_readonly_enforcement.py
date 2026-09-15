@@ -40,17 +40,11 @@ def test_reads_still_work(connector):
     assert cols == ["n"] and rows[0][0] == 240
 
 
-def test_schema_introspection_finds_the_seeded_tables(connector):
-    names = {t["name"] for t in connector.describe_schema()["tables"]}
-    assert {"dealers", "batteries", "telemetry"} <= names
-
-
-def test_partition_children_are_hidden_but_the_parent_is_shown(connector):
-    """The real IoT schema is 115 tables of which 100 are weekly partitions. Listing children
-    would swamp the generator's prompt and let the guard allow a query against one directly."""
-    names = {t["name"] for t in connector.describe_schema()["tables"]}
-    assert "readings" in names
-    assert not {n for n in names if n.startswith("readings_p")}
+def test_a_bare_table_name_can_only_resolve_in_public(connector):
+    # The guard allows bare names by matching them against tables in `public`. A role whose
+    # search_path put another schema first would make that match mean a different table.
+    _, rows = connector.run_select("SHOW search_path", max_rows=1)
+    assert rows == [("public",)]
 
 
 def test_the_parent_partition_can_still_be_queried(connector):

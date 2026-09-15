@@ -13,6 +13,7 @@ from typing import Any
 
 import duckdb
 
+from app.catalog.types import Column, TableDef
 from app.config import get_settings
 from app.services.errors import DomainError
 
@@ -135,6 +136,25 @@ class DuckDBConnector:
                 sample = [[str(v) for v in row] for row in rows]
             tables.append({"name": table, "columns": columns, "sample": sample})
         return {"tables": tables}
+
+    def list_tables(self) -> list[str]:
+        return sorted(self.tables)
+
+    def read_tables(self, names: list[str]) -> list[TableDef]:
+        """Columns only. A spreadsheet has no keys, so it has no relationships to report."""
+        wanted = set(names) & set(self.tables)
+        columns: dict[str, list[Column]] = {}
+        rows = self.con.execute(
+            "SELECT table_name, column_name, data_type, is_nullable = 'YES' "
+            "FROM information_schema.columns WHERE table_schema = 'main' "
+            "ORDER BY table_name, ordinal_position"
+        ).fetchall()
+        for table, name, type_, nullable in rows:
+            if table in wanted:
+                columns.setdefault(table, []).append(
+                    Column(name=name, type=type_, nullable=nullable)
+                )
+        return [TableDef(name=table, columns=columns[table]) for table in sorted(wanted)]
 
     def run_select(self, sql: str, max_rows: int) -> tuple[list[str], list[tuple]]:
         cursor = self.con.execute(sql)

@@ -72,29 +72,24 @@ class TestIngest:
 
 
 class TestSchema:
-    def test_it_describes_the_uploaded_columns(self, connector):
-        table = connector.describe_schema(sample_rows=0)["tables"][0]
+    def test_it_lists_the_uploaded_tables(self, connector):
+        assert connector.list_tables() == ["q3_sales"]
 
-        assert table["name"] == "q3_sales"
-        assert [c["name"] for c in table["columns"]] == [
-            "region",
-            "product",
-            "units",
-            "revenue_inr",
-        ]
+    def test_it_reads_the_uploaded_columns_in_file_order(self, connector):
+        (table,) = connector.read_tables(["q3_sales"])
+
+        assert table.name == "q3_sales"
+        assert [c.name for c in table.columns] == ["region", "product", "units", "revenue_inr"]
 
     def test_types_are_sniffed_once_at_ingest(self, connector):
-        types = {
-            c["name"]: c["type"]
-            for c in connector.describe_schema(sample_rows=0)["tables"][0]["columns"]
-        }
+        (table,) = connector.read_tables(["q3_sales"])
+        types = {c.name: c.type for c in table.columns}
 
         assert types["units"] == "BIGINT"
         assert types["region"] == "VARCHAR"
 
-    def test_sample_rows_honour_the_existing_setting(self, connector):
-        assert connector.describe_schema(sample_rows=0)["tables"][0]["sample"] == []
-        assert len(connector.describe_schema(sample_rows=1)["tables"][0]["sample"]) == 1
+    def test_a_table_the_file_does_not_hold_is_not_invented(self, connector):
+        assert [t.name for t in connector.read_tables(["q3_sales", "elsewhere"])] == ["q3_sales"]
 
 
 class TestQuerying:

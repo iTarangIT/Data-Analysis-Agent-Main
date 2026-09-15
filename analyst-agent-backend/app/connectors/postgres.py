@@ -3,8 +3,9 @@ from typing import Any
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 
+from app.catalog.types import TableDef
 from app.config import get_settings
-from app.connectors import pg_stats
+from app.connectors import pg_catalog, pg_stats
 
 # Bumped when the shape of what `describe_schema` returns changes, so a cache written by an
 # older build is refreshed rather than served for another six hours.
@@ -58,7 +59,7 @@ class PostgresConnector:
         insp = inspect(self.engine)
         tables: list[dict[str, Any]] = []
         with self.engine.connect() as conn:
-            names = self._visible_tables(conn)
+            names = pg_catalog.list_tables(conn)
             stats = pg_stats.collect(conn, names)
             for table in names:
                 cols = [
@@ -74,29 +75,19 @@ class PostgresConnector:
                 tables.append(entry)
         return {"v": SCHEMA_VERSION, "tables": tables}
 
-    @staticmethod
-    def _visible_tables(conn) -> list[str]:
-        """Ordinary and partitioned tables in `public`, never partition children.
+    def list_tables(self) -> list[str]:
+        with self.engine.connect() as conn:
+            return pg_catalog.list_tables(conn)
 
-        `Inspector.get_table_names` returns children too. On the iTarang IoT database that is
-        100 weekly partitions against 15 real tables, which would swamp the generator's prompt
-        and let the guard accept a query aimed at one week's partition instead of the parent.
-        Views are excluded with them: the only ones present belong to pg_stat_statements.
-        """
-        rows = conn.execute(
-            text(
-                """
-                SELECT c.relname
-                  FROM pg_class c
-                  JOIN pg_namespace n ON n.oid = c.relnamespace
-                 WHERE n.nspname = 'public'
-                   AND c.relkind IN ('r', 'p')
-                   AND NOT c.relispartition
-                 ORDER BY c.relname
-                """
-            )
-        )
-        return [r[0] for r in rows]
+    def read_tables(self, names: list[str]) -> list[TableDef]:
+        with self.engine.connect() as conn:
+            return pg_catalog.read_tables(conn, names)
+
+    def table_stats(self, names: list[str]) -> dict[str, dict[str, Any]]:
+        # A connection of its own: `collect` shortens the statement timeout for the rest of
+        # whatever transaction it runs in.
+        with self.engine.connect() as conn:
+            return pg_stats.collect(conn, names)
 
     def run_select(self, sql: str, max_rows: int) -> tuple[list[str], list[tuple]]:
         with self.engine.connect() as conn:
