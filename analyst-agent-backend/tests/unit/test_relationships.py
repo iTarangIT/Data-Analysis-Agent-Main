@@ -169,6 +169,28 @@ class TestInferredFromAnIdSuffix:
 
 
 class TestTheMapAsAWhole:
+    def test_two_unique_columns_matching_each_other_are_one_relationship(self):
+        # Each `imei` is a key the other table could point at, so the match is found from both
+        # ends. Reported twice, the model would be told of two joins where there is one.
+        batteries = _table(
+            "batteries",
+            {"id": "integer", "imei": "text"},
+            pk=["id"],
+            uniques=[["imei"]],
+            not_null=["imei"],
+        )
+        modems = _table(
+            "modems",
+            {"id": "integer", "imei": "text"},
+            pk=["id"],
+            uniques=[["imei"]],
+            not_null=["imei"],
+        )
+
+        assert _edges([modems, batteries]) == [
+            ("batteries", ["imei"], "modems", ["imei"], "inferred", "one_to_one")
+        ]
+
     def test_a_declared_key_suppresses_guesses_between_the_same_two_tables(self):
         batteries = _table(
             "batteries",

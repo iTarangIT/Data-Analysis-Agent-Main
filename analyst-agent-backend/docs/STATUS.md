@@ -8,7 +8,7 @@ Source of truth for the active phase. Phase N+1 does not begin until phase N's l
 | 0 | repos, Compose, stub graph, SSE endpoint | `curl -N /runs` streams a stub, trace in LangSmith | **done**, tracing dormant | 2026-09-10 |
 | 1 | SQL tool on our own IoT DB, guard, evals | `evals/run_evals.py` >= 25/30 | code complete, **gate paused** | 2026-09-10 |
 | 2 | JWT auth, vault, `/connections`, then frontend Part B | second person connects a DB without help | **in progress** | backend auth, history and delete shipped 2026-09-11; frontend building |
-| 3 | web tool (Playwright) | Intellicar live query works for two tenants with separate sessions | **done**, verified live | 2026-09-11 |
+| 3 | ~~web tool (Playwright)~~ | — | **removed** by decision; `3203026` reverts to bring it back | 2026-09-15 |
 | 4 | Redis workers, limits, usage, ~~Docker deploy~~ | killing a worker mid-run gives a clean `error` event | **done**, verified live, Docker cut | 2026-09-11 |
 | 5 | file tool (DuckDB), charts | spreadsheet-only customer gets value | **done** | 2026-09-10 |
 | 6 | billing | paid plan sets `daily_token_budget` | deferred by decision | — |
@@ -645,3 +645,105 @@ Other things worth knowing rather than fixing:
   `MAX_RUNS_PER_MINUTE` for a suite run.
 - **Aborting a queued run cannot interrupt the thread it runs on**, so an in-flight model call
   finishes in the background. Its result is discarded by the guarded update.
+
+## The database only, over tables a person chooses, built 2026-09-15
+
+Owner's call: remove the web tool for now, answer from the database alone, and let a person
+choose which tables the agent may use, twelve to start with. Six commits on `feat/table-catalog`:
+
+| Commit | What |
+|---|---|
+| `405c4db` | the uncommitted router, fallback and table statistics, recorded as they stood |
+| `3203026` | the web tool removed; reverting this one commit brings it back |
+| `d38505a` | the guard refuses other schemas, and functions that read a table by name |
+| `33204aa` | the schema readers and the relationship mapper |
+| `8390d4b` | table choice, the stored catalog, its API, and the run wiring |
+| `163afa2` | the tables screen |
+
+The phase 3 and missing-data sections above describe code that no longer exists after
+`3203026`. They stay as the record.
+
+### Phase 3 is descoped
+
+The dashboard connector, the Playwright session manager, the router, the fallback middleware,
+their prompts, the `playwright` dependency and the `web_tool` SSE stage are gone from both apps,
+in one commit because the stage list is part of the frozen contract. A run names its connection
+again, so the Ask screen's connection picker, which the router had replaced, is back.
+
+Migration `c94f73823b3f` soft-deletes every web connection and blanks its credential, exactly as
+`delete_connection` does, so runs keep their foreign key and history still names the source. Its
+downgrade is a no-op: a blanked secret cannot be restored.
+
+### Choosing tables turned the guard's allowlist into a boundary, and it had three holes
+
+Probed before any change, with `allowed={vehicles, alerts}`, the guard accepted
+`other_schema.vehicles`, `query_to_xml('select * from secret_table', ...)` and
+`table_to_xml('secret_table', ...)`. That was harmless while every `public` table was allowed,
+and is not once a person has deliberately left one out.
+
+Names are now compared the way Postgres resolves them, on a normalised copy so the SQL that runs
+is still what the model wrote. A schema other than `public` (DuckDB: `main`) is refused, and so
+is a function that reads a table named in a string. The connector pins `search_path=public`, so
+a bare name cannot resolve anywhere else.
+
+This limits what the agent is shown and may query. It is not a permission boundary against a
+customer's own view or function that reads another table, because no check on names can see
+inside one. Where that matters, narrow `analyst_ro`'s grants to the chosen tables.
+
+### How it is split
+
+- `app/catalog/types.py` and `relationships.py`: a table's structure and how a set of tables
+  joins. Pure, and importing nothing from `app`.
+- `app/connectors/pg_catalog.py`: columns from `pg_attribute` with `format_type`, because the
+  Inspector renders `timestamptz` as `TIMESTAMP`; keys, unique indexes, checks and comments from
+  `Inspector.get_multi_*`. A fixed handful of statements however many tables, and no row read.
+  DuckDB reads an upload's columns and reports no keys.
+- `app/services/tables.py`: a `connection_tables` row for every table the source exposes, a
+  definition and statistics for chosen tables only, and their relationships on the connection.
+- `app/agent/schema_context.py`: the query tool's description, rendered from that store.
+
+Relationships are the declared foreign keys, plus two inferences that are always labelled
+`inferred`: a column matching another chosen table's one-column key (never `id`, never a
+table's own whole key, never a date, boolean or float), and `<x>_id` against a table named `x`
+or its plural whose key is `id`. Only edges between chosen tables are kept, because the guard
+would refuse the query that followed any other.
+
+A first listing chooses every table when there are no more than `MAX_AGENT_TABLES`, which keeps
+`demo` and small spreadsheets answering; the IoT database's 15 have to be chosen by hand. A run
+on a connection with nothing chosen is a 400 before the stream opens. Runs re-read the chosen
+tables once their reading is six hours old, and only ever update those rows, so two runs at once
+cannot collide; tables appearing or vanishing wait for a refresh someone asks for.
+
+Sample rows are gone, with `SCHEMA_SAMPLE_ROWS`. What the model reads about a database is now
+columns, keys, a size bucket and a partition bound. The 50-row preview of a query's own result
+is unchanged: it is what the model answers from.
+
+### Evals, hard rule 6
+
+The guard change was measured by replaying the `de39cc3c` cassettes against `main`'s code in a
+worktree, without it and then with it: `golden_sql` 4/4 and 4/4, `golden_file` 7/7 and 7/7, no
+drift in either.
+
+`8390d4b` changes `QUERY_TOOL_DESC` and `SQL_CAPABILITY`, so no cassette describes the agent
+after it. **There is no before/after pass rate for the catalog prompts, and rule 6 is not
+satisfied for that commit.** The recording needs `demo` reseeded first, and the free tier's 20
+requests a day does not cover both suites.
+
+### Verified
+
+- Unit tests pass and ruff is clean.
+- The integration tests that leave the App DB alone pass: the tables API, the schema reader and
+  read-only enforcement. They run as throwaway tenants and delete what they make.
+- The full integration suite was **not** run. `clean_app_db` empties the App DB, which on this
+  machine is the real account and its connections.
+- `alembic upgrade head`, `downgrade -1` and `upgrade head` again, against the local `analyst`.
+- Frontend: vitest, typecheck, eslint and `next build` are clean.
+
+### Not done
+
+| # | Item | Blocked on |
+|---|---|---|
+| 1 | A rule 6 pass rate for the catalog prompts | reseeding `demo`, then model quota |
+| 2 | The inferred joins, checked against the real IoT schema | the SSH tunnel on 127.0.0.1:5500 |
+| 3 | `sessions/` still holds Intellicar cookies, and `.env` still holds `INTELLICAR_*` | the owner's go-ahead to delete them |
+| 4 | `test_schema_stats.py`, unchanged from item 4 above | reseeding `demo` |

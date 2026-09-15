@@ -5,13 +5,13 @@ Full manual with every command, file and checkpoint: `docs/analyst_saas_implemen
 
 ## 1. What we are building
 
-A multi-tenant SaaS where a customer connects their own data source (Postgres DB, a web dashboard like Intellicar, or an uploaded file), asks a question in plain English, and gets an answer with numbers, the SQL used and a result table. Owner: iTarang (Apoorv). Reference behaviour: the existing `iTarangIT/Data-Analysis-Agent` repo (TypeScript). We are rebuilding it as a product.
+A multi-tenant SaaS where a customer connects their own data source (a Postgres database or an uploaded file), chooses which of its tables the agent may read, asks a question in plain English, and gets an answer with numbers, the SQL used and a result table. Owner: iTarang (Apoorv). Reference behaviour: the existing `iTarangIT/Data-Analysis-Agent` repo (TypeScript). We are rebuilding it as a product.
 
 Two repos, one workspace:
 
 | Repo | Stack | Role |
 |---|---|---|
-| `analyst-agent/` | Python 3.12, FastAPI, LangGraph, SQLAlchemy, Alembic, Playwright, sqlglot | the agent — routing, SQL generation, guard, execution, streaming |
+| `analyst-agent/` | Python 3.12, FastAPI, LangGraph, SQLAlchemy, Alembic, sqlglot | the agent — routing, SQL generation, guard, execution, streaming |
 | `analyst-web/` | Next.js 16 App Router, TypeScript strict, SWR, shadcn, Tailwind v4 | product shell — auth screens, connections UI, ask workspace, history |
 
 They talk over one contract: `POST /runs` (SSE), `/connections` and `/runs` history on the agent, authenticated with an HS256 JWT `{tenant_id, sub}` **minted by the agent** at `/auth/login`. The web app holds that token in an httpOnly cookie and attaches it server-side; it never holds the signing secret. **Backend is built first; frontend is generated from the backend's `/openapi.json`.**
@@ -25,7 +25,7 @@ Check `docs/STATUS.md` (create it if missing, one line per phase with date + don
 | 0 | repos, Compose, stub graph, SSE endpoint | `curl -N /runs` streams a stub, trace in LangSmith |
 | 1 | SQL tool on our own IoT DB, guard, evals | `evals/run_evals.py` ≥ 25/30 |
 | 2 | JWT auth, vault, `/connections`, then frontend Part B | second person connects a DB without help |
-| 3 | web tool (Playwright) | Intellicar live query works for two tenants with separate sessions |
+| 3 | ~~web tool (Playwright)~~ | descoped 2026-09-15: the database is the only live source, see `docs/STATUS.md` |
 | 4 | Redis workers, limits, usage, Docker deploy (Docker on VPS/CI only) | killing a worker mid-run gives a clean `error` event |
 | 5 | file tool (DuckDB), charts | spreadsheet-only customer gets value |
 | 6 | billing | paid plan sets `daily_token_budget` |
@@ -74,19 +74,7 @@ python evals/recorded.py --record --only 0-9    # capture the model; the free ti
 python evals/recorded.py --replay               # rerun the suite offline, no API calls
 $env:MAX_RUNS_PER_MINUTE="100"                  # a suite trips the per-tenant rate limit
 pip-compile --extra dev -o requirements.lock pyproject.toml     # after any dependency change
-playwright install chromium                           # no `install-deps` on Windows
 ```
-
-Chromium lives on D: because C: has no free space. Both the browser path and the download's
-temp directory must point there, or the install fails with `ENOSPC` after 80%:
-
-```powershell
-$env:PLAYWRIGHT_BROWSERS_PATH="D:\ms-playwright"
-$env:TEMP="D:\pwtmp"; $env:TMP="D:\pwtmp"
-playwright install chromium
-```
-
-The same `PLAYWRIGHT_BROWSERS_PATH` must be set when running anything that drives a browser.
 
 
 ### The queue (phase 4)
@@ -131,9 +119,8 @@ pnpm playwright test  # needs agent + local Postgres + pnpm dev running
 ```
 create_agent:  model  <-->  tools        (loop until the model stops calling tools)
                               |
-                              +-- query_database  -> sql_guard -> customer DB (read-only)
-                              +-- web_tool        -> Playwright  (phase 3)
-                              +-- file_tool       -> DuckDB      (phase 5)
+                              +-- query_database  -> sql_guard -> Postgres or DuckDB (read-only)
+                                    described from, and allowed only, the connection's chosen tables
 ```
 
 The model chooses whether to call a tool, which replaces the hand-written router. The guard
@@ -141,7 +128,8 @@ runs inside the tool, so no model-issued SQL can reach a database unguarded. The
 bounded by `recursion_limit()`, derived from `max_sql_retries`.
 
 - `app/api/` = HTTP only. `app/services/` = business rules. `app/agent/` = LangGraph. `app/connectors/` = customer data sources. `app/security/` = JWT + Fernet vault. Nothing imports upward.
-- `app/agent/nodes/sql_guard.py` is pure code (sqlglot). **It must never call a model.** SELECT only, one statement, table allowlist from the connection's schema cache, LIMIT injected, forbidden ops rejected.
+- `app/agent/nodes/sql_guard.py` is pure code (sqlglot). **It must never call a model.** SELECT only, one statement, `public` (or DuckDB's `main`) only, table allowlist from the tables chosen for the connection, LIMIT injected, forbidden ops and table-reading functions rejected.
+- Table structure is split by job. `app/catalog/` holds its shape (`types.py`) and how tables join (`relationships.py`) and imports nothing from `app`; `app/connectors/pg_catalog.py` and `duckdb.py` read it; `app/services/tables.py` stores it for the chosen tables only; `app/agent/schema_context.py` writes it into the query tool's description. Columns, keys and a size bucket are stored and shown to the model. A row never is.
 - `app/security/vault.py` is the only module that sees plaintext credentials. `decrypt()` is called only from `app/connectors/registry.py`. No API response ever contains `secret_enc`, `dsn`, `password`.
 - Every function under `connectors/` and `agent/` takes `tenant_id`. No default tenant. Checkpointer thread ids are `f"{tenant_id}:{thread_id}"`.
 - Three databases, never confused: App DB (ours, Alembic), Checkpoint DB (LangGraph-managed, disposable), Customer DB (theirs, read-only role, never migrated, never written).
@@ -151,7 +139,7 @@ bounded by `recursion_limit()`, derived from `max_sql_retries`.
 
 | event | data |
 |---|---|
-| `status` | `{"stage": router\|sql_gen\|sql_guard\|db_exec\|web_tool\|answer}` |
+| `status` | `{"stage": router\|sql_gen\|sql_guard\|db_exec\|answer}` |
 | `sql` | `{"sql": "..."}` |
 | `rows` | `{"columns": [...], "rows": [[...]], "truncated": bool}` |
 | `chart` | `{"type": bar\|line, "x": "col", "y": ["col"]}` — optional, always straight after a `rows` |
