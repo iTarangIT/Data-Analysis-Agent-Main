@@ -16,10 +16,12 @@ def clean_app_db():
 
     db = SessionLocal()
     try:
-        # Order matters: refresh_tokens references users, and users references tenants.
+        # Order matters: refresh_tokens references users, users and connections reference
+        # tenants, and connection_tables and runs reference connections.
         db.execute(text("DELETE FROM refresh_tokens"))
         db.execute(text("DELETE FROM users"))
         db.execute(text("DELETE FROM runs"))
+        db.execute(text("DELETE FROM connection_tables"))
         db.execute(text("DELETE FROM connections"))
         db.execute(text("DELETE FROM tenants"))
         db.commit()

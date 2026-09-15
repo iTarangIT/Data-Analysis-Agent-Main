@@ -7,17 +7,19 @@ from langchain_core.language_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage
 
 from app.agent.graph import build_agent, recursion_limit
+from app.catalog.types import Catalog, CatalogTable, Column, TableDef
 from app.services.runs import EventTranslator, RunOutcome
 
-SCHEMA = {
-    "tables": [
-        {
-            "name": "vehicles",
-            "columns": [{"name": "vehicleno", "type": "TEXT"}, {"name": "owner", "type": "TEXT"}],
-            "sample": [],
-        }
+CATALOG = Catalog(
+    tables=[
+        CatalogTable(
+            definition=TableDef(
+                name="vehicles",
+                columns=[Column(name="vehicleno", type="text"), Column(name="owner", type="text")],
+            )
+        )
     ]
-}
+)
 
 
 class FakeToolModel(FakeMessagesListChatModel):
@@ -40,12 +42,6 @@ class FakeConnector:
         self.executed.append(sql)
         return self.columns, self.rows[:max_rows]
 
-    def describe_schema(self):
-        return SCHEMA
-
-    def test(self):
-        return True
-
 
 def _tool_call(sql):
     return AIMessage(
@@ -59,7 +55,7 @@ def _run(model, connector):
     translator = EventTranslator(outcome)
     events = []
     with patch("app.agent.graph.get_llm", return_value=model):
-        agent = build_agent(connector, SCHEMA)
+        agent = build_agent(connector, CATALOG)
         for chunk in agent.stream(
             {"messages": [("user", "how many vehicles")]},
             config={"recursion_limit": recursion_limit()},

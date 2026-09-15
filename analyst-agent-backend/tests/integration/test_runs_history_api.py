@@ -313,7 +313,7 @@ class TestDeleteConnection:
         row = clean_app_db.scalar(select(Connection).where(Connection.id == conn_id))
         assert row is not None  # the row survives, so history can still name the source
         assert row.secret_enc == ""
-        assert row.schema_cache is None
+        assert (row.relationships, row.catalog_refreshed_at) == (None, None)
         assert "postgresql" not in row.secret_enc
 
     def test_a_run_against_a_deleted_connection_is_a_404(self, client, clean_app_db, demo_dsn):

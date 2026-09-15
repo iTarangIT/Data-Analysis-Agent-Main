@@ -1,15 +1,11 @@
 from typing import Any
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from app.catalog.types import TableDef
 from app.config import get_settings
 from app.connectors import pg_catalog, pg_stats
-
-# Bumped when the shape of what `describe_schema` returns changes, so a cache written by an
-# older build is refreshed rather than served for another six hours.
-SCHEMA_VERSION = 2
 
 
 class PostgresConnector:
@@ -41,40 +37,6 @@ class PostgresConnector:
             },
         )
 
-    def describe_schema(self, sample_rows: int | None = None) -> dict[str, Any]:
-        """Table and column names, used as the SQL generator's context and as the guard's
-        table allowlist.
-
-        Sample rows help the model see value formats, but they are real customer rows and end
-        up in every generation prompt, so `schema_sample_rows` may switch them off entirely.
-
-        Each table also carries what it holds: a size bucket and, where the table is
-        partitioned by time, how far its data actually runs. That is catalog metadata rather
-        than row contents, so it stands apart from `schema_sample_rows`, and without it the
-        model cannot tell an empty table from a filter that matched nothing.
-        """
-        if sample_rows is None:
-            sample_rows = get_settings().schema_sample_rows
-
-        insp = inspect(self.engine)
-        tables: list[dict[str, Any]] = []
-        with self.engine.connect() as conn:
-            names = pg_catalog.list_tables(conn)
-            stats = pg_stats.collect(conn, names)
-            for table in names:
-                cols = [
-                    {"name": c["name"], "type": str(c["type"])} for c in insp.get_columns(table)
-                ]
-                sample = []
-                if sample_rows > 0:
-                    rows = conn.execute(text(f'SELECT * FROM "{table}" LIMIT {sample_rows}'))
-                    sample = [[str(v) for v in row] for row in rows]
-                entry: dict[str, Any] = {"name": table, "columns": cols, "sample": sample}
-                if table in stats:
-                    entry["stats"] = stats[table]
-                tables.append(entry)
-        return {"v": SCHEMA_VERSION, "tables": tables}
-
     def list_tables(self) -> list[str]:
         with self.engine.connect() as conn:
             return pg_catalog.list_tables(conn)
@@ -84,6 +46,9 @@ class PostgresConnector:
             return pg_catalog.read_tables(conn, names)
 
     def table_stats(self, names: list[str]) -> dict[str, dict[str, Any]]:
+        """What each table holds: a size bucket and, for a time-partitioned table, how far its
+        data runs. Catalog metadata rather than row contents, and without it the model cannot
+        tell an empty table from a filter that matched nothing."""
         # A connection of its own: `collect` shortens the statement timeout for the rest of
         # whatever transaction it runs in.
         with self.engine.connect() as conn:

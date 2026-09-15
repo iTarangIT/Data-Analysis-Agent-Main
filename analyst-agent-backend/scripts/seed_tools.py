@@ -25,6 +25,7 @@ from app.db.models import User  # noqa: E402
 from app.db.session import SessionLocal  # noqa: E402
 from app.security import vault  # noqa: E402
 from app.services import connections as conn_svc  # noqa: E402
+from app.services import tables  # noqa: E402
 
 DATABASE_NAME = "IoT database"
 
@@ -46,12 +47,11 @@ def _upsert(db, tenant_id: str, dsn: str) -> str:
     keep, *extra = sorted(existing, key=lambda c: (c.created_at, c.id))
 
     # Re-encrypt rather than edit: `secret_enc` is opaque, and this is the same vault call
-    # `create_connection` makes. The schema cache is dropped because the credential may now
-    # point somewhere else entirely.
+    # `create_connection` makes. What was read from the old source is forgotten because the
+    # credential may now point somewhere else entirely; the tables are listed again on next use.
     keep.name = DATABASE_NAME
     keep.secret_enc = vault.encrypt({"dsn": dsn})
-    keep.schema_cache = None
-    keep.schema_cached_at = None
+    tables.forget(db, keep)
 
     for duplicate in extra:
         conn_svc.delete_connection(db, tenant_id, duplicate.id)

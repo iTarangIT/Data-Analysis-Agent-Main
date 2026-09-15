@@ -50,9 +50,9 @@ class Settings(BaseSettings):
         return [o.strip() for o in v.split(",") if o.strip()]
 
     max_rows: int = 500
-    # Sample rows are embedded in every SQL-generation prompt. Set to 0 for sources whose row
-    # contents must not leave the network.
-    schema_sample_rows: int = 3
+    # How many of a connection's tables a person may let the agent use. Every selected table's
+    # structure goes into every query prompt, so this is what bounds that prompt's size.
+    max_agent_tables: int = 12
     statement_timeout_ms: int = 8000
     max_sql_retries: int = 2
     # How many tool calls one question may make. Distinct from max_sql_retries: a model may

@@ -19,7 +19,8 @@ def test_create_then_list(client, token, demo_dsn, clean_app_db):
     )
     assert r.status_code == 201
     body = r.json()
-    assert body["name"] == "demo" and body["has_schema_cache"] is False
+    # The demo fixture has fewer tables than the cap, so creating it chooses them all.
+    assert body["name"] == "demo" and body["selected_tables"] == body["total_tables"] > 0
 
     listed = client.get("/connections", headers=_auth(token)).json()
     assert [c["id"] for c in listed] == [body["id"]]

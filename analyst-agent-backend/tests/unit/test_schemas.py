@@ -39,7 +39,14 @@ class TestConnectionCreate:
 class TestConnectionOut:
     def test_carries_no_secret_field(self):
         fields = set(ConnectionOut.model_fields)
-        assert fields == {"id", "name", "kind", "has_schema_cache"}
+        assert fields == {
+            "id",
+            "name",
+            "kind",
+            "selected_tables",
+            "total_tables",
+            "catalog_refreshed_at",
+        }
         assert not fields & {"secret", "secret_enc", "dsn", "password"}
 
 

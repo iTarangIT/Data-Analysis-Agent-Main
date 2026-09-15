@@ -73,7 +73,7 @@ def prompt_sha() -> str:
 
     Splitting the system prompt into capability blocks changed the constants without changing a
     byte the model sees, and re-recording costs a day of quota, so the hash must not move for a
-    refactor. A web suite carries its own capability text and is guarded by per-turn drift.
+    refactor.
     """
     from app.agent import prompts
 

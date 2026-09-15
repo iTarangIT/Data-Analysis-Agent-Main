@@ -3,14 +3,16 @@ import json
 import pytest
 from langchain_core.tools import BaseTool
 
-from app.agent.tools import PREVIEW_ROWS, _table_list, make_query_tool
+from app.agent.tools import PREVIEW_ROWS, make_query_tool
+from app.catalog.types import Catalog, CatalogTable, Column, TableDef
 
-SCHEMA = {
-    "tables": [
-        {"name": "vehicles", "columns": [{"name": "vehicleno", "type": "TEXT"}], "sample": []},
-        {"name": "alerts", "columns": [{"name": "severity", "type": "TEXT"}], "sample": []},
-    ]
-}
+VEHICLES = CatalogTable(
+    definition=TableDef(name="vehicles", columns=[Column(name="vehicleno", type="text")])
+)
+ALERTS = CatalogTable(
+    definition=TableDef(name="alerts", columns=[Column(name="severity", type="text")])
+)
+CATALOG = Catalog(tables=[VEHICLES, ALERTS])
 
 
 class FakeConnector:
@@ -25,12 +27,6 @@ class FakeConnector:
         self.executed.append(sql)
         return self.cols, self.rows[:max_rows]
 
-    def describe_schema(self):
-        return SCHEMA
-
-    def test(self):
-        return True
-
 
 @pytest.fixture
 def connector():
@@ -39,7 +35,7 @@ def connector():
 
 @pytest.fixture
 def tool(connector):
-    return make_query_tool(connector, SCHEMA)
+    return make_query_tool(connector, CATALOG)
 
 
 def call(tool, sql: str | None = None):
@@ -57,7 +53,7 @@ class TestToolContract:
         assert set(tool.args_schema.model_fields) == {"sql"}
 
     def test_its_description_names_the_tables_the_model_may_use(self, tool):
-        assert "vehicles" in tool.description and "alerts" in tool.description
+        assert "TABLE vehicles" in tool.description and "TABLE alerts" in tool.description
 
 
 class TestGuardIsInsideTheTool:
@@ -86,6 +82,15 @@ class TestGuardIsInsideTheTool:
         assert "secrets" in artifact["error"]
         assert "secrets" in content, "the model must see why, to correct it"
 
+    def test_a_table_left_out_of_the_selection_is_neither_described_nor_queryable(self, connector):
+        only_vehicles = make_query_tool(connector, Catalog(tables=[VEHICLES]))
+
+        _, artifact = call(only_vehicles, "select severity from alerts")
+
+        assert "alerts" not in only_vehicles.description
+        assert "alerts" in artifact["error"]
+        assert connector.executed == []
+
 
 class TestExecution:
     def test_a_valid_select_returns_columns_and_rows(self, tool):
@@ -101,7 +106,7 @@ class TestExecution:
 
     def test_the_model_sees_a_preview_not_the_whole_result(self, connector):
         wide = FakeConnector(rows=[(f"KA{i:03}",) for i in range(PREVIEW_ROWS + 25)])
-        content, artifact = call(make_query_tool(wide, SCHEMA), "select vehicleno from vehicles")
+        content, artifact = call(make_query_tool(wide, CATALOG), "select vehicleno from vehicles")
         assert len(json.loads(content)["rows"]) == PREVIEW_ROWS
         assert len(artifact["rows"]) == PREVIEW_ROWS + 25, "the caller still gets every row"
 
@@ -110,7 +115,7 @@ class TestExecution:
             def run_select(self, sql, max_rows):
                 raise RuntimeError("column does not exist")
 
-        _, artifact = call(make_query_tool(Broken(), SCHEMA), "select vehicleno from vehicles")
+        _, artifact = call(make_query_tool(Broken(), CATALOG), "select vehicleno from vehicles")
         assert "column does not exist" in artifact["error"]
 
     def test_truncation_is_reported(self, monkeypatch):
@@ -118,58 +123,5 @@ class TestExecution:
 
         monkeypatch.setattr(get_settings(), "max_rows", 1, raising=False)
         conn = FakeConnector(rows=(("a",), ("b",), ("c",)))
-        _, artifact = call(make_query_tool(conn, SCHEMA), "select vehicleno from vehicles")
+        _, artifact = call(make_query_tool(conn, CATALOG), "select vehicleno from vehicles")
         assert artifact["truncated"] is True and artifact["rows"] == [["a"]]
-
-
-class TestTableAnnotations:
-    """What the model is told each table holds, before it writes a query.
-
-    Without this the model cannot tell an empty table from a filter that matched nothing, and
-    answers both with a shrug. The wording is load-bearing: it has to be exact about
-    emptiness and vague about size.
-    """
-
-    def _rendered(self, stats):
-        schema = {
-            "tables": [
-                {"name": "trips", "columns": [{"name": "id", "type": "BIGINT"}], "stats": stats}
-            ]
-        }
-        return _table_list(schema)
-
-    def test_an_empty_table_says_so_in_words_the_model_cannot_miss(self):
-        assert "EMPTY, holds no rows at all" in self._rendered({"rows": "empty"})
-
-    def test_a_table_proven_to_hold_rows_is_not_called_empty(self):
-        # `reltuples` is -1 until a table is analysed, and 0 for one analysed while empty and
-        # bulk-loaded since. Neither proves emptiness, so neither may be rendered as it.
-        rendered = self._rendered({"rows": "nonempty"})
-
-        assert "EMPTY" not in rendered
-        assert "has rows" in rendered
-
-    def test_a_size_is_a_bucket_rather_than_a_count(self):
-        rendered = self._rendered({"rows": "millions", "rows_approx": 46_000_000})
-
-        assert "about 46,000,000 rows" in rendered
-
-    def test_a_partial_estimate_says_it_is_a_floor(self):
-        rendered = self._rendered(
-            {"rows": "millions", "rows_approx": 46_000_000, "rows_at_least": True}
-        )
-
-        assert "at least about 46,000,000 rows" in rendered
-
-    def test_stale_data_is_reported_as_where_the_rows_sit(self):
-        # Not "data up to X": a partition bound is the edge of the partition, not the newest
-        # row, and the description should not claim more than was measured.
-        rendered = self._rendered({"rows": "millions", "covered_to": "2026-07-06"})
-
-        assert "newest data sits in a partition ending 2026-07-06" in rendered
-
-    def test_a_schema_cached_before_statistics_existed_still_renders(self):
-        # The cache has a six hour life, so a deployment serves pre-change entries for a while.
-        schema = {"tables": [{"name": "old", "columns": [{"name": "id", "type": "INTEGER"}]}]}
-
-        assert _table_list(schema) == "TABLE old (id INTEGER)"

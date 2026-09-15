@@ -20,18 +20,18 @@ from sqlalchemy.orm import Session
 from app import queue
 from app.agent.graph import build_agent, recursion_limit
 from app.api.schemas import RunCreate
+from app.catalog.types import Catalog
 from app.config import get_settings
-from app.connectors.base import Connector
+from app.connectors.base import SqlConnector
 from app.connectors.registry import connector_for
 from app.db.models import Connection, Run, Tenant
 from app.db.session import SessionLocal
 from app.logging import log
 from app.security.auth import TenantContext
 from app.services import connections as conn_svc
+from app.services import tables as tables_svc
 from app.services.charts import infer_chart
 from app.services.errors import BudgetExceeded, DomainError, NotFound, RateLimited
-
-SCHEMA_CACHE_TTL = timedelta(hours=6)
 
 Emit = Callable[[dict], None]
 
@@ -39,8 +39,8 @@ Emit = Callable[[dict], None]
 @dataclass(frozen=True)
 class PreparedRun:
     run: Run
-    connector: Connector
-    schema: dict
+    connector: SqlConnector
+    catalog: Catalog
 
 
 @dataclass
@@ -208,17 +208,6 @@ def reap_stale_runs(db: Session) -> int:
     return result.rowcount
 
 
-async def refresh_schema_cache(db: Session, conn: Connection, connector: Connector) -> dict:
-    stale = conn.schema_cached_at is None or (
-        datetime.now(UTC) - conn.schema_cached_at > SCHEMA_CACHE_TTL
-    )
-    if conn.schema_cache is None or stale:
-        conn.schema_cache = await asyncio.to_thread(connector.describe_schema)
-        conn.schema_cached_at = datetime.now(UTC)
-        db.commit()
-    return conn.schema_cache
-
-
 async def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> PreparedRun:
     """Everything that can still fail as a plain HTTP status, done before the stream opens.
 
@@ -230,7 +219,7 @@ async def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> Prepa
 
     conn = conn_svc.get_connection(db, ctx.tenant_id, body.connection_id)
     connector = connector_for(conn)
-    schema = await refresh_schema_cache(db, conn, connector)
+    catalog = await tables_svc.load_for_run(db, conn, connector)
 
     run = Run(
         tenant_id=ctx.tenant_id,
@@ -246,14 +235,14 @@ async def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> Prepa
     if get_settings().queue_enabled:
         await queue.pool().enqueue_job("run_question", run.id, _job_id=run.id)
 
-    return PreparedRun(run=run, connector=connector, schema=schema)
+    return PreparedRun(run=run, connector=connector, catalog=catalog)
 
 
 def execute_run(
     db: Session,
     run: Run,
-    connector: Connector,
-    schema: dict,
+    connector: SqlConnector,
+    catalog: Catalog,
     emit: Emit,
 ) -> None:
     """Drive the agent and report what it does. Synchronous, because `agent.stream` is.
@@ -274,7 +263,7 @@ def execute_run(
 
     try:
         with PostgresSaver.from_conn_string(str(s.checkpoint_db_url)) as saver:
-            agent = build_agent(connector, schema, checkpointer=saver)
+            agent = build_agent(connector, catalog, checkpointer=saver)
             config = {
                 "configurable": {"thread_id": f"{run.tenant_id}:{run.thread_id}"},
                 "callbacks": [usage],
@@ -349,7 +338,7 @@ async def _stream_inline(prepared: PreparedRun) -> AsyncIterator[dict[str, str]]
     def work() -> None:
         db = SessionLocal()
         try:
-            execute_run(db, run, prepared.connector, prepared.schema, emit)
+            execute_run(db, run, prepared.connector, prepared.catalog, emit)
         finally:
             db.close()
             loop.call_soon_threadsafe(frames.put_nowait, None)

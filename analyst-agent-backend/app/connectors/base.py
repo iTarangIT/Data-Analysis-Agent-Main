@@ -8,11 +8,9 @@ class Connector(Protocol):
 
     kind: str
 
-    def describe_schema(self) -> dict[str, Any]: ...
-
 
 class SqlConnector(Connector, Protocol):
-    """A source the query tool reaches with SQL. DuckDB joins Postgres here in phase 5."""
+    """A source the query tool reaches with SQL: Postgres, or DuckDB over an uploaded file."""
 
     dialect: str
 
@@ -21,3 +19,5 @@ class SqlConnector(Connector, Protocol):
     def list_tables(self) -> list[str]: ...
 
     def read_tables(self, names: list[str]) -> list[TableDef]: ...
+
+    def table_stats(self, names: list[str]) -> dict[str, dict[str, Any]]: ...

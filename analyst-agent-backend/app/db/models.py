@@ -10,6 +10,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -37,7 +38,7 @@ class Tenant(Base):
 
 
 class Connection(Base):
-    """A customer data source. `secret_enc` holds the Fernet-encrypted DSN or login JSON."""
+    """A customer data source. `secret_enc` holds the Fernet-encrypted DSN or file sources."""
 
     __tablename__ = "connections"
 
@@ -46,8 +47,9 @@ class Connection(Base):
     name: Mapped[str] = mapped_column(String(200))
     kind: Mapped[str] = mapped_column(String(20))
     secret_enc: Mapped[str] = mapped_column(Text)
-    schema_cache: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    schema_cached_at: Mapped[datetime | None] = mapped_column(
+    # How the selected tables join, mapped when their structure was last read.
+    relationships: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    catalog_refreshed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -56,6 +58,27 @@ class Connection(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tenant: Mapped[Tenant] = relationship(back_populates="connections")
+
+
+class ConnectionTable(Base):
+    """One table a connection's source exposes, and whether the agent may use it.
+
+    `definition` and `stats` are held only while the table is selected, and neither is ever a
+    row: a definition is columns and keys, and stats are a size bucket and a partition bound.
+    """
+
+    __tablename__ = "connection_tables"
+    # Also serves every lookup of one connection's tables, so connection_id needs no index.
+    __table_args__ = (
+        UniqueConstraint("connection_id", "name", name="uq_connection_tables_connection_id_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    connection_id: Mapped[str] = mapped_column(ForeignKey("connections.id"))
+    name: Mapped[str] = mapped_column(String(200))
+    selected: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    definition: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    stats: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class Run(Base):

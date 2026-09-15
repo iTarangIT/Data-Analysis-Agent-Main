@@ -1,10 +1,10 @@
 from datetime import date
-from typing import Any
 
 from langchain.agents import create_agent
 
 from app.agent.prompts import AGENT_SYSTEM, SQL_CAPABILITY
 from app.agent.tools import make_query_tool
+from app.catalog.types import Catalog
 from app.config import get_settings
 from app.connectors.base import SqlConnector
 from app.llm import get_llm
@@ -19,10 +19,10 @@ def recursion_limit() -> int:
     return 2 * get_settings().max_tool_calls + 1
 
 
-def build_agent(connector: SqlConnector, schema: dict[str, Any], checkpointer=None):
+def build_agent(connector: SqlConnector, catalog: Catalog, checkpointer=None):
     return create_agent(
         model=get_llm(),
-        tools=[make_query_tool(connector, schema)],
+        tools=[make_query_tool(connector, catalog)],
         system_prompt=AGENT_SYSTEM.format(
             today=date.today().isoformat(), capability=SQL_CAPABILITY
         ),

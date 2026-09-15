@@ -12,6 +12,7 @@ from app.connectors.postgres import PostgresConnector
 from app.db.models import Connection, Tenant
 from app.logging import log
 from app.security import vault
+from app.services import tables
 from app.services.errors import DomainError, NotFound
 
 
@@ -47,6 +48,7 @@ def create_connection(
     db.add(conn)
     db.commit()
     db.refresh(conn)
+    tables.ensure_listed(db, conn)
     return conn
 
 
@@ -84,8 +86,7 @@ def delete_connection(db: Session, tenant_id: str, connection_id: str) -> None:
 
     conn.deleted_at = datetime.now(UTC)
     conn.secret_enc = ""
-    conn.schema_cache = None
-    conn.schema_cached_at = None
+    tables.forget(db, conn)
     db.commit()
     log.info("connection.deleted", connection_id=conn.id, kind=conn.kind)
 
@@ -127,4 +128,5 @@ def create_file_connection(
     db.add(conn)
     db.commit()
     db.refresh(conn)
+    tables.ensure_listed(db, conn)
     return conn

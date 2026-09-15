@@ -1,7 +1,9 @@
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from app.catalog.types import Relationship, TableDef
 
 # A file connection is never created from a client-supplied body: `kind="file"` there would
 # let any tenant register a path of their choosing, which no SQL guard could catch, because
@@ -36,7 +38,35 @@ class ConnectionOut(BaseModel):
     id: str
     name: str
     kind: str
-    has_schema_cache: bool
+    selected_tables: int
+    total_tables: int
+    catalog_refreshed_at: datetime | None
+
+
+class TableOut(BaseModel):
+    name: str
+    selected: bool
+    # Both null for a table that is not selected: its structure is not kept.
+    definition: TableDef | None
+    stats: dict[str, Any] | None
+
+
+class TablesOut(BaseModel):
+    max_selected: int
+    refreshed_at: datetime | None
+    tables: list[TableOut]
+    # Between selected tables only.
+    relationships: list[Relationship]
+
+
+class TablesRefreshOut(TablesOut):
+    added: list[str]
+    removed: list[str]
+
+
+class TableSelection(BaseModel):
+    # The cap is a setting enforced by the service; this only stops an absurd body.
+    tables: list[str] = Field(max_length=1000)
 
 
 class ChartSpec(BaseModel):

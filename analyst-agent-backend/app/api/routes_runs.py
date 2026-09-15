@@ -38,8 +38,9 @@ def list_runs(
     """A page of past runs, newest first.
 
     Carries no result rows, and never will: `runs` records how many rows came back, not what
-    they were. Keeping a customer's result set in this database is exactly what
-    SCHEMA_SAMPLE_ROWS=0 exists to prevent. A past run is re-read by running it again.
+    they were. This database keeps the structure of a customer's tables and never their
+    contents, and a stored result set would break that. A past run is re-read by running it
+    again.
     """
     items, next_cursor = svc.list_runs(
         db,

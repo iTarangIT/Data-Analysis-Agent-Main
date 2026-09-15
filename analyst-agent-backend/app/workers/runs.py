@@ -19,6 +19,7 @@ from app.db.models import Connection, Run
 from app.db.session import SessionLocal
 from app.logging import configure_logging, log
 from app.services import runs as svc
+from app.services import tables
 
 
 async def _heartbeat(ctx: dict, run_id: str) -> None:
@@ -58,9 +59,9 @@ async def run_question(ctx: dict, run_id: str) -> None:
             return
         conn = db.get(Connection, run.connection_id)
         connector = connector_for(conn)
-        # Through the cache, not straight to the source: `prepare_run` has just refreshed it.
-        schema = await svc.refresh_schema_cache(db, conn, connector)
-        await asyncio.to_thread(svc.execute_run, db, run, connector, schema, emit)
+        # Read from the store, not the source: `prepare_run` has just brought it up to date.
+        catalog = await tables.load_for_run(db, conn, connector)
+        await asyncio.to_thread(svc.execute_run, db, run, connector, catalog, emit)
     except asyncio.CancelledError:
         # The client went away, or the job timed out. Report it before the task dies, using the
         # synchronous client: an await inside an already-cancelled coroutine may never resume.

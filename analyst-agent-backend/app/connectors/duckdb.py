@@ -14,7 +14,6 @@ from typing import Any
 import duckdb
 
 from app.catalog.types import Column, TableDef
-from app.config import get_settings
 from app.services.errors import DomainError
 
 # The table name is interpolated into CREATE TABLE, so it is derived from a validated pattern
@@ -120,23 +119,6 @@ class DuckDBConnector:
         self.con.execute("SET enable_external_access=false")
         self.con.execute("SET lock_configuration=true")
 
-    def describe_schema(self, sample_rows: int | None = None) -> dict[str, Any]:
-        if sample_rows is None:
-            sample_rows = get_settings().schema_sample_rows
-
-        tables = []
-        for table in self.tables:
-            columns = [
-                {"name": name, "type": type_}
-                for name, type_, *_ in self.con.execute(f"DESCRIBE {table}").fetchall()
-            ]
-            sample = []
-            if sample_rows > 0:
-                rows = self.con.execute(f"SELECT * FROM {table} LIMIT {sample_rows}").fetchall()
-                sample = [[str(v) for v in row] for row in rows]
-            tables.append({"name": table, "columns": columns, "sample": sample})
-        return {"tables": tables}
-
     def list_tables(self) -> list[str]:
         return sorted(self.tables)
 
@@ -155,6 +137,11 @@ class DuckDBConnector:
                     Column(name=name, type=type_, nullable=nullable)
                 )
         return [TableDef(name=table, columns=columns[table]) for table in sorted(wanted)]
+
+    def table_stats(self, names: list[str]) -> dict[str, dict[str, Any]]:
+        """Nothing to report. An upload is small, never partitioned and held whole in memory, so
+        neither a size bucket nor a coverage date would change the query the model writes."""
+        return {}
 
     def run_select(self, sql: str, max_rows: int) -> tuple[list[str], list[tuple]]:
         cursor = self.con.execute(sql)

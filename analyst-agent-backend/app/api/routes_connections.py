@@ -7,19 +7,33 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Response, UploadFil
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_tenant
-from app.api.schemas import UPLOAD_SUFFIXES, ConnectionCreate, ConnectionOut
+from app.api.schemas import (
+    UPLOAD_SUFFIXES,
+    ConnectionCreate,
+    ConnectionOut,
+    TableSelection,
+    TablesOut,
+    TablesRefreshOut,
+)
 from app.config import get_settings
 from app.db.models import Connection
 from app.db.session import get_db
 from app.security.auth import TenantContext
 from app.services import connections as svc
+from app.services import tables as tables_svc
 
 router = APIRouter()
 
 
-def _out(c: Connection) -> ConnectionOut:
+def _out(c: Connection, counts: dict[str, tuple[int, int]]) -> ConnectionOut:
+    selected, total = counts.get(c.id, (0, 0))
     return ConnectionOut(
-        id=c.id, name=c.name, kind=c.kind, has_schema_cache=c.schema_cache is not None
+        id=c.id,
+        name=c.name,
+        kind=c.kind,
+        selected_tables=selected,
+        total_tables=total,
+        catalog_refreshed_at=c.catalog_refreshed_at,
     )
 
 
@@ -29,14 +43,17 @@ def create(
     ctx: TenantContext = Depends(current_tenant),
     db: Session = Depends(get_db),
 ) -> ConnectionOut:
-    return _out(svc.create_connection(db, ctx.tenant_id, body.name, body.kind, body.secret))
+    conn = svc.create_connection(db, ctx.tenant_id, body.name, body.kind, body.secret)
+    return _out(conn, tables_svc.counts(db, [conn.id]))
 
 
 @router.get("", response_model=list[ConnectionOut])
 def list_(
     ctx: TenantContext = Depends(current_tenant), db: Session = Depends(get_db)
 ) -> list[ConnectionOut]:
-    return [_out(c) for c in svc.list_connections(db, ctx.tenant_id)]
+    connections = svc.list_connections(db, ctx.tenant_id)
+    counts = tables_svc.counts(db, [c.id for c in connections])
+    return [_out(c, counts) for c in connections]
 
 
 @router.post("/file", response_model=ConnectionOut, status_code=201)
@@ -76,7 +93,45 @@ def create_from_file(
         conn = svc.create_file_connection(db, ctx.tenant_id, name, staged, file.filename or "")
     finally:
         staged.unlink(missing_ok=True)
-    return _out(conn)
+    return _out(conn, tables_svc.counts(db, [conn.id]))
+
+
+@router.get("/{connection_id}/tables", response_model=TablesOut)
+def read_tables(
+    connection_id: str,
+    ctx: TenantContext = Depends(current_tenant),
+    db: Session = Depends(get_db),
+) -> TablesOut:
+    """Every table the source exposes, and the structure of the ones the agent may use.
+
+    Synchronous: a connection registered before tables were tracked is listed on its first read
+    here, against the customer's database, which belongs in the threadpool.
+    """
+    conn = svc.get_connection(db, ctx.tenant_id, connection_id)
+    tables_svc.ensure_listed(db, conn)
+    return TablesOut.model_validate(tables_svc.view(db, conn))
+
+
+@router.put("/{connection_id}/tables", response_model=TablesOut)
+def choose_tables(
+    connection_id: str,
+    body: TableSelection,
+    ctx: TenantContext = Depends(current_tenant),
+    db: Session = Depends(get_db),
+) -> TablesOut:
+    """Replace the selection. The chosen tables' structure is read before this returns."""
+    conn = svc.get_connection(db, ctx.tenant_id, connection_id)
+    return TablesOut.model_validate(tables_svc.save_selection(db, conn, body.tables))
+
+
+@router.post("/{connection_id}/tables/refresh", response_model=TablesRefreshOut)
+def refresh_tables(
+    connection_id: str,
+    ctx: TenantContext = Depends(current_tenant),
+    db: Session = Depends(get_db),
+) -> TablesRefreshOut:
+    conn = svc.get_connection(db, ctx.tenant_id, connection_id)
+    return TablesRefreshOut.model_validate(tables_svc.refresh(db, conn))
 
 
 @router.delete("/{connection_id}", status_code=204, response_class=Response)

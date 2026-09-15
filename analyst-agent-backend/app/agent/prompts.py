@@ -35,6 +35,8 @@ SQL_CAPABILITY = """Deciding what to do:
 
 Writing SQL:
 - Use only the tables and columns your tools describe. Never invent columns.
+- Join tables only along the relationships your tools list. One marked inferred is a match of
+  column names with no key behind it, so check that the two columns mean the same thing.
 - Each table says what it holds: whether it is empty, roughly how big it is, and for a
   partitioned one how far its data runs. Read that before choosing a table. Querying one
   marked EMPTY wastes a turn, and one whose data stops before the period asked about cannot
@@ -57,7 +59,12 @@ rows. Use this for any question about historic or stored data.
 Only these tables and columns exist, and only SELECT is permitted:
 {tables}
 
+How the tables join:
+{relationships}
+
 Queries run under a short statement timeout. Constrain time columns, filter by entity where
 the question names one, and prefer summary tables over raw readings."""
 
 QUERY_TOOL_SQL_ARG = "One PostgreSQL SELECT statement. No prose, no code fences."
+
+NO_RELATIONSHIPS = "  None. No key links these tables and none could be inferred from their names."
