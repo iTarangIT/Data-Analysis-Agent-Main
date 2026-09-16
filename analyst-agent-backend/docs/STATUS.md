@@ -747,3 +747,131 @@ requests a day does not cover both suites.
 | 2 | The inferred joins, checked against the real IoT schema | the SSH tunnel on 127.0.0.1:5500 |
 | 3 | `sessions/` still holds Intellicar cookies, and `.env` still holds `INTELLICAR_*` | the owner's go-ahead to delete them |
 | 4 | `test_schema_stats.py`, unchanged from item 4 above | reseeding `demo` |
+
+## The database over MCP, built 2026-09-16
+
+Owner's call: reach the customer's database through a Model Context Protocol server rather than
+through an in-process connector, so that the database is a standard, reusable interface rather
+than code this service maintains.
+
+Nothing about what a person sees changed. The table picker, the stored structure, the
+relationship map, the guard and the SSE contract are the ones `feat/table-catalog` shipped; only
+what sits behind `SqlConnector`'s four methods moved out of this process.
+
+### It began as a second implementation of work that was already pushed
+
+A complete MCP rearchitecture existed uncommitted on `main` - its own server, client, contract,
+metadata service, migration and table-access UI. It had been written against a `main` that was
+**ten commits behind `origin/main`**, about half an hour after those ten commits were pushed.
+So it re-added the web tool `3203026` had deleted, declared a `schema_cache` column
+`5b7e2d9a41c3` had dropped, and carried a migration that assumed a schema that no longer
+existed. It also rebuilt table choice and relationship mapping a second time, less well: only
+declared foreign keys, where `app/catalog/relationships.py` already infers edges too.
+
+`main` was fast-forwarded (it had no commits of its own) and the MCP layer rebuilt on top of the
+catalog work instead of replacing it. The abandoned tree is in `stash@{0}` and under
+`scratchpad/mcp-snapshot`, kept until someone confirms nothing is wanted from it.
+
+The lesson is the cheap one: fast-forward before starting, not after finishing.
+
+### The local App DB was inconsistent before any of this
+
+`alembic_version` read `6df29aa84fda` while `connections` already carried `relationships` and
+`catalog_refreshed_at` and had lost `schema_cache` - that is, `5b7e2d9a41c3`'s column changes had
+been applied without its `connection_tables` table and without a stamp. `alembic upgrade head`
+could not have run. The table was created from the model and the revision stamped; the account,
+three connections and ten runs were left alone.
+
+### How it is split
+
+- `app/database_mcp.py` is the server, `uvicorn app.database_mcp:app --port 8001`, its own
+  process because it is the only thing that decrypts a customer DSN. It exposes `SqlConnector`
+  as four tools - `list_tables`, `read_tables`, `table_stats`, `run_select` - and reuses
+  `pg_catalog` and `pg_stats` unchanged.
+- `app/connectors/mcp.py` is the client half, an `McpConnector` that satisfies the same protocol
+  the in-process one did. `connector_for` returns it for `kind="postgres"`, and **the API
+  process no longer decrypts a database credential at all**.
+- `app/mcp_auth.py` mints a 120-second HS256 token carrying one `tenant_id` and one
+  `connection_id`, signed with `MCP_JWT_SECRET`, which is deliberately not `JWT_SECRET`: a
+  stolen access token must not be replayable against the database server. Nothing in a tool's
+  arguments names a connection, so a call can only reach the one its token was minted for.
+- `app/mcp_client.py` is synchronous, because every caller is: the protocol is sync, the table
+  routes are sync `def` in FastAPI's threadpool, and a run reaches the database through
+  `asyncio.to_thread`. None of those threads has a running loop.
+
+### The guard runs on both sides, which is not duplication here
+
+`app/agent/tools.py` still guards before it calls, with the chosen tables it already holds for
+the prompt. The server guards again, reading the selection from `connection_tables` per query.
+Neither is a second source of truth - both read the same rows - and a server holding a decrypted
+DSN must not be a bare SQL proxy for whoever reaches it. All three read-only layers now sit
+together beside the thing that opens the connection.
+
+### Creating a connection proves itself differently
+
+The old smoke test was `PostgresConnector(dsn).test()` before the row existed. MCP resolves a
+connection by id, so there is nothing to test that early. Listing the source is the proof now:
+the row is written, `ensure_listed` reads the catalog through MCP, and a failure deletes the row
+and returns the same 400 the field error already expected.
+
+### Two processes must share `CREDENTIAL_ENCRYPTION_KEY`
+
+That is new, and it is what the integration suite found: the server reads its own settings, so
+under the suite it held a different key than the tests encrypt with and every connection failed
+to open. `mcp_in_process` in `tests/integration/conftest.py` dispatches MCP calls straight at
+the server's tool functions, which runs the real tools, guard and readers against the test's own
+settings. The wire itself is covered by `test_database_mcp.py` and by `probe_mcp` at boot.
+
+### Verified
+
+- 278 unit tests and the full integration suite pass, except the three in `test_schema_stats.py`
+  that were already failing on the un-reseeded `demo` fixture (open item 4, unchanged).
+- `test_runs_worker.py` referenced `PreparedRun.schema`, renamed to `catalog` in `8390d4b`. It
+  had never been run since. Fixed.
+- The API boots with `MCP_STARTUP_PROBE=true` against a running server, and `/health` answers.
+  `/openapi.json` is unchanged, so `pnpm gen:agent` needs no re-run and the frontend no change.
+- End to end against `demo` through MCP: create, list, choose, read structure, stats, and
+  `SELECT count(*) FROM telemetry` returning 240.
+- The App DB was snapshotted before the destructive suite and restored after; the account, three
+  connections and ten runs are intact.
+- ruff clean. Frontend: typecheck, eslint and 159 vitest tests clean.
+
+### Not done
+
+| # | Item | Blocked on |
+|---|---|---|
+| 1 | A rule 6 pass rate for this change | it touches no prompt, so nothing is owed yet; the catalog prompts' own item stands |
+| 2 | `test_schema_stats.py` | reseeding `demo`, unchanged |
+| 3 | Whether anything is wanted from `stash@{0}` | the owner's read of it |
+| 4 | Deploying the MCP server as a second process anywhere but a laptop | there is still no VPS |
+
+### A source that is down, found by using it 2026-09-16
+
+Choosing tables on the IoT connection showed a Next.js runtime error, "An unexpected response
+was received from the server". The SSH tunnel on 5500 had dropped; later attempts at the same
+connection succeeded, so the tunnel was flapping rather than gone.
+
+The tunnel is infrastructure. What the tunnel exposed was two defects, both older than the MCP
+change and both reachable by any unreachable source.
+
+**Opening a connection had no timeout.** `statement_timeout` bounds a query once connected and
+says nothing about connecting. A dead tunnel accepts the TCP connection locally and then never
+answers, so the request hung, and the MCP server hung with it - its log stops at `Processing
+request of type CallToolRequest` with no completion. Reproduced by pointing a connection at a
+closed port: the PUT never returned, and was still hanging when the client gave up after 90
+seconds. `connect_timeout` is now set from `connect_timeout_s` (10s), and `mcp_request_timeout_s`
+(30s) bounds the API's wait on the server as a backstop.
+
+**An unreachable source escaped as a 500.** Only `DomainError` has a handler, and
+`save_selection`, `refresh` and `load_for_run` let the driver's exception through, so the browser
+got a crash rather than a sentence. `create_connection` already did the right thing; these did
+not. `SourceUnavailable` (503) is the error, `_reachable` in `app/services/tables.py` is where
+the translation happens, and the driver's message - which quotes host, port and user - is logged
+rather than returned.
+
+Measured on the same dead port, before and after: hung past 90s, then `503` in 10.4s carrying
+`could not reach that database just now - check it is running and try again`. The picker shows
+that as a toast, because `normalizeAgentError` reads `error` off the body.
+
+`TestASourceThatIsDown` in `test_tables_api.py` covers it by failing `read_tables` the way the
+tunnel did: listing works, reading structure does not.

@@ -36,12 +36,20 @@ Next.js (analyst-web) -- App Postgres (users, tenants, usage)
       v
 analyst-agent (Python 3.12, FastAPI, LangGraph)
       create_agent:  model <--> tools   (loop until the model stops calling tools)
-                       query_database  -> sql_guard -> Postgres or DuckDB (read-only)
+                       query_database  -> sql_guard -> connector
                          described from, and allowed only, the connection's chosen tables
-      credential vault (Fernet, per tenant) | Postgres checkpointer | LangSmith
+      Postgres checkpointer | LangSmith
       |                                         |
-      v                                         v
-Customer DB (read-only)                    Uploaded files
+      |  MCP (streamable HTTP, 120s token       |  in process
+      |       naming one tenant + connection)   v
+      v                                    DuckDB -> Uploaded files
+database MCP server (app/database_mcp.py, its own process on :8001)
+      list_tables · read_tables · table_stats · run_select
+      credential vault (Fernet) -> the only place a DSN is decrypted
+      sql_guard again | analyst_ro role | read-only connect_args
+      |
+      v
+Customer DB (read-only)
 ```
 
 The browser never holds a token at all. It talks only to Next.js route handlers, which hold the access token in an httpOnly cookie and attach it server-side. Identity moved into this service: it owns the `users` table, hashes passwords with Argon2id, and mints the 15-minute access token itself.
@@ -69,6 +77,7 @@ analyst-agent (PowerShell):
 ```powershell
 .\.venv\Scripts\activate
 uvicorn app.main:app --reload --port 8000
+uvicorn app.database_mcp:app --port 8001         # the database MCP server; the API will not boot without it
 alembic revision --autogenerate -m "msg"; alembic upgrade head
 pytest -m "not integration"                      # fast, no DB
 pytest -m integration                            # needs the three local databases
@@ -108,16 +117,17 @@ pnpm playwright test  # needs agent + local Postgres + pnpm dev running
 
 ## Architecture invariants
 
-**analyst-agent** — `app/api/` (HTTP only) · `app/services/` (business rules, domain errors) · `app/agent/` (`graph.py` builds the `create_agent` harness, `prompts.py`, `tools.py`, `nodes/sql_guard.py`) · `app/connectors/` (customer sources: `base.py` protocols, `postgres.py`, `pg_catalog.py` and `pg_stats.py` which read the catalog, `duckdb.py`, `registry.py`) · `app/catalog/` (`types.py` a table's structure, `relationships.py` how tables join; imports nothing from `app`) · `app/security/` (`auth.py` JWT, `vault.py` Fernet) · `app/db/` (App DB session + models: Tenant, Connection, ConnectionTable, Run; `Run` is the usage ledger, there is no separate `Usage` table) · `app/workers/` (`runs.py` the arq worker) · `app/queue.py` · plus `evals/`, `scripts/`, `tests/{unit,integration}`. Nothing imports upward. `HTTPException` is raised only inside `app/api/`; everything else raises from `app/services/errors.py`.
+**analyst-agent** — `app/api/` (HTTP only) · `app/services/` (business rules, domain errors) · `app/agent/` (`graph.py` builds the `create_agent` harness, `prompts.py`, `tools.py`, `nodes/sql_guard.py`) · `app/connectors/` (customer sources: `base.py` protocols, `mcp.py` which reaches Postgres through the MCP server, `pg_catalog.py` and `pg_stats.py` which read the catalog, `duckdb.py`, `registry.py`) · `app/database_mcp.py` (the MCP server itself, its own process), `app/mcp_client.py`, `app/mcp_auth.py` · `app/catalog/` (`types.py` a table's structure, `relationships.py` how tables join; imports nothing from `app`) · `app/security/` (`auth.py` JWT, `vault.py` Fernet) · `app/db/` (App DB session + models: Tenant, Connection, ConnectionTable, Run; `Run` is the usage ledger, there is no separate `Usage` table) · `app/workers/` (`runs.py` the arq worker) · `app/queue.py` · plus `evals/`, `scripts/`, `tests/{unit,integration}`. Nothing imports upward. `HTTPException` is raised only inside `app/api/`; everything else raises from `app/services/errors.py`.
 
 - The agent is built with `langchain.agents.create_agent`, whose graph is a `model` node and a `tools` node looping until the model stops calling tools. There is no hand-written router: the model decides whether a question needs a tool. The loop is bounded by `recursion_limit()`, derived from `max_sql_retries`.
 - Capabilities are LangChain tools defined with the `@tool` decorator in `app/agent/tools.py`, one per tenant connection. Each returns `content_and_artifact`, so the model sees a row preview while the caller keeps the full result for the `rows` event.
 - `app/agent/nodes/sql_guard.py` is the most important file in the service and is **pure sqlglot code that must never call a model**. It is called from inside every tool, because a tool is invoked by the model and cannot assume anything guarded first: SELECT only, one statement, tables in `public` (DuckDB: `main`) only, table allowlist from the tables chosen for the connection, LIMIT injected, every mutating expression type rejected (`Insert`, `Update`, `Delete`, `Drop`, `Alter`, `Create`, `Command`, `Merge`, `TruncateTable`, `Grant`), and functions that read a table named in a string (`query_to_xml`, `table_to_xml`, `dblink`, …) rejected. Choosing tables limits what the agent is shown and may query; the database role's GRANTs remain the hard boundary, because a customer view or function that reads other tables cannot be caught by name.
 - A connection's tables live in `connection_tables` (`app/services/tables.py`): every table the source exposes, which ones are chosen (at most `MAX_AGENT_TABLES`), and for the chosen ones only their definition and statistics. Relationships between chosen tables sit on the connection. `app/agent/schema_context.py` renders that into the query tool's description. Columns, keys and a size bucket are stored and shown to the model; a row never is.
-- `app/security/vault.py` is the only module that sees plaintext credentials, and `decrypt()` is called only from `app/connectors/registry.py`. No API response may contain `secret_enc`, `dsn`, or `password`.
+- `app/security/vault.py` is the only module that sees plaintext credentials. `decrypt()` is called from `app/connectors/registry.py` for a file source, and from `app/database_mcp.py` for a database. **The API process never decrypts a Postgres DSN** — only the MCP server does, which is why it is a separate process. No API response may contain `secret_enc`, `dsn`, or `password`.
 - Every function under `connectors/` and `agent/` takes an explicit `tenant_id` — never optional, never defaulted, never inferred from anything but the JWT. Checkpointer thread ids are `f"{tenant_id}:{thread_id}"`.
 - Three distinct databases, never conflated: **App DB** (ours, Alembic-migrated), **Checkpoint DB** (LangGraph-managed, disposable), **Customer DB** (theirs — read-only role, never migrated, never written).
-- Customer DB read-only is enforced at three independent layers: the Postgres role (`default_transaction_read_only=on`), the connector's `connect_args`, and the guard. Verify with a DELETE that must fail.
+- Customer DB read-only is enforced at three independent layers, all of which now live in the MCP server beside the thing that opens the connection: the Postgres role (`default_transaction_read_only=on`), the engine's `connect_args`, and the guard. `app/agent/tools.py` guards as well, before it calls — the MCP server does not trust its caller, and the caller does not assume the server guards. Verify with a DELETE that must fail.
+- A database is reached **only** through MCP. `connector_for` returns an `McpConnector` for `kind="postgres"`, and every call carries a 120-second token naming one tenant and one connection; nothing in a tool's arguments names a database, so a call can only reach the one its token was minted for.
 
 **analyst-agent-frontend** — Next.js 16, App Router, no `src/`. `app/(auth)/{login,register}` · `app/(app)/{ask,connections,connections/[connectionId]/tables,runs}` · `app/api/` (the only place the access token is attached) · `components/{ui,app-shell,auth,connections,ask}` · `features/ask/` (the SSE state machine) · `features/connections/` (the table picker's rules) · `lib/{api,auth,sse}` · `proxy.ts`, which is what Next 16 calls middleware and which only ever reads the cookie.
 

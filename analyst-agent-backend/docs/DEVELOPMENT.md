@@ -65,6 +65,7 @@ psql -U postgres -d demo -f scripts\demo_customer.sql
 psql -U analyst_ro -d demo -c "delete from dealers"      # MUST fail: read-only transaction
 
 uvicorn app.main:app --reload --port 8000
+uvicorn app.database_mcp:app --port 8001         # the database MCP server; the API will not boot without it
 alembic revision --autogenerate -m "msg"; alembic upgrade head
 pytest -m "not integration"                           # fast, no DB
 pytest -m integration                                 # needs the three local databases above
@@ -119,8 +120,10 @@ pnpm playwright test  # needs agent + local Postgres + pnpm dev running
 ```
 create_agent:  model  <-->  tools        (loop until the model stops calling tools)
                               |
-                              +-- query_database  -> sql_guard -> Postgres or DuckDB (read-only)
+                              +-- query_database  -> sql_guard -> connector (read-only)
                                     described from, and allowed only, the connection's chosen tables
+                                       Postgres -> MCP server -> customer DB
+                                       file     -> DuckDB, in process
 ```
 
 The model chooses whether to call a tool, which replaces the hand-written router. The guard
@@ -130,7 +133,8 @@ bounded by `recursion_limit()`, derived from `max_sql_retries`.
 - `app/api/` = HTTP only. `app/services/` = business rules. `app/agent/` = LangGraph. `app/connectors/` = customer data sources. `app/security/` = JWT + Fernet vault. Nothing imports upward.
 - `app/agent/nodes/sql_guard.py` is pure code (sqlglot). **It must never call a model.** SELECT only, one statement, `public` (or DuckDB's `main`) only, table allowlist from the tables chosen for the connection, LIMIT injected, forbidden ops and table-reading functions rejected.
 - Table structure is split by job. `app/catalog/` holds its shape (`types.py`) and how tables join (`relationships.py`) and imports nothing from `app`; `app/connectors/pg_catalog.py` and `duckdb.py` read it; `app/services/tables.py` stores it for the chosen tables only; `app/agent/schema_context.py` writes it into the query tool's description. Columns, keys and a size bucket are stored and shown to the model. A row never is.
-- `app/security/vault.py` is the only module that sees plaintext credentials. `decrypt()` is called only from `app/connectors/registry.py`. No API response ever contains `secret_enc`, `dsn`, `password`.
+- `app/security/vault.py` is the only module that sees plaintext credentials. `decrypt()` is called from `app/connectors/registry.py` for a file source and from `app/database_mcp.py` for a database. The API process never decrypts a Postgres DSN. No API response ever contains `secret_enc`, `dsn`, `password`.
+- A database is reached only through the MCP server, which runs as its own process because it is the only thing holding a decrypted DSN. It exposes the `SqlConnector` protocol as four tools, and `app/connectors/mcp.py` is the client. All three read-only layers live there with it; `app/agent/tools.py` guards before calling anyway, and the server guards regardless of who called.
 - Every function under `connectors/` and `agent/` takes `tenant_id`. No default tenant. Checkpointer thread ids are `f"{tenant_id}:{thread_id}"`.
 - Three databases, never confused: App DB (ours, Alembic), Checkpoint DB (LangGraph-managed, disposable), Customer DB (theirs, read-only role, never migrated, never written).
 - Frontend: `src/app/api/*` route handlers are the only files holding `SUPABASE_SERVICE_ROLE_KEY` and `AGENT_JWT_SECRET`. `src/lib/agent/` is the single boundary to the agent. `hooks/useRun.ts` is a state machine driven only by SSE events.
