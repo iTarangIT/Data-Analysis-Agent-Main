@@ -42,6 +42,7 @@ export function columnIsNumeric(rows: Cell[][], index: number, sample = 20): boo
 export type RenderedCell =
   | { kind: "null" }
   | { kind: "boolean"; text: string }
+  | { kind: "json"; text: string }
   | { kind: "value"; text: string };
 
 /**
@@ -50,9 +51,13 @@ export type RenderedCell =
  * Never `Number(value)`. Coercing "7.20" gives 7.2 and coercing a bigint past 2^53 gives the
  * wrong integer outright, and in a product whose whole job is answering questions about
  * numbers that is the worst possible failure.
+ *
+ * A json, jsonb or array cell is printed as the JSON it arrived as. `String()` on it gives
+ * "[object Object]" for an object and silently drops the brackets and quotes from an array.
  */
 export function renderCell(value: Cell): RenderedCell {
   if (value === null || value === undefined) return { kind: "null" };
   if (typeof value === "boolean") return { kind: "boolean", text: value ? "true" : "false" };
+  if (typeof value === "object") return { kind: "json", text: JSON.stringify(value) };
   return { kind: "value", text: String(value) };
 }

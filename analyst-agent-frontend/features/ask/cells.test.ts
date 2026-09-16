@@ -45,6 +45,26 @@ describe("renderCell", () => {
   it("prints a date, which arrives as a string", () => {
     expect(renderCell("2026-09-11")).toEqual({ kind: "value", text: "2026-09-11" });
   });
+
+  it("prints a jsonb value as the JSON it is, not as [object Object]", () => {
+    // `SELECT info -> 'assignedgroups' FROM vehicles` on the IoT database. psycopg decodes jsonb
+    // into Python lists and dicts, and json.dumps sends them on as JSON, not as text.
+    const groups = [{ groupname: "SHREEJI" }, { groupname: "Rohan_Motors" }];
+    expect(renderCell(groups)).toEqual({
+      kind: "json",
+      text: '[{"groupname":"SHREEJI"},{"groupname":"Rohan_Motors"}]',
+    });
+    expect(renderCell({ soc: 46, online: true })).toEqual({
+      kind: "json",
+      text: '{"soc":46,"online":true}',
+    });
+  });
+
+  it("prints a Postgres array the same way", () => {
+    // array_agg and ARRAY columns arrive as JSON arrays of scalars.
+    expect(renderCell(["TK-1", "TK-2"])).toEqual({ kind: "json", text: '["TK-1","TK-2"]' });
+    expect(renderCell([])).toEqual({ kind: "json", text: "[]" });
+  });
 });
 
 describe("isNumericCell", () => {
@@ -65,6 +85,11 @@ describe("isNumericCell", () => {
       expect(isNumericCell(value)).toBe(false);
     },
   );
+
+  it("does not treat JSON as numeric, even a one-element array of a number", () => {
+    expect(isNumericCell([7])).toBe(false);
+    expect(isNumericCell({ value: 7 })).toBe(false);
+  });
 
   it("does not treat a boolean as numeric", () => {
     expect(isNumericCell(true)).toBe(false);

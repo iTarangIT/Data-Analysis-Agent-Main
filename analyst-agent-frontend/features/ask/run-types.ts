@@ -17,8 +17,12 @@ export type Stage = "router" | "sql_gen" | "sql_guard" | "db_exec" | "answer";
  * and None survive as JSON numbers, booleans and null, while Decimal, date, datetime and UUID
  * arrive as **strings**. A money column comes through as "266300.00". Never coerce a cell with
  * Number() to display it: in an analytics product that turns into silently wrong figures.
+ *
+ * Not every cell is a scalar. psycopg decodes json and jsonb columns into Python lists and
+ * dicts, and Postgres arrays into lists, and `json.dumps` sends those on as JSON arrays and
+ * objects. `info -> 'assignedgroups'` is one: a list of `{"groupname": ...}` objects.
  */
-export type Cell = string | number | boolean | null;
+export type Cell = string | number | boolean | null | Cell[] | { [key: string]: Cell };
 
 export type ResultTable = {
   columns: string[];

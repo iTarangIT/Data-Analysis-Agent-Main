@@ -81,9 +81,9 @@ export function ResultTable({ result }: { result: Result }) {
   );
 }
 
-/** Null and booleans are shown as absent and as words, both in the muted ink. */
+/** Null and booleans are shown as absent and as words, both in the muted ink. JSON is data. */
 function RenderedCell({ value }: { value: Cell }) {
   const rendered = renderCell(value);
-  if (rendered.kind === "value") return rendered.text;
+  if (rendered.kind === "value" || rendered.kind === "json") return rendered.text;
   return <span className="text-ink-muted">{rendered.kind === "null" ? "null" : rendered.text}</span>;
 }
