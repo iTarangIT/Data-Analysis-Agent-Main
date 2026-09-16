@@ -1,10 +1,16 @@
 import json
 
 import pytest
+from langchain.tools import ToolRuntime
 from langchain_core.tools import BaseTool
+from langgraph.store.memory import InMemoryStore
 
-from app.agent.tools import PREVIEW_ROWS, make_query_tool
+from app.agent import memory
+from app.agent.context import RunContext
+from app.agent.tools import PREVIEW_ROWS, make_query_tool, make_tools, remember
 from app.catalog.types import Catalog, CatalogTable, Column, TableDef
+
+CONTEXT = RunContext(tenant_id="t_test", connection_id="c1", run_id="r1", thread_id="th1")
 
 VEHICLES = CatalogTable(
     definition=TableDef(name="vehicles", columns=[Column(name="vehicleno", type="text")])
@@ -38,9 +44,23 @@ def tool(connector):
     return make_query_tool(connector, CATALOG)
 
 
-def call(tool, sql: str | None = None):
+def runtime(store=None):
+    """What ToolNode builds and hands the tool; nothing here reaches the model's schema."""
+    return ToolRuntime(
+        state={},
+        context=CONTEXT,
+        config={},
+        stream_writer=lambda _: None,
+        tool_call_id="c1",
+        store=store,
+    )
+
+
+def call(tool, sql: str | None = None, store=None):
     """Invoke as the agent does, so the structured artifact comes back on a ToolMessage."""
-    args = {} if sql is None else {"sql": sql}
+    args = {"runtime": runtime(store)}
+    if sql is not None:
+        args["sql"] = sql
     msg = tool.invoke({"name": tool.name, "args": args, "id": "c1", "type": "tool_call"})
     return msg.content, msg.artifact
 
@@ -125,3 +145,82 @@ class TestExecution:
         conn = FakeConnector(rows=(("a",), ("b",), ("c",)))
         _, artifact = call(make_query_tool(conn, CATALOG), "select vehicleno from vehicles")
         assert artifact["truncated"] is True and artifact["rows"] == [["a"]]
+
+
+class TestRuntimeIsHiddenFromTheModel:
+    """`runtime` is injected by ToolNode. If it ever showed up in the model-facing schema the
+    model would try to supply it, and whatever it sent would be silently overwritten."""
+
+    def test_the_model_is_offered_only_the_sql_argument(self, tool):
+        assert set(tool.tool_call_schema.model_fields) == {"sql"}
+
+
+class TestRememberedCorrections:
+    """A refusal is the only channel back to the model, so a remembered fix has to ride in it."""
+
+    def test_a_first_refusal_carries_no_hint(self, tool):
+        content, _ = call(tool, "select severity from alerts", store=InMemoryStore())
+        assert "refused before" not in content
+
+    def test_a_refusal_seen_before_carries_the_query_that_worked(self, tool):
+        store = InMemoryStore()
+        memory.remember_correction(
+            store, CONTEXT, "select * from secrets", "tables not allowed", "select 1 from vehicles"
+        )
+
+        content, artifact = call(tool, "select * from secrets", store=store)
+
+        assert "select 1 from vehicles" in content
+        assert artifact["error"], "the hint must not turn a refusal into a success"
+
+    def test_the_rejected_sql_is_kept_so_a_later_success_can_be_paired_with_it(self, tool):
+        _, artifact = call(tool, "delete from vehicles")
+        assert artifact["sql"] == "delete from vehicles"
+
+    def test_without_a_store_the_refusal_still_explains_itself(self, tool):
+        content, artifact = call(tool, "select * from secrets", store=None)
+        assert artifact["error"] and "secrets" in content
+
+
+class TestRememberTool:
+    def test_it_is_offered_only_when_there_is_somewhere_to_remember(self, connector):
+        assert [t.name for t in make_tools(connector, CATALOG, with_memory=False)] == [
+            "query_database"
+        ]
+        assert "remember" in [t.name for t in make_tools(connector, CATALOG, with_memory=True)]
+
+    def test_a_definition_is_readable_on_a_later_run(self):
+        store = InMemoryStore()
+
+        remember.invoke(
+            {
+                "name": "remember",
+                "args": {
+                    "term": "net revenue",
+                    "definition": "sales minus refunds",
+                    "runtime": runtime(store),
+                },
+                "id": "c1",
+                "type": "tool_call",
+            }
+        )
+
+        assert "sales minus refunds" in memory.recall(store, CONTEXT)
+
+    def test_it_is_filed_under_the_context_tenant_and_not_an_argument(self):
+        store = InMemoryStore()
+        remember.invoke(
+            {
+                "name": "remember",
+                "args": {
+                    "term": "churn",
+                    "definition": "no order in 90 days",
+                    "runtime": runtime(store),
+                },
+                "id": "c1",
+                "type": "tool_call",
+            }
+        )
+
+        other = RunContext(tenant_id="t_other", connection_id="c1", run_id="r2", thread_id="th2")
+        assert memory.recall(store, other) == ""

@@ -875,3 +875,123 @@ that as a toast, because `normalizeAgentError` reads `error` off the body.
 
 `TestASourceThatIsDown` in `test_tables_api.py` covers it by failing `read_tables` the way the
 tunnel did: listing works, reading structure does not.
+
+### The LangChain v1 agent architecture 2026-09-16
+
+`create_agent` was being given four arguments - model, tools, system prompt, checkpointer - and
+none of the rest of the v1 architecture. Two consequences were already live. A thread's messages
+accumulated in the checkpointer with nothing pruning them, so every turn on a long thread cost
+more than the last against a 200,000 token daily budget. And the agent learned nothing between
+runs: it re-derived the same joins against the same schema every time, while `runs` recorded
+question, SQL and answer and never read them back.
+
+What is attached now, layer by layer. `context_schema=RunContext` carries tenant, connection, run
+and thread into the graph. Tools take `ToolRuntime`, which is how `remember` files a definition
+under `runtime.context.tenant_id` rather than under anything the model supplied.
+`ContextEditingMiddleware` and `SummarizationMiddleware` bound a thread's context.
+`PostgresStore` in the App DB, with an `InMemoryStore` behind `MEMORY_BACKEND=memory` for local
+work, holds a glossary, the queries that answered earlier questions, corrections, preferences and
+a per-thread record. `MemoryMiddleware` reads it once per run and writes it once.
+
+The connector and catalog deliberately did **not** move into `RunContext`. They stay bound in the
+closure `make_query_tool` builds: a tool with no way to reach another tenant's source is a
+stronger guarantee than one handed the right identifier.
+
+**`recursion_limit()` had to change, and getting it wrong would not have failed loudly.** It
+counts supersteps, not model calls, and `SummarizationMiddleware` hooks `before_model`, which
+adds a node to every cycle. Left alone the loop would have been cut off early while reporting
+that the model gave up after too many attempts. It now takes the middleware list and counts the
+four node-producing hooks the way `create_agent` counts them. `wrap_model_call` and
+`wrap_tool_call` produce no node, which is why memory is read through a wrap hook and costs
+nothing.
+
+**`2 * max_tool_calls + 1` was itself off by one, and had been since it was written.** Writing a
+test that spends the whole budget rather than asserting the arithmetic found it. LangGraph raises
+when the superstep count *reaches* `recursion_limit`, so a run needing N supersteps needs a limit
+of N + 1. Measured on `main`, with `MAX_TOOL_CALLS=6`: four tool calls completed, five completed,
+six raised `GraphRecursionError`. Every customer who asked a question needing the sixth query was
+told the agent gave up after too many query attempts, which is not what happened. The minimum
+working limit was measured for each configuration rather than reasoned about - 14 bare, 21 with
+context management, 23 with memory as well - and the formula now returns exactly those.
+
+Both of the arithmetic's failure modes are now driven end to end rather than asserted:
+`TestTheWholeToolBudgetIsSpendable` spends every permitted tool call and answers, and its second
+test pins that the old bound would have cut the same run short.
+
+**The SSE contract is untouched and stays untouched by accident of an exact match.**
+`EventTranslator` dispatches on `node == "model"` / `node == "tools"`. Middleware nodes are named
+`<middleware>.<hook>`, so they are ignored. That matters more than it looks: summarisation's
+update carries the whole preserved message tail, and a prefix match would have replayed a
+thread's history to the customer as `token` events.
+
+`TestSummarisationActuallyFiring` makes the summariser really run, with its own model, rather
+than feeding the translator a node name by hand. Its update was observed carrying
+`RemoveMessage, HumanMessage, AIMessage, ToolMessage` - an AIMessage and a ToolMessage
+indistinguishable from the ones the `model` and `tools` nodes emit - while the stage sequence
+stayed the frozen five and exactly one `token` event reached the client.
+
+**Two defects found while building, both of which would have shipped.**
+
+`PostgresStore.from_conn_string(str(app_db_url))` fails. `APP_DB_URL` is a SQLAlchemy URL and
+carries a `+psycopg` driver suffix; psycopg parses the DSN itself and rejects it. `CHECKPOINT_DB_URL`
+has no suffix precisely because LangGraph opens that one directly. `store.py` strips the suffix,
+and two unit tests pin it.
+
+Alembic would have dropped the memory. Verified rather than assumed: with `include_object`
+removed, `--autogenerate` emits `op.drop_table('store')` and `op.drop_table('store_migrations')`.
+With it in place the same command produces an empty migration.
+
+That verification was a pair of throwaway revisions run by hand, which protects nobody once they
+are deleted, and `alembic/env.py` cannot be imported by a test because it runs migrations at
+import. So `LANGGRAPH_TABLES` and the predicate moved into `app/agent/store.py` - the module that
+creates the tables is the one that names them - and `env.py` imports it.
+`test_alembic_excludes_the_store.py` now runs `compare_metadata` for real, asserts the diff is
+empty, and runs the same comparison with the filter removed to prove the guard is load-bearing
+rather than vacuously true.
+
+**Numbers chosen.** Clearing trips at 12,000 tokens and summarising at 24,000, so the free
+mechanism runs first and the one that costs a model call is the fallback. `WORKER_MAX_JOBS` drops
+from 4 to 3: a job now holds an App DB session, a checkpoint connection, a store connection and a
+customer DB connection against a pool of 5 plus 10 overflow. `SummarizationMiddleware` is given
+an explicit `trigger`; its default is `None`, which makes it a silent no-op rather than a default,
+and a test asserts the trigger is armed.
+
+**Owed: rule 6.** The prompts file gained a summary prompt and a memory template, and the model is
+offered a second tool, so the golden suite has to be re-recorded and the before/after pass rate
+reported. It could not be run here. Note the cassettes were **already** stale before this change:
+`prompt_sha()` at HEAD is `12f02ab9` and the cassettes on disk are `de39cc3c`, so `--replay` was
+already failing on `main`. Re-recording needs `TOKEN`, `CONN` and a day of free-tier quota.
+
+Not done: the end-to-end checks that need a live model - that summarisation fires on a real long
+thread against Gemini rather than a scripted one, and that a definition taught in one thread is
+applied in a new one against the real model. Both are covered by unit tests with fakes; what is
+missing is the live confirmation.
+
+### A turn was keeping the thread's SQL, not its own 2026-09-16
+
+Found by reading the store after five questions were put through the running agent, not by a
+test. Thread `6d1a3148` asked "How much vehicles are present in database ?", then "How much ?",
+then "Can you tell me the question ?". The third run recorded no SQL in `runs` and yet a
+`queries` memory was written for it, pairing that question with
+`SELECT COUNT(*) FROM vehicles LIMIT 500` - the query two turns earlier.
+
+`_harvest` took `state["messages"]`, which under a checkpointer is the whole thread rather than
+the run that just finished. So `sql` was the last successful tool artifact *anywhere* in the
+thread, and `answer` the last content-bearing AIMessage anywhere in it. A turn that ran no query
+inherited both. The pair is not merely useless: `recall` offers remembered queries back as
+precedent, so a conversational aside teaches the model that a question about what was just asked
+is answered by counting vehicles.
+
+`_this_turn` now slices the thread at its own question - the last human turn that is not a
+summary the summariser wrote back in - and everything is harvested from that slice.
+
+Why no existing test saw it: `run()` in `test_middleware.py` builds a fresh graph per call with
+no checkpointer, so nothing it drives ever carries a previous turn into `after_agent`.
+`test_a_question_answered_without_sql_keeps_no_query` passed because there was no earlier SQL to
+inherit. `run_thread` drives several turns down one `InMemorySaver` thread instead, which is the
+shape that breaks. Checked load-bearing rather than assumed: with `_this_turn` reverted, two of
+the three new tests fail with `assert 'SELECT vehicleno FROM vehicles LIMIT 500' is None`, the
+same symptom as the live store.
+
+364 unit tests pass, lint clean. The polluted row is still in the local store; it is one
+`queries` entry under the live tenant and nothing has recalled it yet.

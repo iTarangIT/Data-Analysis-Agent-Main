@@ -3,6 +3,7 @@ import base64
 import json
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -18,7 +19,10 @@ from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import Session
 
 from app import queue
+from app.agent.context import RunContext
 from app.agent.graph import build_agent, recursion_limit
+from app.agent.middleware import build_middleware
+from app.agent.store import memory_enabled, open_store
 from app.api.schemas import RunCreate
 from app.catalog.types import Catalog
 from app.config import get_settings
@@ -261,17 +265,34 @@ def execute_run(
     t0 = time.perf_counter()
     status, error = "done", None
 
+    # Built before the run so the limit is known to the handler that reports overrunning it.
+    middleware = build_middleware(memory_enabled())
+    limit = recursion_limit(middleware)
+
     try:
-        with PostgresSaver.from_conn_string(str(s.checkpoint_db_url)) as saver:
-            agent = build_agent(connector, catalog, checkpointer=saver)
+        with ExitStack() as stack:
+            saver = stack.enter_context(PostgresSaver.from_conn_string(str(s.checkpoint_db_url)))
+            store = stack.enter_context(open_store())
+            agent = build_agent(
+                connector, catalog, checkpointer=saver, store=store, middleware=middleware
+            )
             config = {
                 "configurable": {"thread_id": f"{run.tenant_id}:{run.thread_id}"},
                 "callbacks": [usage],
                 "metadata": {"tenant_id": run.tenant_id, "run_id": run.id},
-                "recursion_limit": recursion_limit(),
+                "recursion_limit": limit,
             }
+            context = RunContext(
+                tenant_id=run.tenant_id,
+                connection_id=run.connection_id,
+                run_id=run.id,
+                thread_id=run.thread_id,
+            )
             for chunk in agent.stream(
-                {"messages": [("user", run.question)]}, config=config, stream_mode="updates"
+                {"messages": [("user", run.question)]},
+                config=config,
+                context=context,
+                stream_mode="updates",
             ):
                 for node, update_ in chunk.items():
                     for message in (update_ or {}).get("messages", []):
@@ -279,7 +300,7 @@ def execute_run(
                             emit(event)
     except GraphRecursionError as e:
         # The model kept calling tools without settling on an answer.
-        log.warning("run.exhausted", limit=recursion_limit())
+        log.warning("run.exhausted", limit=limit)
         status, error = "error", str(e)
         emit(
             {

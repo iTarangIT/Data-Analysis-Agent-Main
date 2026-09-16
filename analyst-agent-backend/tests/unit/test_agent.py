@@ -5,10 +5,17 @@ from unittest.mock import patch
 import pytest
 from langchain_core.language_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage
+from langgraph.errors import GraphRecursionError
+from langgraph.store.memory import InMemoryStore
 
+from app.agent.context import RunContext
 from app.agent.graph import build_agent, recursion_limit
+from app.agent.middleware import build_middleware
 from app.catalog.types import Catalog, CatalogTable, Column, TableDef
+from app.config import get_settings
 from app.services.runs import EventTranslator, RunOutcome
+
+CONTEXT = RunContext(tenant_id="t_test", connection_id="c1", run_id="r1", thread_id="th1")
 
 CATALOG = Catalog(
     tables=[
@@ -50,15 +57,21 @@ def _tool_call(sql):
     )
 
 
-def _run(model, connector):
+def _run(model, connector, store=None, question="how many vehicles", limit=None):
     outcome = RunOutcome()
     translator = EventTranslator(outcome)
     events = []
-    with patch("app.agent.graph.get_llm", return_value=model):
-        agent = build_agent(connector, CATALOG)
+    with (
+        patch("app.agent.graph.get_llm", return_value=model),
+        patch("app.agent.middleware.get_llm", return_value=model),
+    ):
+        # Built inside the patch: SummarizationMiddleware resolves its model at construction.
+        middleware = build_middleware(store is not None)
+        agent = build_agent(connector, CATALOG, store=store, middleware=middleware)
         for chunk in agent.stream(
-            {"messages": [("user", "how many vehicles")]},
-            config={"recursion_limit": recursion_limit()},
+            {"messages": [("user", question)]},
+            config={"recursion_limit": limit or recursion_limit(middleware)},
+            context=CONTEXT,
             stream_mode="updates",
         ):
             for node, update in chunk.items():
@@ -155,16 +168,31 @@ class TestGuardRejection:
 
 
 class TestRecursionLimit:
-    def test_it_allows_the_configured_number_of_tool_calls(self):
-        from app.config import get_settings
+    """The limit counts supersteps, and middleware adds nodes. Pinned here because getting it
+    wrong does not fail loudly - it reports that the model gave up."""
 
-        # A tool call is a model step plus a tool step, then one model step for the answer.
-        assert recursion_limit() == 2 * get_settings().max_tool_calls + 1
+    def test_it_allows_one_more_superstep_than_a_full_run_takes(self):
+        """LangGraph raises when the count reaches the limit, so a run needing N supersteps
+        needs N + 1. Without this the last permitted tool call always failed."""
+        calls = get_settings().max_tool_calls
+
+        assert recursion_limit([]) == (2 * calls + 1) + 1
 
     def test_it_leaves_room_for_more_than_one_query(self):
         # A model may legitimately query twice to answer one question; the first limit was
         # derived from max_sql_retries and cut runs off after three tool calls.
-        assert recursion_limit() >= 2 * 3 + 1
+        assert recursion_limit([]) >= 2 * 3 + 1
+
+    def test_a_before_model_hook_widens_it_by_one_step_per_cycle(self):
+        calls = get_settings().max_tool_calls
+        # Summarisation hooks before_model, so every cycle costs three steps rather than two.
+        assert recursion_limit(build_middleware(False)) == calls * 3 + 3
+
+    def test_memory_adds_two_steps_to_the_run_and_none_to_the_cycle(self):
+        # before_agent and after_agent run once each; the read is a wrap hook and adds no node.
+        assert (
+            recursion_limit(build_middleware(True)) == recursion_limit(build_middleware(False)) + 2
+        )
 
 
 class TestContentBlocks:
@@ -229,3 +257,38 @@ class TestChartEvent:
         events, _ = _run(model, FakeConnector())
 
         assert "chart" not in [e["type"] for e in events]
+
+
+class TestTheWholeToolBudgetIsSpendable:
+    """The arithmetic in `recursion_limit` is one thing; actually spending the budget is the
+    thing it exists for. A limit that is too tight does not fail loudly - the customer is told
+    the model gave up after too many query attempts, which is not what happened."""
+
+    def _model_using_every_call(self):
+        calls = get_settings().max_tool_calls
+        return FakeToolModel(
+            responses=[
+                *[_tool_call("select vehicleno from vehicles") for _ in range(calls)],
+                AIMessage(content="Done."),
+            ]
+        )
+
+    def test_a_run_may_make_every_tool_call_it_is_allowed(self):
+        connector = FakeConnector()
+
+        _, outcome = _run(self._model_using_every_call(), connector, store=InMemoryStore())
+
+        assert len(connector.executed) == get_settings().max_tool_calls
+        assert outcome.answer == "Done."
+
+    def test_the_bound_before_middleware_would_have_cut_it_short(self):
+        """If this stops raising, the limit is no longer what makes the test above pass."""
+        old_bound = 2 * get_settings().max_tool_calls + 1
+
+        with pytest.raises(GraphRecursionError):
+            _run(
+                self._model_using_every_call(),
+                FakeConnector(),
+                store=InMemoryStore(),
+                limit=old_bound,
+            )

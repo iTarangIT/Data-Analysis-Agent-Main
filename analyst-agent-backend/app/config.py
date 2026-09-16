@@ -1,6 +1,6 @@
 import json
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AnyHttpUrl, Field, PostgresDsn, RedisDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -75,6 +75,20 @@ class Settings(BaseSettings):
     # legitimately query more than once to answer, without any of them having been rejected.
     max_tool_calls: int = 6
 
+    # Long-term memory. "postgres" keeps it in the App DB beside the account it belongs to;
+    # "memory" keeps it for the life of one process, which is enough for local work and the test
+    # suite; "off" attaches no store and runs the agent exactly as it ran before.
+    memory_backend: Literal["postgres", "memory", "off"] = "postgres"
+    # Old tool results are cleared before the thread is summarised, because clearing costs
+    # nothing and summarising costs a model call. A 50-row preview is most of what a long thread
+    # holds, so this trips well before the summariser does.
+    clear_tool_results_after_tokens: int = 12_000
+    # Far below `daily_token_budget`, which is 200,000: without this a single long thread bills
+    # the tenant its whole day re-sending its own history.
+    summarize_after_tokens: int = 24_000
+    # Roughly six question-and-answer turns kept verbatim behind the summary.
+    keep_messages: int = 20
+
     file_store_dir: str = "./uploads"
     # Bounds resident memory per concurrent run, because an upload is materialised in full.
     max_upload_bytes: int = 25 * 1024 * 1024
@@ -89,9 +103,9 @@ class Settings(BaseSettings):
     # How long the reader waits with no entry at all before calling the worker dead.
     run_stall_timeout_s: float = 15.0
     run_stream_ttl_s: int = 900
-    # Not arq's default of 10: each job holds an App DB session, a checkpoint connection and a
-    # customer DB connection, against a pool of 5 plus 10 overflow.
-    worker_max_jobs: int = 4
+    # Not arq's default of 10: each job holds an App DB session, a checkpoint connection, a
+    # store connection and a customer DB connection, against a pool of 5 plus 10 overflow.
+    worker_max_jobs: int = 3
 
     max_runs_per_minute: int = 10
     max_concurrent_runs: int = 3

@@ -14,6 +14,11 @@ os.environ.setdefault("MCP_JWT_SECRET", "test-mcp-secret-test-mcp-secret")
 # No MCP server runs under the suite; the tests that need one stub the client.
 os.environ.setdefault("MCP_STARTUP_PROBE", "false")
 os.environ.setdefault("LANGSMITH_TRACING", "false")
+# Off by default so the suite opens no store connection and every test that does not ask for
+# memory behaves exactly as it did before there was any. The tests that want one say so:
+# the unit tests hand `build_agent` an `InMemoryStore`, and `test_memory_store.py` asks for
+# Postgres.
+os.environ.setdefault("MEMORY_BACKEND", "off")
 
 
 @pytest.fixture

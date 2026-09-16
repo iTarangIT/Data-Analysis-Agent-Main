@@ -68,3 +68,71 @@ the question names one, and prefer summary tables over raw readings."""
 QUERY_TOOL_SQL_ARG = "One PostgreSQL SELECT statement. No prose, no code fences."
 
 NO_RELATIONSHIPS = "  None. No key links these tables and none could be inferred from their names."
+
+
+REMEMBER_TOOL_DESC = """Record something about this customer's data that should hold for later
+questions: what a business term means, or how they prefer answers presented. Use it when the
+person tells you a definition or a preference, not for the answer to their question."""
+
+MEMORY_BLOCK = """What you already know about this connection, from earlier conversations.
+Treat a definition here as the customer's own wording, overriding whatever a column name
+suggests. Treat a remembered query as a worked example of how these tables join, not as an
+answer - check it still fits before reusing it.
+
+Definitions:
+{terms}
+
+Queries that answered earlier questions:
+{queries}
+
+How this customer likes answers:
+{preferences}"""
+
+NO_MEMORY = ""
+
+# The stock prompt asks for files and artifacts, which this agent never has. It asks instead for
+# the three things a half-finished analysis needs to continue: what was wanted, what the data
+# already said, and which queries turned out to be the right ones.
+# `{messages}` and the `<messages>` marker are a contract of the middleware, not decoration.
+THREAD_SUMMARY = """<role>
+Analyst handover
+</role>
+
+<primary_objective>
+Condense the conversation below into the notes an analyst would need to carry on answering
+questions about this customer's database, without re-running work that is already done.
+</primary_objective>
+
+<instructions>
+Write these sections. Populate each one, or write "None" under it.
+
+## QUESTION
+What the person is trying to find out, across the whole conversation rather than the last turn.
+
+## ESTABLISHED
+Figures already obtained and what they were for. Give the number and what it measured. Never
+carry over a figure the rows did not actually show.
+
+## QUERIES THAT WORKED
+The SELECTs that returned usable rows, and what each one answered. These are the joins and
+filters that are known to fit this schema.
+
+## DEAD ENDS
+Tables that were empty, queries that were rejected or timed out, and periods the data does not
+cover. This is what stops the work being repeated.
+
+## OPEN
+What still has to be answered.
+</instructions>
+
+Respond only with those sections.
+
+<messages>
+Messages to summarize:
+{messages}
+</messages>"""
+
+REMEMBER_TERM_ARG = "The word or phrase as the customer says it."
+REMEMBER_DEFINITION_ARG = (
+    "What it means against these tables, concretely enough to write SQL from later."
+)

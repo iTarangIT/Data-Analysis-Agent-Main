@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import queue
+from app.agent.store import setup_store
 from app.api import (
     routes_auth,
     routes_connections,
@@ -33,6 +34,8 @@ async def lifespan(app: FastAPI):
     if s.mcp_startup_probe:
         # Same reasoning: without the MCP server no Postgres connection can answer anything.
         await probe_mcp()
+    # Idempotent, and not per run: it issues CREATE INDEX CONCURRENTLY.
+    setup_store()
     db = SessionLocal()
     try:
         # Covers a process killed mid-run, which no in-process teardown can reach.
