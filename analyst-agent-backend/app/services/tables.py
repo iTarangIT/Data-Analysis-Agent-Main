@@ -10,6 +10,8 @@ nothing is chosen, and a run is refused until a person has chosen.
 
 import asyncio
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -23,7 +25,8 @@ from app.config import get_settings
 from app.connectors.base import SqlConnector
 from app.connectors.registry import connector_for
 from app.db.models import Connection, ConnectionTable
-from app.services.errors import DomainError
+from app.logging import log
+from app.services.errors import DomainError, SourceUnavailable
 
 # Structure rarely changes, but what a table holds does, and the model reads both: a table that
 # emptied or a partition that stopped filling must reach the prompt without anyone refreshing.
@@ -67,6 +70,25 @@ def _first_listing(db: Session, conn: Connection, names: list[str]) -> list[Conn
     return _rows(db, conn.id)
 
 
+@contextmanager
+def _reachable(conn: Connection) -> Iterator[None]:
+    """Turn a source that is down into an answer rather than a crash.
+
+    The driver's message names host, port and user, so it is logged and a plain sentence goes
+    back instead. Without this a dropped tunnel reaches the browser as a 500, and the picker
+    shows a runtime error where it should show a line saying to try again.
+    """
+    try:
+        yield
+    except DomainError:
+        raise
+    except Exception as e:
+        log.warning("tables.source_unreachable", connection_id=conn.id, error=str(e))
+        raise SourceUnavailable(
+            "could not reach that database just now - check it is running and try again"
+        ) from e
+
+
 def _introspect(
     connector: SqlConnector, names: list[str]
 ) -> tuple[list[TableDef], dict[str, dict[str, Any]]]:
@@ -97,8 +119,9 @@ def ensure_listed(db: Session, conn: Connection) -> None:
     if db.scalar(select(ConnectionTable.id).where(ConnectionTable.connection_id == conn.id)):
         return
     connector = connector_for(conn)
-    selected = [r for r in _first_listing(db, conn, connector.list_tables()) if r.selected]
-    _apply(conn, selected, *_introspect(connector, [r.name for r in selected]))
+    with _reachable(conn):
+        selected = [r for r in _first_listing(db, conn, connector.list_tables()) if r.selected]
+        _apply(conn, selected, *_introspect(connector, [r.name for r in selected]))
     db.commit()
 
 
@@ -131,7 +154,8 @@ def save_selection(db: Session, conn: Connection, names: list[str]) -> dict[str,
         if not row.selected:
             row.definition = row.stats = None
     selected = [r for r in rows if r.selected]
-    _apply(conn, selected, *_introspect(connector_for(conn), [r.name for r in selected]))
+    with _reachable(conn):
+        _apply(conn, selected, *_introspect(connector_for(conn), [r.name for r in selected]))
     db.commit()
     return view(db, conn)
 
@@ -141,7 +165,8 @@ def refresh(db: Session, conn: Connection) -> dict[str, Any]:
     one is dropped, selected or not."""
     ensure_listed(db, conn)
     connector = connector_for(conn)
-    present = set(connector.list_tables())
+    with _reachable(conn):
+        present = set(connector.list_tables())
     rows = _rows(db, conn.id)
     known = {r.name for r in rows}
     added, removed = sorted(present - known), sorted(known - present)
@@ -152,7 +177,8 @@ def refresh(db: Session, conn: Connection) -> dict[str, Any]:
     _add(db, conn.id, added, selected=False)
 
     selected = [r for r in rows if r.selected and r.name in present]
-    _apply(conn, selected, *_introspect(connector, [r.name for r in selected]))
+    with _reachable(conn):
+        _apply(conn, selected, *_introspect(connector, [r.name for r in selected]))
     db.commit()
     return {**view(db, conn), "added": added, "removed": removed}
 
@@ -188,7 +214,8 @@ async def load_for_run(db: Session, conn: Connection, connector: SqlConnector) -
     """
     rows = _rows(db, conn.id)
     if not rows:
-        rows = _first_listing(db, conn, await asyncio.to_thread(connector.list_tables))
+        with _reachable(conn):
+            rows = _first_listing(db, conn, await asyncio.to_thread(connector.list_tables))
     selected = [r for r in rows if r.selected]
 
     stale = (
@@ -196,7 +223,8 @@ async def load_for_run(db: Session, conn: Connection, connector: SqlConnector) -
         or datetime.now(UTC) - conn.catalog_refreshed_at > REFRESH_AFTER
     )
     if selected and stale:
-        read = await asyncio.to_thread(_introspect, connector, [r.name for r in selected])
+        with _reachable(conn):
+            read = await asyncio.to_thread(_introspect, connector, [r.name for r in selected])
         _apply(conn, selected, *read)
 
     catalog = Catalog(

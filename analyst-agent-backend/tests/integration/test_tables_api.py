@@ -284,3 +284,61 @@ def test_deleting_a_connection_forgets_its_tables(client, auth, connection_id):
         assert db.query(ConnectionTable).filter_by(connection_id=connection_id).count() == 0
     finally:
         db.close()
+
+
+class TestASourceThatIsDown:
+    """A customer's database being unreachable is not a bad request and not a crash.
+
+    Reproduces what a dropped SSH tunnel does: the connection row is fine and the choice is
+    valid, but reading the chosen tables' structure fails partway through.
+    """
+
+    @staticmethod
+    def _break_reads(monkeypatch):
+        """Let listing work and make reading structure fail, which is the order the tunnel
+        died in: the connection answered, then dropped partway through the save."""
+        from app import mcp_client
+
+        working = mcp_client.call
+
+        def fail(tenant_id, connection_id, tool, args):
+            if tool == "read_tables":
+                raise RuntimeError(
+                    "Error executing tool read_tables: (psycopg.OperationalError) connection "
+                    'failed: connection to server at "127.0.0.1", port 5500 failed: server '
+                    "closed the connection unexpectedly"
+                )
+            return working(tenant_id, connection_id, tool, args)
+
+        monkeypatch.setattr(mcp_client, "call", fail)
+
+    def test_choosing_tables_says_so_instead_of_failing_with_a_500(
+        self, client, auth, connection_id, monkeypatch
+    ):
+        _read(client, auth, connection_id)
+        self._break_reads(monkeypatch)
+
+        r = _choose(client, auth, connection_id, ["dealers"])
+
+        assert r.status_code == 503, r.text
+        assert "reach" in r.json()["error"].lower()
+
+    def test_the_message_never_quotes_the_host_or_port(
+        self, client, auth, connection_id, monkeypatch
+    ):
+        """The driver names host, port and user. That belongs in the log, not in a browser."""
+        _read(client, auth, connection_id)
+        self._break_reads(monkeypatch)
+
+        body = _choose(client, auth, connection_id, ["dealers"]).json()
+
+        assert "5500" not in body["error"]
+        assert "127.0.0.1" not in body["error"]
+
+    def test_refreshing_says_so_too(self, client, auth, connection_id, monkeypatch):
+        _read(client, auth, connection_id)
+        self._break_reads(monkeypatch)
+
+        r = client.post(f"/connections/{connection_id}/tables/refresh", headers=auth)
+
+        assert r.status_code == 503, r.text

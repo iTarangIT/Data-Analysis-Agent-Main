@@ -21,6 +21,13 @@ class Conflict(DomainError):
     status_code = 409
 
 
+class SourceUnavailable(DomainError):
+    """A customer's database could not be reached. Not a bad request: nothing the caller sent
+    was wrong, and the same call will work once the source is back."""
+
+    status_code = 503
+
+
 class GuardRejected(DomainError):
     """SQL failed the safety guard."""
 
