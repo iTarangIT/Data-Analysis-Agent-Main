@@ -1,30 +1,87 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import {
+  AnswerText,
+  AssistantMessage,
+  MessageActions,
+  UserMessage,
+} from "@/components/ask/chat-message";
+import { RunErrorPanel } from "@/components/ask/run-error";
 import { RunProcess } from "@/components/ask/run-process";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { RunDetail, RunSummary } from "@/lib/api/types";
-import { cn } from "@/lib/utils";
 
 /**
  * A turn from before this sitting, replayed from the agent.
  *
- * Collapsed, and deliberately without a result table. The agent records how many rows came
- * back, never what they were, so there is no table to restore and there never will be --
- * re-asking the question is how you get fresh numbers. Saying that plainly beats an empty
- * grid that looks like a bug.
+ * It reads like any other message, but without a result table. The agent records how many
+ * rows came back, never what they were, so there is no table to restore and there never will
+ * be -- asking again is how you get fresh numbers, and the action row offers exactly that.
  *
- * The list carries no SQL or answer text either, because both are unbounded and a thread of
- * fifty would be a heavy payload for what is only a way to find your place. Opening one
- * fetches it, the same way the runs page does.
+ * The thread's list carries no SQL or answer text, because both are unbounded and a thread of
+ * fifty would be a heavy payload just to find your place. Each answer is fetched when its turn
+ * comes within a screen of the viewport, the same way the runs page fetches one it opens, so a
+ * long thread costs requests only for what someone actually scrolls to.
  */
-function Detail({ runId }: { runId: string }) {
+
+/** How far outside the viewport a turn starts loading, so it is usually ready on arrival. */
+const PRELOAD_MARGIN = "600px 0px";
+
+export function PastTurn({
+  run,
+  latest,
+  onAskAgain,
+}: {
+  run: RunSummary;
+  latest: boolean;
+  onAskAgain?: () => void;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  const [near, setNear] = useState(false);
+
+  useEffect(() => {
+    const element = root.current;
+    if (!element || near) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) setNear(true);
+      },
+      { rootMargin: PRELOAD_MARGIN },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [near]);
+
+  return (
+    <div ref={root} className="flex flex-col gap-5">
+      <UserMessage>{run.question}</UserMessage>
+      <AssistantMessage>
+        {near ? (
+          <Reply runId={run.id} latest={latest} onAskAgain={onAskAgain} />
+        ) : (
+          <ReplySkeleton />
+        )}
+      </AssistantMessage>
+    </div>
+  );
+}
+
+function Reply({
+  runId,
+  latest,
+  onAskAgain,
+}: {
+  runId: string;
+  latest: boolean;
+  onAskAgain?: () => void;
+}) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetching here is correct, unlike starting a run: this reads a row the person just asked
-  // to see, costs nothing, and is abandoned if they close it again.
+  // Fetching here is correct, unlike starting a run: this reads a row that is about to be on
+  // screen, costs nothing against the budget, and is abandoned if the turn goes away first.
   useEffect(() => {
     const controller = new AbortController();
     fetch(`/api/runs/${runId}`, { signal: controller.signal })
@@ -33,60 +90,34 @@ function Detail({ runId }: { runId: string }) {
         setDetail((await response.json()) as RunDetail);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setError("Could not load that run.");
+        if (!controller.signal.aborted) setError("Could not load that answer.");
       });
     return () => controller.abort();
   }, [runId]);
 
-  if (error) return <p className="pt-3 text-[0.875rem] text-fault">{error}</p>;
-  if (!detail) return <p className="pt-3 text-[0.875rem] text-ink-muted">Loading</p>;
+  if (error) return <p className="text-[0.875rem] text-fault">{error}</p>;
+  if (!detail) return <ReplySkeleton />;
 
   return (
-    <div className="flex flex-col gap-3 pt-3">
-      <RunProcess detail={detail} />
-      {detail.answer ? (
-        <p className="max-w-[68ch] text-[0.9375rem] leading-[1.65] whitespace-pre-wrap text-ink">{detail.answer}</p>
-      ) : (
+    <>
+      {detail.answer ? <AnswerText shown={detail.answer} full={detail.answer} /> : null}
+      {detail.error ? <RunErrorPanel error={{ kind: "agent", message: detail.error }} /> : null}
+      {!detail.answer && !detail.error ? (
         <p className="text-[0.875rem] text-ink-muted">No answer was recorded for this run.</p>
-      )}
-      {detail.error ? <p className="text-[0.875rem] text-fault">{detail.error}</p> : null}
-      <p className="text-[0.75rem] text-ink-muted">
-        Results are not stored. Ask it again for fresh numbers.
-      </p>
-    </div>
+      ) : null}
+      <MessageActions copyText={detail.answer} onAskAgain={onAskAgain} persistent={latest}>
+        <RunProcess detail={detail} />
+      </MessageActions>
+    </>
   );
 }
 
-export function PastTurn({ run }: { run: RunSummary }) {
-  const [open, setOpen] = useState(false);
-
+/** Roughly the height of a short answer and its action row, so loading one barely moves the page. */
+function ReplySkeleton() {
   return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-start gap-2 text-left"
-      >
-        <ChevronDown
-          aria-hidden
-          className={cn(
-            "mt-1 size-4 shrink-0 text-ink-faint transition-transform",
-            open && "rotate-180",
-          )}
-          strokeWidth={2}
-        />
-        <span className="min-w-0 flex-1">
-          <span className="block text-[0.9375rem] leading-[1.6] text-ink">{run.question}</span>
-          <span className="mt-0.5 block font-mono text-[0.6875rem] text-ink-muted">
-            {run.status === "error"
-              ? "failed"
-              : `${run.rows_returned} row${run.rows_returned === 1 ? "" : "s"} · ${(run.duration_ms / 1000).toFixed(1)}s`}
-          </span>
-        </span>
-      </button>
-
-      {open ? <Detail runId={run.id} /> : null}
+    <div role="presentation" className="flex flex-col gap-2.5 pt-1.5 pb-8">
+      <Skeleton className="h-3.5 w-11/12 rounded-full bg-surface-sunk" />
+      <Skeleton className="h-3.5 w-3/4 rounded-full bg-surface-sunk" />
     </div>
   );
 }

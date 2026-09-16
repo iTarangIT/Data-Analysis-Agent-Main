@@ -22,12 +22,12 @@ export function ResultTable({ result }: { result: Result }) {
   return (
     <Panel className="flex min-w-0 flex-col overflow-hidden">
       <div className="flex items-baseline justify-between gap-3 border-b border-line px-4 py-2.5">
-        <p className="text-[0.6875rem] font-semibold tracking-[0.08em] text-ink-muted uppercase">
+        <p className="text-xs font-medium text-ink-muted">
           {rows.length === 1 ? "1 row" : `${rows.length} rows`}
         </p>
         {truncated ? (
-          <p className="text-[0.6875rem] text-warning">
-            capped, ask for a narrower range to see the rest
+          <p className="text-xs text-warning">
+            Capped. Ask for a narrower range to see the rest.
           </p>
         ) : null}
       </div>

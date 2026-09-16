@@ -35,7 +35,7 @@ export function ResultChart({ spec, result }: { spec: ChartSpec; result: ResultT
   return (
     <figure className="m-0 flex min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-card">
       <figcaption className="flex items-baseline justify-between gap-3 border-b border-line px-4 py-2.5">
-        <span className="min-w-0 truncate text-[0.6875rem] font-semibold tracking-[0.08em] text-ink-muted uppercase">
+        <span className="min-w-0 truncate text-xs font-medium text-ink-muted">
           {chart.series.map((s) => s.column).join(", ")} by {chart.xColumn}
         </span>
         <span className="shrink-0 font-mono text-[0.6875rem] text-ink-faint">{chart.type}</span>

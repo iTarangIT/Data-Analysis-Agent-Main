@@ -2,9 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { AskWorkspace } from "@/components/ask/ask-workspace";
 import { agentJson } from "@/lib/api/agent-client";
-import { initialsOf } from "@/lib/initials";
-import type { Connection, RunPage, Thread } from "@/lib/api/types";
-import { getCurrentUser, requireSession } from "@/lib/auth/dal";
+import type { Connection, RunPage } from "@/lib/api/types";
+import { requireSession } from "@/lib/auth/dal";
 
 export const metadata = { title: "Ask" };
 export const dynamic = "force-dynamic";
@@ -24,14 +23,12 @@ export default async function AskPage({ searchParams }: PageProps<"/ask">) {
   const continuing = typeof thread === "string" && thread.length > 0;
 
   // Read straight from the agent. Going through our own route handlers would add a round trip
-  // between the handler and this render for nothing. None of the three is load-bearing: an
-  // unreachable agent still renders the page, and the composer says why.
-  const [connections, threads, history] = await Promise.all([
+  // between the handler and this render for nothing. Neither is load-bearing: an unreachable
+  // agent still renders the page, and the composer says why. The thread list is the sidebar's,
+  // read by the layout.
+  const [connections, history] = await Promise.all([
     agentJson<Connection[]>("/connections", { token: session.accessToken }).catch(
       (): Connection[] => [],
-    ),
-    agentJson<Thread[]>("/runs/threads?limit=30", { token: session.accessToken }).catch(
-      (): Thread[] => [],
     ),
     continuing
       ? agentJson<RunPage>(
@@ -41,16 +38,15 @@ export default async function AskPage({ searchParams }: PageProps<"/ask">) {
       : Promise.resolve<RunPage>({ items: [], next_cursor: null }),
   ]);
 
-  const user = await getCurrentUser();
-
   return (
     <AskWorkspace
+      // Keyed on the thread, so opening another conversation starts from a clean transcript
+      // rather than carrying this sitting's turns into it.
+      key={threadId}
       connections={connections}
       threadId={threadId}
-      threads={threads}
       // The agent returns newest first; a transcript reads oldest first.
       history={[...history.items].reverse()}
-      userInitials={initialsOf(user)}
     />
   );
 }

@@ -1,19 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 
-const QUERY = "(prefers-reduced-motion: reduce)";
-function subscribe(callback: () => void) {
-  const media = window.matchMedia(QUERY);
-  media.addEventListener("change", callback);
-  return () => media.removeEventListener("change", callback);
-}
-const getSnapshot = () => window.matchMedia(QUERY).matches;
-const getServerSnapshot = () => true;
+import { usePrefersReducedMotion } from "@/lib/use-reduced-motion";
 
 /** Presentation only: never changes the answer retained in the run state. */
 export function useTypedAnswer(text: string, enabled: boolean): string {
-  const reduced = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const reduced = usePrefersReducedMotion();
   const [shown, setShown] = useState("");
   const progress = useRef({ source: "", shown: "" });
 

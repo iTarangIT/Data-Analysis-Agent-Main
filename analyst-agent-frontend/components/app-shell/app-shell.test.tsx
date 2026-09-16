@@ -5,8 +5,11 @@ import { AppShell } from "./app-shell";
 
 // A server action cannot be imported into jsdom, and the shell only ever passes it to a form.
 vi.mock("@/actions/auth", () => ({ logout: vi.fn() }));
-// `usePathname` reads the router, which only exists inside the App Router at runtime.
-vi.mock("next/navigation", () => ({ usePathname: () => "/ask" }));
+// `usePathname` and `useSearchParams` read the router, which only exists inside the App Router at runtime.
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/ask",
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 afterEach(cleanup);
 

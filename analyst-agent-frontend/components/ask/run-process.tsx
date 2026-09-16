@@ -24,17 +24,19 @@ export function RunProcess({ state, detail }: Props) {
   const rows = state ? state.result?.rows.length : detail!.rows_returned;
   const sql = state?.sql ?? detail?.sql;
   const queries = state?.attempts.filter((attempt) => attempt.sql) ?? [];
+  // `contents`, so the toggle and its panel join the message's action row as siblings: the
+  // toggle sits beside Copy and Ask again, and the panel wraps onto a full line of its own.
   return (
-    <div className="min-w-0">
+    <div className="contents">
       <button type="button" aria-expanded={open} aria-controls={id}
         onClick={() => setOpen((value) => !value)}
-        className="flex max-w-full items-center gap-2 text-left text-[0.8125rem] text-ink-muted hover:text-ink">
+        className="flex h-8 max-w-full items-center gap-1.5 rounded-lg px-2 text-left text-[0.8125rem] text-ink-muted transition-colors hover:bg-surface-sunk hover:text-ink">
         {phase === "done" ? <Check aria-hidden className="size-3.5 shrink-0 text-success" /> : null}
         <span>{summary}</span>
         <ChevronDown aria-hidden className={cn("size-3.5 shrink-0", open && "rotate-180")} />
       </button>
       {open ? (
-        <section id={id} aria-label="How this was answered" className="mt-3 flex min-w-0 flex-col gap-3 rounded-lg border border-line bg-surface p-4">
+        <section id={id} aria-label="How this was answered" className="mt-2 flex min-w-0 basis-full flex-col gap-3 rounded-xl border border-line bg-surface p-4">
           <h3 className="text-xs font-semibold text-ink">How this was answered</h3>
           {state ? <RunTimeline state={state} /> : null}
           <p className="text-xs text-ink-muted">Tool: <span className="font-mono">{tool ?? (state ? "None recorded" : "Not recorded")}</span></p>
