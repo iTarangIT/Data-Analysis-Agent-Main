@@ -2,7 +2,7 @@ import json
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, PostgresDsn, RedisDsn, SecretStr, field_validator
+from pydantic import AnyHttpUrl, Field, PostgresDsn, RedisDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -54,6 +54,22 @@ class Settings(BaseSettings):
     # structure goes into every query prompt, so this is what bounds that prompt's size.
     max_agent_tables: int = 12
     statement_timeout_ms: int = 8000
+    # `statement_timeout` bounds a query once connected; opening the connection is unbounded
+    # without this. A source behind a dead SSH tunnel accepts the TCP connection and then never
+    # answers, which hung the request and the MCP server with it.
+    connect_timeout_s: int = 10
+
+    # The database MCP server. It runs as its own process because it is the only thing that
+    # decrypts a customer DSN, and it authenticates with a secret of its own so a leaked user
+    # token cannot be replayed against it.
+    database_mcp_url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:8001/mcp")
+    mcp_jwt_secret: SecretStr
+    mcp_token_ttl_seconds: int = 120
+    # Longer than the database's own connect and statement timeouts, so the server's error is
+    # what surfaces; this is only the backstop for a server that stops answering entirely.
+    mcp_request_timeout_s: int = 30
+    # Fail fast at boot rather than on a customer's first question.
+    mcp_startup_probe: bool = True
     max_sql_retries: int = 2
     # How many tool calls one question may make. Distinct from max_sql_retries: a model may
     # legitimately query more than once to answer, without any of them having been rejected.

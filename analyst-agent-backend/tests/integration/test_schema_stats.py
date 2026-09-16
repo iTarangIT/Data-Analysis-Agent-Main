@@ -7,14 +7,14 @@ partition already created ahead of it. Reseed before running them.
 
 import pytest
 
-from app.connectors.postgres import PostgresConnector
+from app.database_mcp import CustomerDatabase
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(scope="module")
 def stats(demo_dsn):
-    connector = PostgresConnector(demo_dsn)
+    connector = CustomerDatabase(demo_dsn)
     return connector.table_stats(connector.list_tables())
 
 

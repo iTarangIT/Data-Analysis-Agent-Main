@@ -3,12 +3,10 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.connectors.duckdb import ingest_upload
-from app.connectors.postgres import PostgresConnector
 from app.db.models import Connection, Tenant
 from app.logging import log
 from app.security import vault
@@ -35,20 +33,23 @@ def create_connection(
     db: Session, tenant_id: str, name: str, kind: str, secret: dict
 ) -> Connection:
     ensure_tenant(db, tenant_id)
-    if kind == "postgres":
-        try:
-            PostgresConnector(secret["dsn"]).test()
-        except SQLAlchemyError as e:
-            # The driver's message quotes host, port and user, so it is logged rather than
-            # returned. Storing a credential we cannot use only fails later, in a run.
-            log.warning("connection.test_failed", kind=kind, error=str(e))
-            raise DomainError("could not connect to that database with the details given") from e
-
     conn = Connection(tenant_id=tenant_id, name=name, kind=kind, secret_enc=vault.encrypt(secret))
     db.add(conn)
     db.commit()
     db.refresh(conn)
-    tables.ensure_listed(db, conn)
+
+    # Listing the source is the connectivity proof. A Postgres database is only reachable
+    # through MCP, which resolves a connection by id, so there is nothing to test before the row
+    # exists - and a row whose source we cannot read is worse than no row at all.
+    try:
+        tables.ensure_listed(db, conn)
+    except Exception as e:
+        db.rollback()
+        db.delete(conn)
+        db.commit()
+        # The driver's message quotes host, port and user, so it is logged rather than returned.
+        log.warning("connection.listing_failed", kind=kind, error=str(e))
+        raise DomainError("could not connect to that database with the details given") from e
     return conn
 
 

@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import event
 
 from app.catalog.types import Column, ForeignKey
-from app.connectors.postgres import PostgresConnector
+from app.database_mcp import CustomerDatabase
 
 pytestmark = pytest.mark.integration
 
@@ -19,7 +19,7 @@ SEEDED = ["batteries", "dealers", "readings", "telemetry"]
 
 @pytest.fixture(scope="module")
 def connector(demo_dsn):
-    return PostgresConnector(demo_dsn)
+    return CustomerDatabase(demo_dsn)
 
 
 @pytest.fixture(scope="module")

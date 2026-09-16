@@ -9,6 +9,8 @@ description = "Multi-tenant data analyst agent service (FastAPI + LangGraph)"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
+    "mcp>=1.26,<2",
+    "langchain-mcp-adapters>=0.3,<0.4",
     "uvicorn[standard]>=0.30",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",

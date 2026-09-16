@@ -18,6 +18,7 @@ from app.connectors.registry import connector_for
 from app.db.models import Connection, Run
 from app.db.session import SessionLocal
 from app.logging import configure_logging, log
+from app.mcp_client import probe_mcp
 from app.services import runs as svc
 from app.services import tables
 
@@ -98,6 +99,8 @@ async def reap_stale(ctx: dict) -> None:
 async def _startup(ctx: dict) -> None:
     # The worker does not go through the app's lifespan, so nothing else configures logging.
     configure_logging()
+    if get_settings().mcp_startup_probe:
+        await probe_mcp()
     log.info("worker.startup", max_jobs=get_settings().worker_max_jobs)
 
 

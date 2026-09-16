@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.db.session import SessionLocal
 from app.llm import configure_tracing
 from app.logging import configure_logging, log
+from app.mcp_client import probe_mcp
 from app.services.auth import purge_expired_refresh_tokens
 from app.services.errors import DomainError
 from app.services.runs import reap_stale_runs
@@ -29,6 +30,9 @@ async def lifespan(app: FastAPI):
     if s.queue_enabled:
         # Fail the boot rather than the first question if Redis is not running.
         await queue.connect()
+    if s.mcp_startup_probe:
+        # Same reasoning: without the MCP server no Postgres connection can answer anything.
+        await probe_mcp()
     db = SessionLocal()
     try:
         # Covers a process killed mid-run, which no in-process teardown can reach.
