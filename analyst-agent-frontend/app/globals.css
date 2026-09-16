@@ -164,6 +164,17 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  /* A page wearing the app shell owns the viewport and clips inside itself, so the document
+     must not scroll as well. Without this, anything appended to `body` -- which is a flex
+     column, and which Grammarly, password managers and the like all append to -- becomes a
+     sibling flex item, grows the page past the viewport and leaves the shell pinned at
+     `h-dvh` above a band of dead space, with a second scrollbar to reach it. The shell cannot
+     defend against that itself; only the scrolling box above it can. Keyed off the shell so
+     that sign-in, which is an ordinary page that should scroll on a short screen, still does. */
+  body:has(> [data-app-shell]) {
+    overflow: hidden;
+  }
+
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;

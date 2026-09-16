@@ -23,6 +23,11 @@ import { NavLink } from "./nav-link";
  * descendant `overflow-y-auto` -- including the one that pins the composer -- would quietly
  * stop working.
  *
+ * `data-app-shell` is what globals.css keys the document's own `overflow: hidden` off. The
+ * shell sizes itself to the viewport, but it cannot stop a sibling growing the page beneath
+ * it, and `body` is a flex column that browser extensions append themselves to. See the note
+ * on that rule.
+ *
  * Icons are rendered here and passed down as elements. See the note in nav-link.tsx.
  */
 
@@ -67,7 +72,7 @@ export function AppShell({
   );
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-bg">
+    <div data-app-shell className="flex h-dvh overflow-hidden bg-bg">
       <aside className="hidden w-[212px] shrink-0 flex-col border-r border-line bg-surface md:flex">
         <div className="flex h-14 shrink-0 items-center px-5">{wordmark}</div>
 
