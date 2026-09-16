@@ -128,7 +128,7 @@ class TestParity:
                 worker_db = SessionLocal()
                 try:
                     svc.execute_run(
-                        worker_db, prepared.run, prepared.connector, prepared.schema, emit
+                        worker_db, prepared.run, prepared.connector, prepared.catalog, emit
                     )
                 finally:
                     worker_db.close()
