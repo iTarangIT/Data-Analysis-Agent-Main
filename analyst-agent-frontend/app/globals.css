@@ -4,6 +4,8 @@
 /* Streamdown renders the agent's answers as markdown and styles its elements with utilities
    from inside node_modules, which Tailwind does not scan unless told to. */
 @source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/code/dist/*.js";
+@source "../node_modules/@streamdown/math/dist/*.js";
 
 /* Registry components carry `dark:` utilities. Redefining the variant as a class that
    nothing ever sets is what keeps them inert; without this line `dark:` would fall back
@@ -58,6 +60,24 @@
   /* the only dark surface in the product */
   --code-bg: #1e1b31;
   --code-fg: #e4e4e7;
+
+  /* Syntax colours for code inside an answer, which shiki paints through these (see
+     components/ask/answer-markdown.ts). Every one is the palette: the same dark surface as the
+     SQL block, lavender tints of the brand for structure, and the status colours for literals. */
+  --code-foreground: var(--code-fg);
+  --code-background: var(--code-bg);
+  --code-token-keyword: color-mix(in oklab, var(--brand) 55%, var(--code-fg));
+  --code-token-function: color-mix(in oklab, var(--brand) 30%, var(--code-fg));
+  --code-token-link: color-mix(in oklab, var(--brand) 55%, var(--code-fg));
+  --code-token-constant: var(--warning);
+  --code-token-string: var(--success);
+  --code-token-string-expression: var(--success);
+  --code-token-comment: var(--ink-faint);
+  --code-token-parameter: var(--code-fg);
+  --code-token-punctuation: var(--ink-faint);
+  --code-token-inserted: var(--success);
+  --code-token-deleted: var(--fault);
+  --code-token-changed: var(--warning);
 
   --radius: 0.5rem;
 

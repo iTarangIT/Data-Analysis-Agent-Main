@@ -17,7 +17,13 @@ export const Response = memo(
       {...props}
     />
   ),
-  (prevProps, nextProps) => prevProps.children === nextProps.children
+  // The registry version compared `children` alone. When a stream ends the text stops changing
+  // and only `isAnimating` flips, so it never re-rendered and the caret stayed on for good.
+  (prevProps, nextProps) =>
+    prevProps.children === nextProps.children &&
+    prevProps.isAnimating === nextProps.isAnimating &&
+    prevProps.caret === nextProps.caret &&
+    prevProps.className === nextProps.className
 )
 
 Response.displayName = "Response"

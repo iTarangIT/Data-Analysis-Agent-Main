@@ -258,7 +258,9 @@ function Turn({
           </div>
         ) : null}
 
-        {turn.answer ? <AnswerText shown={answer} full={turn.answer} /> : null}
+        {turn.answer ? (
+          <AnswerText shown={answer} full={turn.answer} streaming={Boolean(live) && running} />
+        ) : null}
 
         {plottable && turn.chart && turn.result ? (
           <ResultChart spec={turn.chart} result={turn.result} />

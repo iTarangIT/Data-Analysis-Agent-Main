@@ -3,6 +3,9 @@
 import { Check, Copy, RotateCcw } from "lucide-react";
 import { useState } from "react";
 
+import "katex/dist/katex.min.css";
+
+import { ANSWER_PLUGINS, SHIKI_THEME } from "@/components/ask/answer-markdown";
 import { Message, MessageContent } from "@/components/ui/message";
 import { Response } from "@/components/ui/response";
 import { cn } from "@/lib/utils";
@@ -44,19 +47,39 @@ export function AssistantMessage({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * The answer, as markdown.
+ * The answer, rendered by the Response component as it streams in.
  *
- * `shown` is the typed-out part and `full` the whole of it. While the two differ the visible
- * copy is hidden from assistive tech, which reads the complete answer instead of a sentence
- * that grows under it. Once typing finishes they are the same and the visible copy is all
- * there is.
+ * `shown` is the typed-out part and `full` the whole of it. While the two differ -- or while
+ * the agent is still sending tokens -- Response runs in streaming mode: an unclosed `**` or a
+ * half-received table renders as what it will become instead of flashing raw syntax, and a
+ * caret marks where text is still arriving.
+ *
+ * While typing, the visible copy is hidden from assistive tech, which reads the complete answer
+ * instead of a sentence that grows under it. Once typing finishes they are the same and the
+ * visible copy is all there is.
  */
-export function AnswerText({ shown, full }: { shown: string; full: string }) {
+export function AnswerText({
+  shown,
+  full,
+  streaming = false,
+}: {
+  shown: string;
+  full: string;
+  /** The agent is still sending this answer. */
+  streaming?: boolean;
+}) {
   const typing = shown !== full;
+  const animating = typing || streaming;
   return (
     <>
       <div aria-hidden={typing || undefined} className="min-w-0">
-        <Response className="text-base leading-7 text-ink [&_li]:my-1 [&_ol]:my-3 [&_p]:my-3 [&_ul]:my-3">
+        <Response
+          plugins={ANSWER_PLUGINS}
+          shikiTheme={SHIKI_THEME}
+          isAnimating={animating}
+          caret={animating ? "circle" : undefined}
+          className={ANSWER_CLASS}
+        >
           {shown}
         </Response>
       </div>
@@ -64,6 +87,28 @@ export function AnswerText({ shown, full }: { shown: string; full: string }) {
     </>
   );
 }
+
+/**
+ * Type for an answer, in the product's own scale rather than Streamdown's defaults: body copy at
+ * the transcript's size, headings a step or two above it, and space between blocks so a
+ * paragraph, a list and a table read as separate things.
+ */
+const ANSWER_CLASS = cn(
+  "text-base leading-7 text-ink",
+  "[&_p]:my-3 [&_ol]:my-3 [&_ul]:my-3 [&_li]:my-1",
+  "[&_h1]:mt-6 [&_h1]:mb-3 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:tracking-tight",
+  "[&_h2]:mt-6 [&_h2]:mb-2.5 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:tracking-tight",
+  "[&_h3]:mt-5 [&_h3]:mb-2 [&_h3]:text-base [&_h3]:font-semibold",
+  "[&_hr]:my-6 [&_hr]:border-line",
+  "[&_blockquote]:border-l-brand/40 [&_blockquote]:text-ink-muted",
+  "[&_:not(pre)>code]:rounded-md [&_:not(pre)>code]:bg-surface-sunk [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[0.875em]",
+  "[&_a]:text-brand [&_a]:underline-offset-4 hover:[&_a]:text-brand-hover",
+  // Code sits on the product's one dark surface, the same as the SQL block, which is the ground
+  // the syntax colours in globals.css are chosen for.
+  "[&_[data-streamdown=code-block-body]]:border-transparent [&_[data-streamdown=code-block-body]]:bg-code-bg [&_[data-streamdown=code-block-body]]:text-code-fg",
+  // The streaming caret is drawn after the last block and would inherit the ink.
+  "[&>*:last-child]:after:text-brand",
+);
 
 /**
  * Copy, ask again, and the run's details.
