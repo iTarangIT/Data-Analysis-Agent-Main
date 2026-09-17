@@ -19,11 +19,10 @@ from app.services.errors import DomainError, NotFound
 
 
 def ensure_tenant(db: Session, tenant_id: str) -> Tenant:
-    """Adopt a tenant named by a JWT that has no row yet.
+    """The tenant row for `tenant_id`, created if it is missing.
 
-    Signing up creates the tenant now, so this is no longer how tenants normally appear. It
-    stays for hand-minted tokens: the eval harness and the test fixtures both sign a
-    tenant_id that was never registered, and every route they exercise depends on this.
+    A request's tenant always exists, since `current_tenant` resolves it from an account that
+    references it. This stays for tests that seed runs and connections for a tenant directly.
     """
     tenant = db.get(Tenant, tenant_id)
     if tenant is None:

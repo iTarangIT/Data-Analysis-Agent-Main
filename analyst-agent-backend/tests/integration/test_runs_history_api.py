@@ -3,14 +3,17 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-pytestmark = pytest.mark.integration
+from tests import supabase_tokens
 
-PASSWORD = "a-long-enough-password"
+pytestmark = pytest.mark.integration
 
 
 def _account(client, email="owner@example.com"):
-    body = client.post("/auth/register", json={"email": email, "password": PASSWORD}).json()
-    return body, {"Authorization": f"Bearer {body['access_token']}"}
+    """Sign in through Supabase and create an organisation, the way a new person does."""
+    headers = {"Authorization": f"Bearer {supabase_tokens.mint(email=email)}"}
+    r = client.post("/auth/provision", json={"tenant_name": "Acme"}, headers=headers)
+    assert r.status_code == 201, r.text
+    return {"user": r.json()}, headers
 
 
 def _connection(client, headers, demo_dsn, name="demo"):

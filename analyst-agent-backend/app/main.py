@@ -18,7 +18,6 @@ from app.db.session import SessionLocal
 from app.llm import configure_tracing
 from app.logging import configure_logging, log
 from app.mcp_client import probe_mcp
-from app.services.auth import purge_expired_refresh_tokens
 from app.services.errors import DomainError
 from app.services.runs import reap_stale_runs
 
@@ -40,7 +39,6 @@ async def lifespan(app: FastAPI):
     try:
         # Covers a process killed mid-run, which no in-process teardown can reach.
         reap_stale_runs(db)
-        purge_expired_refresh_tokens(db)
     finally:
         db.close()
     log.info("startup", env=s.env, queue=s.queue_enabled)
@@ -60,7 +58,10 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(DomainError)
     async def _domain_error(_: Request, exc: DomainError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"error": str(exc)})
+        content = {"error": str(exc)}
+        if exc.code:
+            content["code"] = exc.code
+        return JSONResponse(status_code=exc.status_code, content=content)
 
     app.include_router(routes_health.router)
     app.include_router(routes_auth.router, prefix="/auth", tags=["auth"])

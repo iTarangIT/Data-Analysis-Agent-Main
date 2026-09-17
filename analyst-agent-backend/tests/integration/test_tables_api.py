@@ -11,48 +11,57 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import text
 
+from tests.integration.accounts import auth as bearer
+from tests.integration.accounts import create_account
+
 pytestmark = pytest.mark.integration
 
 # In the demo fixture as seeded by every version of scripts/demo_customer.sql.
 SEEDED = {"batteries", "dealers", "readings", "telemetry"}
 
 
-def _headers(tenant_id: str) -> dict:
-    from jose import jwt
-
-    from app.config import get_settings
-
-    token = jwt.encode(
-        {"tenant_id": tenant_id, "sub": "u_tables"},
-        get_settings().jwt_secret.get_secret_value(),
-        algorithm="HS256",
-    )
-    return {"Authorization": f"Bearer {token}"}
-
-
 @pytest.fixture
-def auth():
+def sign_in():
+    """Headers for a member of a brand-new tenant. Every tenant made here is removed after the
+    test, along with its account and everything it created."""
     from app.db.session import SessionLocal
 
-    tenant_id = f"t_tables_{uuid.uuid4().hex[:8]}"
-    yield _headers(tenant_id)
+    made: list[str] = []
+
+    def _sign_in(prefix: str = "t_tables") -> dict:
+        tenant_id = f"{prefix}_{uuid.uuid4().hex[:8]}"
+        made.append(tenant_id)
+        db = SessionLocal()
+        try:
+            return bearer(create_account(db, tenant_id))
+        finally:
+            db.close()
+
+    yield _sign_in
 
     db = SessionLocal()
     try:
-        owned = {"t": tenant_id}
-        db.execute(
-            text(
-                "DELETE FROM connection_tables WHERE connection_id IN "
-                "(SELECT id FROM connections WHERE tenant_id = :t)"
-            ),
-            owned,
-        )
-        db.execute(text("DELETE FROM runs WHERE tenant_id = :t"), owned)
-        db.execute(text("DELETE FROM connections WHERE tenant_id = :t"), owned)
-        db.execute(text("DELETE FROM tenants WHERE id = :t"), owned)
+        for tenant_id in made:
+            owned = {"t": tenant_id}
+            db.execute(
+                text(
+                    "DELETE FROM connection_tables WHERE connection_id IN "
+                    "(SELECT id FROM connections WHERE tenant_id = :t)"
+                ),
+                owned,
+            )
+            db.execute(text("DELETE FROM runs WHERE tenant_id = :t"), owned)
+            db.execute(text("DELETE FROM connections WHERE tenant_id = :t"), owned)
+            db.execute(text("DELETE FROM users WHERE tenant_id = :t"), owned)
+            db.execute(text("DELETE FROM tenants WHERE id = :t"), owned)
         db.commit()
     finally:
         db.close()
+
+
+@pytest.fixture
+def auth(sign_in):
+    return sign_in()
 
 
 @pytest.fixture
@@ -157,8 +166,10 @@ class TestChoosing:
         assert r.status_code == 400
         assert "invoices" in r.json()["error"]
 
-    def test_another_tenant_can_neither_see_nor_change_the_choice(self, client, connection_id):
-        other = _headers(f"t_tables_other_{uuid.uuid4().hex[:8]}")
+    def test_another_tenant_can_neither_see_nor_change_the_choice(
+        self, client, sign_in, connection_id
+    ):
+        other = sign_in("t_tables_other")
         base = f"/connections/{connection_id}/tables"
 
         assert client.get(base, headers=other).status_code == 404

@@ -81,7 +81,7 @@ class TestAlembicIsToldToLeaveTheStoreAlone:
     def test_a_langgraph_table_is_not_alembics_to_manage(self, name):
         assert store_mod.owned_by_alembic(name, "table") is False
 
-    @pytest.mark.parametrize("name", ["runs", "tenants", "connections", "refresh_tokens"])
+    @pytest.mark.parametrize("name", ["runs", "tenants", "connections", "users"])
     def test_our_own_tables_stay_alembics(self, name):
         assert store_mod.owned_by_alembic(name, "table") is True
 

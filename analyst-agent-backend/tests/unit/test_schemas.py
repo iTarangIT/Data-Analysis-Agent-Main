@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from app.api.schemas import (
     ConnectionCreate,
     ConnectionOut,
-    RegisterIn,
+    ProvisionIn,
     RunCreate,
     TableOut,
     UserOut,
@@ -91,20 +91,15 @@ class TestUserOut:
         assert not fields & {"password", "password_hash", "hashed_password"}
 
 
-class TestRegisterIn:
-    @pytest.mark.parametrize("password", ["", "short", "x" * 11])
-    def test_rejects_a_password_that_is_too_short(self, password):
+class TestProvisionIn:
+    @pytest.mark.parametrize("name", ["", "   ", "\t\n"])
+    def test_an_organisation_needs_a_name_that_is_not_just_space(self, name):
         with pytest.raises(ValidationError):
-            RegisterIn(email="a@example.com", password=password)
+            ProvisionIn(tenant_name=name)
 
-    def test_rejects_a_password_long_enough_to_be_a_cpu_bomb(self):
-        # Argon2 has no input ceiling of its own, so an unbounded password burns 64MiB a go.
+    def test_a_name_longer_than_the_column_is_refused(self):
         with pytest.raises(ValidationError):
-            RegisterIn(email="a@example.com", password="x" * 129)
-
-    def test_rejects_a_malformed_email(self):
-        with pytest.raises(ValidationError):
-            RegisterIn(email="not-an-email", password="a-long-enough-password")
+            ProvisionIn(tenant_name="x" * 201)
 
 
 class TestRunCreate:

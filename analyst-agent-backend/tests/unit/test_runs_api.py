@@ -17,7 +17,18 @@ def test_rejects_a_malformed_token(client):
     assert r.status_code == 401
 
 
+@pytest.fixture
+def signed_in(client):
+    """Stands in for an onboarded member, since resolving a real one reads the App DB."""
+    from app.api.deps import current_tenant
+    from app.security.auth import TenantContext
+
+    client.app.dependency_overrides[current_tenant] = lambda: TenantContext("t_test", "u_test")
+    yield
+    client.app.dependency_overrides.pop(current_tenant)
+
+
 @pytest.mark.parametrize("bad", [{"question": "hi"}, {"thread_id": ""}, {"connection_id": 7}])
-def test_rejects_an_invalid_body_before_touching_the_database(client, token, bad):
-    r = client.post("/runs", json=_body(**bad), headers={"Authorization": f"Bearer {token}"})
+def test_rejects_an_invalid_body_before_touching_the_database(client, signed_in, bad):
+    r = client.post("/runs", json=_body(**bad), headers={"Authorization": "Bearer ignored"})
     assert r.status_code == 422

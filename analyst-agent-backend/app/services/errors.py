@@ -1,5 +1,8 @@
 class DomainError(Exception):
     status_code = 400
+    # A stable name for a failure a client has to branch on, rendered beside the message. Most
+    # errors need none: the status says enough.
+    code: str | None = None
 
 
 class NotFound(DomainError):
@@ -10,11 +13,11 @@ class Forbidden(DomainError):
     status_code = 403
 
 
-class Unauthorized(DomainError):
-    """Bad credentials, as opposed to a missing or malformed bearer, which `deps` raises as an
-    HTTPException. Both are 401, but only this one renders as {"error": ...}."""
+class OnboardingRequired(Forbidden):
+    """Signed in with Supabase, but no account here yet: the person has to name their
+    organisation before anything else will answer."""
 
-    status_code = 401
+    code = "onboarding_required"
 
 
 class Conflict(DomainError):

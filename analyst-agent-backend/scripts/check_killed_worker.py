@@ -1,6 +1,10 @@
 """Phase 4's done-line: killing a worker mid-run gives the client a clean `error` event.
 
+    $env:TOKEN = python scripts/supabase_token.py you@example.com
     python scripts/check_killed_worker.py
+
+TOKEN is a Supabase access token for an account that already has an organisation here; the
+fixture connection is created in that organisation.
 
 Needs Redis (Memurai on Windows) on the configured REDIS_URL, the App DB up, and a model key,
 because it runs one real question. Everything else it starts and stops itself.
@@ -33,7 +37,6 @@ import httpx
 REPO = pathlib.Path(__file__).resolve().parents[1]
 PORT = int(os.environ.get("CHECK_PORT", "8123"))
 BASE = f"http://127.0.0.1:{PORT}"
-TENANT = "t_killcheck"
 LOGS = pathlib.Path(tempfile.gettempdir()) / "analyst-killcheck"
 
 QUESTION = (
@@ -58,30 +61,26 @@ def wait_for_health(timeout_s: float = 40) -> None:
     raise SystemExit("the server never came up; check the log in " + str(LOGS))
 
 
-def make_connection() -> tuple[str, str]:
-    """Register the sales fixture and mint a token, through the same app the server runs."""
+def make_connection(token: str) -> tuple[str, str]:
+    """Register the sales fixture for the signed-in account, through the same app the server
+    runs. Returns the connection id and the tenant it belongs to."""
     from fastapi.testclient import TestClient
-    from jose import jwt
 
-    from app.config import get_settings
     from app.main import create_app
 
-    s = get_settings()
-    token = jwt.encode(
-        {"tenant_id": TENANT, "sub": "u_killcheck"},
-        s.jwt_secret.get_secret_value(),
-        algorithm="HS256",
-    )
     client = TestClient(create_app())
+    headers = {"Authorization": f"Bearer {token}"}
+    me = client.get("/auth/me", headers=headers)
+    me.raise_for_status()
     body = (REPO / "evals" / "fixtures" / "sales.csv").read_bytes()
     r = client.post(
         "/connections/file",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         data={"name": "sales"},
         files={"files": ("sales.csv", body, "text/csv")},
     )
     r.raise_for_status()
-    return r.json()["id"], token
+    return r.json()["id"], me.json()["tenant_id"]
 
 
 def kill_worker(pid: int) -> str:
@@ -104,7 +103,11 @@ def main() -> int:
     LOGS.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "QUEUE_ENABLED": "true", "PYTHONUNBUFFERED": "1"}
 
-    conn_id, token = make_connection()
+    token = os.environ.get("TOKEN")
+    if not token:
+        log("set TOKEN to a Supabase access token: python scripts/supabase_token.py <email>")
+        return 2
+    conn_id, tenant_id = make_connection(token)
     log(f"connection {conn_id}")
 
     with (
@@ -193,7 +196,7 @@ def main() -> int:
                 "select id, status, error from runs where tenant_id = :t "
                 "order by created_at desc limit 1"
             ),
-            {"t": TENANT},
+            {"t": tenant_id},
         ).first()
     log(f"run row: status={row[1]!r} error={row[2]!r}")
     if row[1] == "running":

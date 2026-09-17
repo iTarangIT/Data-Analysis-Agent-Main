@@ -94,8 +94,8 @@ class Run(Base):
     connection_id: Mapped[str] = mapped_column(ForeignKey("connections.id"))
     thread_id: Mapped[str] = mapped_column(String(100), index=True)
     question: Mapped[str] = mapped_column(Text)
-    # The `sub` claim of the token that started the run. Deliberately not a foreign key: the
-    # eval harness and the test fixtures hand-mint tokens for users that have no row.
+    # The account (`users.id`) that started the run. Not a foreign key, so removing a person
+    # never has to rewrite or orphan their organisation's history.
     user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(20), default="running")
     tool: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -118,19 +118,24 @@ class Run(Base):
 class User(Base):
     """A person who signs in. Identity only: what they may do is `role`, read from this row.
 
-    `role` is deliberately absent from the JWT. TenantContext is a frozen two-field dataclass
-    that every route already depends on, and reading the role from the database means a
-    demotion takes effect at once rather than at the next refresh.
+    Supabase holds the credentials and the session; this row holds which tenant the person
+    belongs to. `auth_user_id` is the Supabase user id (the token's `sub`) and is the only
+    thing a request is matched on. Reading the tenant and role from here, rather than from the
+    token, means a demotion or a deactivation takes effect on the very next request.
     """
 
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
-    # Unique across the service, not per tenant: sign-in takes an email and a password with no
-    # tenant selector, so an address has to resolve to exactly one account.
+    # Null for an account from before Supabase, until its owner signs in with that address
+    # verified and adopts it.
+    auth_user_id: Mapped[str | None] = mapped_column(
+        String(36), unique=True, index=True, nullable=True
+    )
+    # Unique across the service, not per tenant: an address resolves to exactly one account,
+    # which is what makes adopting an older account by its email unambiguous.
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(20), default="owner")
     name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
@@ -138,28 +143,3 @@ class User(Base):
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tenant: Mapped[Tenant] = relationship(back_populates="users")
-
-
-class RefreshToken(Base):
-    """One row per issued refresh token, so a session can be listed and revoked individually.
-
-    A column on `users` would hold one token, so signing in on a phone would silently sign the
-    laptop out, and rotation would have nowhere to record what replaced what.
-    """
-
-    __tablename__ = "refresh_tokens"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    # Every token rotated from one sign-in shares this. Presenting an already-rotated token
-    # revokes the whole family in one statement, which is the theft response.
-    family_id: Mapped[str] = mapped_column(String(36), index=True)
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    replaced_by_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    # Audit only. Behind the Next.js proxy these record the proxy unless it forwards the
-    # originating address, so do not authorise on them.
-    user_agent: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    ip: Mapped[str | None] = mapped_column(String(45), nullable=True)

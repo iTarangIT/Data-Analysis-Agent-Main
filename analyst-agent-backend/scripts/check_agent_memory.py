@@ -2,7 +2,8 @@
 
     uvicorn app.database_mcp:app --port 8001
     uvicorn app.main:app --port 8000
-    $env:TOKEN="..."; $env:CONN="..."; $env:MAX_RUNS_PER_MINUTE="100"
+    $env:TOKEN = python scripts/supabase_token.py you@example.com
+    $env:CONN="..."; $env:MAX_RUNS_PER_MINUTE="100"
     python scripts/check_agent_memory.py
 
 Needs MEMORY_BACKEND=postgres, which is the default. Questions go through the real SSE endpoint
@@ -19,6 +20,7 @@ import json
 import os
 import sys
 import uuid
+from functools import lru_cache
 from pathlib import Path
 
 import httpx
@@ -76,10 +78,12 @@ def ask(client: httpx.Client, token: str, conn: str, thread: str, question: str)
     return out
 
 
+@lru_cache
 def tenant_of(token: str) -> str:
-    from jose import jwt
-
-    return jwt.get_unverified_claims(token)["tenant_id"]
+    """The tenant is the account's, not the token's, so ask the service."""
+    r = httpx.get(f"{BASE}/auth/me", headers={"Authorization": f"Bearer {token}"})
+    r.raise_for_status()
+    return r.json()["tenant_id"]
 
 
 def context_for(token: str, conn: str, thread: str) -> RunContext:

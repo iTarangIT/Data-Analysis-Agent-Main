@@ -1,7 +1,8 @@
 """Record the model once, then replay the whole suite offline.
 
-    $env:TOKEN="..."; $env:CONN="..."; python evals/recorded.py --record --only 0-9
-    $env:TOKEN="..."; $env:CONN="..."; python evals/recorded.py --replay
+    $env:TOKEN = python scripts/supabase_token.py you@example.com
+    $env:CONN="..."; python evals/recorded.py --record --only 0-9
+    $env:CONN="..."; python evals/recorded.py --replay
 
 The free tier allows 20 requests per day per model and one case costs two or more, so a
 30-question gate cannot be recorded in one sitting. `--only` records a slice and re-running

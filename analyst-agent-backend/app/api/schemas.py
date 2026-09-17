@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.catalog.types import Relationship, TableDef
 
@@ -130,36 +130,18 @@ class UsageOut(BaseModel):
 
 # --- authentication -------------------------------------------------------------------
 
-# Argon2 has no input ceiling of its own, so without a cap a multi-megabyte "password" is a
-# free way to burn 64MiB and a CPU core per request.
-_Password = Field(min_length=12, max_length=128)
 
+class ProvisionIn(BaseModel):
+    tenant_name: str = Field(min_length=1, max_length=200)
 
-class RegisterIn(BaseModel):
-    email: EmailStr
-    password: str = _Password
-    name: str | None = Field(default=None, max_length=200)
-    # Signing up creates the tenant, so this names it. Falls back to the email address.
-    tenant_name: str | None = Field(default=None, min_length=1, max_length=200)
-
-
-class LoginIn(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=1, max_length=128)
-
-
-class RefreshIn(BaseModel):
-    refresh_token: str = Field(min_length=1, max_length=512)
-
-
-class LogoutIn(BaseModel):
-    refresh_token: str = Field(min_length=1, max_length=512)
-    all_devices: bool = False
+    @field_validator("tenant_name", mode="before")
+    @classmethod
+    def _trim(cls, v: object) -> object:
+        """Trimmed before the length check, so a name of only spaces is refused as empty."""
+        return v.strip() if isinstance(v, str) else v
 
 
 class UserOut(BaseModel):
-    """Deliberately has no password field. Nothing derived from `password_hash` may be returned."""
-
     id: str
     email: str
     name: str | None
@@ -168,17 +150,6 @@ class UserOut(BaseModel):
     tenant_name: str
     plan: str
     created_at: datetime
-
-
-class AuthOut(BaseModel):
-    access_token: str
-    token_type: Literal["bearer"] = "bearer"
-    # Seconds, so the caller can schedule a refresh without decoding the token, and so the
-    # proxy can set a cookie Max-Age without parsing an opaque string.
-    expires_in: int
-    refresh_token: str
-    refresh_expires_in: int
-    user: UserOut
 
 
 # --- run history ----------------------------------------------------------------------

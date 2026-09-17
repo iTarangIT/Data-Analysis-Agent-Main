@@ -1,6 +1,7 @@
 """Golden-question harness. Phase 1 is done at >= 80% (25 of 30).
 
-    $env:TOKEN="..."; $env:CONN="..."; python evals/run_evals.py
+    $env:TOKEN = python scripts/supabase_token.py you@example.com
+    $env:CONN="..."; python evals/run_evals.py
 
 The suite runs many questions in a row against one tenant, so it trips the per-tenant rate
 limit. Raise it for an eval run:

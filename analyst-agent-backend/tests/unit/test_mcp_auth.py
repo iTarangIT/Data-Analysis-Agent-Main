@@ -12,6 +12,7 @@ from jose import jwt
 
 from app.config import get_settings
 from app.mcp_auth import ISSUER, MCPTokenVerifier, mint_mcp_token
+from tests import supabase_tokens
 
 
 def _verify(token: str):
@@ -54,14 +55,28 @@ def test_the_probe_token_names_no_tenant_and_no_connection():
     assert "connection_id" not in verified.claims
 
 
-def test_a_token_signed_with_the_user_secret_is_refused():
-    """The MCP secret is separate from JWT_SECRET precisely so a stolen access token cannot be
-    replayed here. If this ever passes, that separation has stopped meaning anything."""
+def test_a_user_access_token_is_refused():
+    """A stolen Supabase session must not be replayable here, even one carrying MCP-shaped
+    claims. If this ever passes, a user token can open any connection it names."""
     s = get_settings()
+    user_token = supabase_tokens.sign(
+        supabase_tokens.claims()
+        | {"iss": ISSUER, "aud": str(s.database_mcp_url), "tenant_id": "t_a", "connection_id": "c1"}
+    )
+
+    assert _verify(user_token) is None
+
+
+def test_a_token_signed_with_any_other_secret_is_refused():
     forged = jwt.encode(
-        {"iss": ISSUER, "aud": str(s.database_mcp_url), "tenant_id": "t_a", "connection_id": "c1"},
-        s.jwt_secret.get_secret_value(),
-        algorithm=s.jwt_algorithm,
+        {
+            "iss": ISSUER,
+            "aud": str(get_settings().database_mcp_url),
+            "tenant_id": "t_a",
+            "connection_id": "c1",
+        },
+        "not-the-mcp-secret-not-the-mcp-secret",
+        algorithm=get_settings().jwt_algorithm,
     )
 
     assert _verify(forged) is None

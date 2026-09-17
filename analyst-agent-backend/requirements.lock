@@ -20,10 +20,6 @@ anyio==4.15.1
     #   sse-starlette
     #   starlette
     #   watchfiles
-argon2-cffi==25.1.0
-    # via analyst-agent (pyproject.toml)
-argon2-cffi-bindings==26.1.0
-    # via argon2-cffi
 arq==0.28.0
     # via analyst-agent (pyproject.toml)
 ast-serialize==0.11.1
@@ -40,9 +36,7 @@ certifi==2026.7.22
     #   httpx
     #   requests
 cffi==2.1.1
-    # via
-    #   argon2-cffi-bindings
-    #   cryptography
+    # via cryptography
 charset-normalizer==3.5.1
     # via requests
 click==8.5.0
@@ -66,14 +60,10 @@ distro==1.9.0
     # via
     #   google-genai
     #   langsmith
-dnspython==2.8.0
-    # via email-validator
 duckdb==1.5.5
     # via analyst-agent (pyproject.toml)
 ecdsa==0.19.2
     # via python-jose
-email-validator==2.3.0
-    # via analyst-agent (pyproject.toml)
 et-xmlfile==2.0.0
     # via openpyxl
 fakeredis==2.38.0
@@ -115,7 +105,6 @@ httpx2==2.12.0
 idna==3.19
     # via
     #   anyio
-    #   email-validator
     #   httpx
     #   httpx2
     #   requests
@@ -251,6 +240,7 @@ pygments==2.21.0
     # via pytest
 pyjwt[crypto]==2.13.0
     # via
+    #   analyst-agent (pyproject.toml)
     #   mcp
     #   redis
 pyproject-hooks==1.2.0
@@ -270,6 +260,7 @@ python-dateutil==2.9.0.post0
     # via pandas
 python-dotenv==1.2.3
     # via
+    #   analyst-agent (pyproject.toml)
     #   pydantic-settings
     #   uvicorn
 python-jose[cryptography]==3.5.0

@@ -19,18 +19,30 @@ class Settings(BaseSettings):
     checkpoint_db_url: PostgresDsn
 
     credential_encryption_key: SecretStr
-    jwt_secret: SecretStr
+    # Signs the short-lived tokens this service hands its own MCP server. User tokens come
+    # from Supabase and are never HMAC-signed.
     jwt_algorithm: str = "HS256"
 
-    # Short, because an access token is stateless and cannot be revoked. Logging out kills the
-    # refresh token; the access token simply expires.
-    access_token_ttl_minutes: int = 15
-    refresh_token_ttl_days: int = 30
-    # Two requests that share a session will race to rotate the same refresh token, and the
-    # loser would otherwise look like theft and kill the whole family. Inside this window a
-    # rotated token is merely rejected. Outside it, it is treated as stolen.
-    refresh_reuse_grace_seconds: int = 10
+    # The Supabase project that signs in every user. Sessions, refresh and passwords all live
+    # there; this service only verifies its access tokens against the project's public keys.
+    supabase_url: str
+    # Whether a signed-in Supabase user with no account here may create an organisation.
     allow_open_signup: bool = True
+
+    @field_validator("supabase_url")
+    @classmethod
+    def _strip_trailing_slash(cls, v: str) -> str:
+        """The issuer claim is compared as a string, so `https://x.supabase.co/` would reject
+        every token."""
+        return v.rstrip("/")
+
+    @property
+    def supabase_issuer(self) -> str:
+        return f"{self.supabase_url}/auth/v1"
+
+    @property
+    def supabase_jwks_url(self) -> str:
+        return f"{self.supabase_issuer}/.well-known/jwks.json"
 
     # Only reached when a browser talks to this service directly. The Next.js app proxies
     # server-side, so its requests carry no Origin and never touch CORS.

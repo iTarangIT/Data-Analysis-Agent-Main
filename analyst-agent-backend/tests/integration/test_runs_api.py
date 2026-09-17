@@ -167,7 +167,8 @@ class TestFullStackWithAScriptedModel:
         # `_for_model` assigns rather than appends, so this is the final answer, not the first.
         assert run.answer == "There are three dealers."
         # And the run knows who asked, which is what makes "my history" possible later.
-        assert run.user_id == "u_test"
+        asker = client.get("/auth/me", headers=_auth(token)).json()
+        assert run.user_id == asker["id"]
 
     def test_a_write_is_refused_by_the_guard_inside_the_tool(
         self, client, token, connection_id, clean_app_db
