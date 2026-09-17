@@ -18,9 +18,20 @@ Then here:
 
 ```bash
 npm install
-cp .env.example .env.local   # AGENT_API_URL points at the agent
+cp .env.example .env.local   # AGENT_API_URL, and the Supabase project's URL and publishable key
 npm run dev
 ```
+
+Signing in needs the Supabase project set up once, in its dashboard:
+
+- **Authentication → URL Configuration**: Site URL `http://localhost:3000`, and
+  `http://localhost:3000/api/auth/**` on the redirect allow list.
+- **Authentication → Emails → Confirm signup**: link to
+  `{{ .SiteURL }}/api/auth/confirm?token_hash={{ .TokenHash }}&type=email`, so the link works in
+  any browser rather than only the one that signed up.
+- **Authentication → Sign In / Providers → Google**: enabled, with the client ID and secret of a
+  Google Cloud "Web application" OAuth client whose redirect URI is
+  `https://<project-ref>.supabase.co/auth/v1/callback`.
 
 ```bash
 npm test        # vitest
@@ -30,28 +41,34 @@ npx eslint .
 
 One thing that will catch you out: the agent's integration suite shares the local App DB and
 truncates `users`, `tenants`, `connections` and `runs` between tests. Running `pytest` over
-there therefore signs you out here and deletes the connections you added. The app handles it
-without complaint, but the data is gone.
+there therefore deletes your organisation and the connections you added. You stay signed in to
+Supabase, so the app sends you to `/welcome` to name a new one, but the data is gone.
 
 ## How it is put together
 
-**The browser never holds a token.** It talks only to this app; this app talks to the agent.
-The access and refresh tokens live in httpOnly cookies, and exactly one module
-(`lib/api/agent-client.ts`, marked `server-only`) attaches an `Authorization` header. Nothing
-here knows the agent's origin except the server.
+**The browser never holds a token.** It talks only to this app; this app talks to the agent and
+to Supabase. Supabase Auth owns sign-in, sessions and refresh, but only ever from the server:
+there is no browser Supabase client and no `NEXT_PUBLIC_` variable, so its session cookies are
+written httpOnly. Exactly one module (`lib/api/agent-client.ts`, marked `server-only`) attaches
+the Supabase access token as an `Authorization` header, and the agent verifies it itself.
+
+**Signing in and belonging are separate.** Supabase says who someone is; the agent says which
+organisation they belong to, and answers `403 onboarding_required` until they have one. A
+first-time Google user names theirs on `/welcome`. An email sign-up names it on the form, and
+`/api/auth/confirm` creates it when the confirmation link is opened (`lib/auth/landing.ts`).
 
 **`proxy.ts` is what Next 15 called `middleware.ts`.** Next 16 renamed the file and the
-export, and its runtime is Node and cannot be configured. It reads the session cookie and
-redirects; it never calls the network and never keeps module state, because it runs on every
-navigation including prefetches. It is not the gate. `lib/auth/dal.ts` is, and every server
+export, and its runtime is Node and cannot be configured. It verifies the session with
+`getClaims()` (locally, against the project's cached public keys) and redirects a signed-out
+navigation; prefetches are excluded. It is not the gate. `lib/auth/dal.ts` is, and every server
 component, server action and route handler calls it, because a server action is reachable by
 a direct POST and not only through the form that renders it.
 
-**Rotating a token needs a route handler.** Cookies cannot be written from a server component,
-or after a response starts streaming. So the proxy hands a stale session to
-`/api/auth/refresh`, which rotates, writes the pair, and sends the person on. Concurrent
-requests are collapsed into one upstream call, but that only holds inside a single process;
-the real protection against a rotation race is the agent's own grace window.
+**Refreshing a session happens in the proxy.** Cookies cannot be written from a server
+component, or after a response starts streaming, so `lib/supabase/proxy.ts` refreshes an
+expired token before the page renders and writes the new cookies onto both the request and the
+response. Route handlers under `/api`, which the proxy skips, refresh for themselves through
+`lib/supabase/server.ts`. Supabase tolerates the brief overlap when two of them race.
 
 ## Two things that will bite anyone touching the stream
 

@@ -14,7 +14,7 @@ Two repos, one workspace:
 | `analyst-agent/` | Python 3.12, FastAPI, LangGraph, SQLAlchemy, Alembic, sqlglot | the agent — routing, SQL generation, guard, execution, streaming |
 | `analyst-web/` | Next.js 16 App Router, TypeScript strict, SWR, shadcn, Tailwind v4 | product shell — auth screens, connections UI, ask workspace, history |
 
-They talk over one contract: `POST /runs` (SSE), `/connections` and `/runs` history on the agent, authenticated with an HS256 JWT `{tenant_id, sub}` **minted by the agent** at `/auth/login`. The web app holds that token in an httpOnly cookie and attaches it server-side; it never holds the signing secret. **Backend is built first; frontend is generated from the backend's `/openapi.json`.**
+They talk over one contract: `POST /runs` (SSE), `/connections` and `/runs` history on the agent, authenticated with a **Supabase Auth** access token (ES256). The web app signs people in with Supabase from the server, holds the session in httpOnly cookies and attaches the token server-side; the agent verifies it against the project's JWKS and resolves the tenant from the linked account. **Backend is built first; frontend is generated from the backend's `/openapi.json`.**
 
 ## 2. Current phase
 
@@ -130,14 +130,14 @@ The model chooses whether to call a tool, which replaces the hand-written router
 runs inside the tool, so no model-issued SQL can reach a database unguarded. The loop is
 bounded by `recursion_limit()`, derived from `max_sql_retries`.
 
-- `app/api/` = HTTP only. `app/services/` = business rules. `app/agent/` = LangGraph. `app/connectors/` = customer data sources. `app/security/` = JWT + Fernet vault. Nothing imports upward.
+- `app/api/` = HTTP only. `app/services/` = business rules. `app/agent/` = LangGraph. `app/connectors/` = customer data sources. `app/security/` = Supabase token verification + Fernet vault. Nothing imports upward.
 - `app/agent/nodes/sql_guard.py` is pure code (sqlglot). **It must never call a model.** SELECT only, one statement, `public` (or DuckDB's `main`) only, table allowlist from the tables chosen for the connection, LIMIT injected, forbidden ops and table-reading functions rejected.
 - Table structure is split by job. `app/catalog/` holds its shape (`types.py`) and how tables join (`relationships.py`) and imports nothing from `app`; `app/connectors/pg_catalog.py` and `duckdb.py` read it; `app/services/tables.py` stores it for the chosen tables only; `app/agent/schema_context.py` writes it into the query tool's description. Columns, keys and a size bucket are stored and shown to the model. A row never is.
 - `app/security/vault.py` is the only module that sees plaintext credentials. `decrypt()` is called from `app/connectors/registry.py` for a file source and from `app/database_mcp.py` for a database. The API process never decrypts a Postgres DSN. No API response ever contains `secret_enc`, `dsn`, `password`.
 - A database is reached only through the MCP server, which runs as its own process because it is the only thing holding a decrypted DSN. It exposes the `SqlConnector` protocol as four tools, and `app/connectors/mcp.py` is the client. All three read-only layers live there with it; `app/agent/tools.py` guards before calling anyway, and the server guards regardless of who called.
 - Every function under `connectors/` and `agent/` takes `tenant_id`. No default tenant. Checkpointer thread ids are `f"{tenant_id}:{thread_id}"`.
 - Three databases, never confused: App DB (ours, Alembic), Checkpoint DB (LangGraph-managed, disposable), Customer DB (theirs, read-only role, never migrated, never written).
-- Frontend: `src/app/api/*` route handlers are the only files holding `SUPABASE_SERVICE_ROLE_KEY` and `AGENT_JWT_SECRET`. `src/lib/agent/` is the single boundary to the agent. `hooks/useRun.ts` is a state machine driven only by SSE events.
+- Frontend: Supabase is called only from the server, with the publishable key; no service-role key or signing secret exists in the frontend. `src/lib/agent/` is the single boundary to the agent. `hooks/useRun.ts` is a state machine driven only by SSE events.
 
 ## 5. The SSE contract (frozen — do not change without updating both repos in the same PR)
 
@@ -162,7 +162,7 @@ unaffected. Note that `pnpm gen:agent` will not surface it: SSE events do not ap
 
 1. Every LLM call has a Pydantic output schema or a single-string contract. No regex parsing of model output.
 2. Every phase adds cases to `evals/golden_sql.yaml`. A PR that lowers the eval pass rate is not merged.
-3. `tenant_id` is required, never optional, never inferred from anything but the JWT.
+3. `tenant_id` is required, never optional, never inferred from anything but the account `current_tenant` resolves from a verified Supabase token.
 4. Customer DB access is read-only at three layers: role (`default_transaction_read_only=on`), connector (`connect_args`), guard (SELECT only). Verify with a DELETE that must fail.
 5. Do not add Redis/queue before phase 4. Do not add a second DB connector before a paying customer asks.
 5a. Do not require Docker for local development. Anything that only works inside a container belongs in CI or on the VPS.

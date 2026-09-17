@@ -175,7 +175,8 @@ reveals or hover lifts.
 
 `:focus-visible` is a 2px solid `--ring` (the brand) outline at 2px offset, everywhere.
 `::selection` is brand at 22% in oklab. Active nav carries `aria-current="page"`.
-Disabled single sign-on buttons say why they are disabled rather than only looking it.
+"Continue with Google" is a real submit button: it shows a spinner and disables itself while
+Google's consent page loads, rather than inviting a second click.
 
 ---
 

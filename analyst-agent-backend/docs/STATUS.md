@@ -7,7 +7,7 @@ Source of truth for the active phase. Phase N+1 does not begin until phase N's l
 |---|---|---|---|---|
 | 0 | repos, Compose, stub graph, SSE endpoint | `curl -N /runs` streams a stub, trace in LangSmith | **done**, tracing dormant | 2026-09-10 |
 | 1 | SQL tool on our own IoT DB, guard, evals | `evals/run_evals.py` >= 25/30 | code complete, **gate paused** | 2026-09-10 |
-| 2 | JWT auth, vault, `/connections`, then frontend Part B | second person connects a DB without help | **in progress** | backend auth, history and delete shipped 2026-09-11; frontend building |
+| 2 | JWT auth, vault, `/connections`, then frontend Part B | second person connects a DB without help | **in progress** | backend auth, history and delete shipped 2026-09-11; identity moved to Supabase with Google 2026-09-17; frontend building |
 | 3 | ~~web tool (Playwright)~~ | — | **removed** by decision; `3203026` reverts to bring it back | 2026-09-15 |
 | 4 | Redis workers, limits, usage, ~~Docker deploy~~ | killing a worker mid-run gives a clean `error` event | **done**, verified live, Docker cut | 2026-09-11 |
 | 5 | file tool (DuckDB), charts | spreadsheet-only customer gets value | **done** | 2026-09-10 |
@@ -453,14 +453,14 @@ half again as many requests against a 20-per-day quota and made charts impossibl
 11. **No `app/agent/nodes/web_tool.py`.** Section 7.7 targets the deleted five-node graph.
 12. **The SSE contract gained `chart`** before `analyst-web` existed, so there was no second repo
     to update in the same PR. Additive, no new stage, both doc tables updated.
-13. **Sign-up and sign-in live in the agent, not the web app.** The ownership table assigned
+13. **Reversed 2026-09-17, see "Identity moves to Supabase" below.** **Sign-up and sign-in live in the agent, not the web app.** The ownership table assigned
     identity to Supabase inside analyst-web. Owner's call on 2026-09-11: put identity beside
     the data it protects. The cost is a `users` table, Argon2id and `/auth/*` here; the payoff
     is that the browser never holds a token, the web app never holds the signing secret, and
     `decode_token`, `TenantContext` and every existing route were untouched, because the new
     endpoints mint exactly the claim shape this service already accepted. Hand-minted tokens
     therefore still work everywhere, which is what keeps the eval harness running.
-14. **Refresh tokens are opaque, not JWTs.** `decode_token` accepts any correctly signed token
+14. **Retired 2026-09-17 with the refresh tokens themselves.** **Refresh tokens are opaque, not JWTs.** `decode_token` accepts any correctly signed token
     carrying `tenant_id` and `sub`, so a JWT refresh token would be accepted as a bearer and
     hand out thirty days of access to the whole API. Adding a `typ` claim would have broken
     every hand-minted token. A random string is not a decodable JWT, so the problem disappears.
@@ -1099,3 +1099,54 @@ finished in 1.9s. Nothing here touches the queue or a Postgres run; it is left f
 | 4 | `analyst-agent-frontend/lib/api/types.ts` does not carry `file_count` or `file`, and the frontend has no upload UI yet. |
 | 5 | C: fills up on this machine, and `TMPDIR` points at it and overrides `TEMP`. Run the suite with `TMPDIR` and `--basetemp` on D:. |
 | 6 | Not yet done against a running API: a three-file join through a live model, adding a fourth file, removing one, and a real dealer sheet with a title and a Grand Total. |
+
+## Identity moves to Supabase, built 2026-09-17
+
+Owner's call: Supabase Auth handles authentication, with "Continue with Google" live. This reverses
+deviation 13. Supabase is used for identity only; tenants and everything else stay in the App DB.
+
+### What shipped
+
+- **Backend.** `app/security/supabase.py` verifies the project's ES256 access tokens against its
+  JWKS (algorithm pinned, `aud=authenticated`, issuer checked, `role=authenticated`, anonymous
+  users refused), with no shared secret. `current_tenant` resolves the tenant from
+  `users.auth_user_id`, so a deactivation takes effect on the next request. A signed-in person
+  with no account gets 403 `{"code": "onboarding_required"}`; `POST /auth/provision` creates
+  their organisation. An account from before Supabase is adopted by the first sign-in whose
+  token proves the same email (`user_metadata.email_verified`); an unverified address adopts
+  nothing. Migration `0f6da5ee636c` adds `auth_user_id` and drops `password_hash` and
+  `refresh_tokens`. `/auth/register|login|refresh|logout`, Argon2 and `JWT_SECRET` are gone.
+- **Frontend.** Supabase is called only from server actions, route handlers and `proxy.ts`, with
+  httpOnly session cookies; no Supabase code or key ships to the browser (checked in
+  `.next/static`). Google goes out through a server action and back through
+  `/api/auth/callback`; a first-time user names their organisation on `/welcome`. Email sign-up
+  names it on the form and `/api/auth/confirm` creates it when the link is opened.
+- **Scripts.** `scripts/supabase_token.py <email>` prints a token for the evals and check scripts.
+
+### Verified
+
+- Backend: 381 unit tests. Integration suite: 153 passed, 2 skipped, 4 failed; one was a stale
+  `u_test` assertion in `test_runs_api.py`, fixed and passing on rerun, and three are
+  `test_schema_stats.py` (below). `alembic check` clean; downgrade and upgrade round-trip.
+- The App DB was snapshotted before the suite and migration and restored after: 3 tenants,
+  2 users (unlinked until they sign in), 3 connections, 16 connection tables, 27 runs.
+- Against the live project: a token naming the project's real key id but signed elsewhere is
+  refused with "Signature verification failed", so the JWKS is fetched and used.
+- Frontend: typecheck, lint, 249 tests, production build. Signed-out navigation redirects to
+  `/login?next=`, and the callback and confirm handlers send a failure to `/login?error=`.
+
+### Not done
+
+- **Dashboard setup, which only the owner can do:** a Google Cloud OAuth client (redirect URI
+  `https://okifeathrijchctwrdpu.supabase.co/auth/v1/callback`) pasted into Authentication →
+  Providers → Google; Site URL `http://localhost:3000` and `http://localhost:3000/api/auth/**`
+  on the redirect allow list; the "Confirm signup" template linking to
+  `{{ .SiteURL }}/api/auth/confirm?token_hash={{ .TokenHash }}&type=email`.
+- A real Google sign-in and a real email confirmation, end to end, which need the above. That
+  run is also where `user_metadata.email_verified` must be seen on both kinds of token: if it is
+  absent, adopting older accounts by email never happens and they need linking by hand.
+
+### Found, not caused: `test_schema_stats.py` needs the demo database reseeded
+
+Three tests fail with `KeyError: 'trips'` and `'gps_pings'`. They read the demo database
+directly, never the API, and their docstring says to reseed `scripts/demo_customer.sql` first.
