@@ -92,6 +92,7 @@ class Settings(BaseSettings):
     file_store_dir: str = "./uploads"
     # Bounds resident memory per concurrent run, because an upload is materialised in full.
     max_upload_bytes: int = 25 * 1024 * 1024
+    max_dataset_bytes: int = 100 * 1024 * 1024
 
     # 127.0.0.1, not localhost: Memurai binds IPv4 only, while `localhost` resolves to ::1
     # first on Windows, so the client spends its whole connect timeout on IPv6 and fails.

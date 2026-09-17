@@ -6,7 +6,7 @@
 #
 # Register the connection first by uploading the fixture:
 #   curl -X POST localhost:8000/connections/file -H "Authorization: Bearer $env:TOKEN" `
-#        -F name="sales" -F file=@evals/fixtures/sales.csv
+#        -F name="sales" -F files=@evals/fixtures/sales.csv
 #
 # The fixture is committed and deliberately tie-free: every superlative below has one winner
 # with a clear margin, so a model that answers correctly is never marked wrong. West leads

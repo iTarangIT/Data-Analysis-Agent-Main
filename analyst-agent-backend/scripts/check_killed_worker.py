@@ -78,7 +78,7 @@ def make_connection() -> tuple[str, str]:
         "/connections/file",
         headers={"Authorization": f"Bearer {token}"},
         data={"name": "sales"},
-        files={"file": ("sales.csv", body, "text/csv")},
+        files={"files": ("sales.csv", body, "text/csv")},
     )
     r.raise_for_status()
     return r.json()["id"], token

@@ -6,6 +6,7 @@ from app.api.schemas import (
     ConnectionOut,
     RegisterIn,
     RunCreate,
+    TableOut,
     UserOut,
 )
 
@@ -45,9 +46,33 @@ class TestConnectionOut:
             "kind",
             "selected_tables",
             "total_tables",
+            "file_count",
             "catalog_refreshed_at",
         }
         assert not fields & {"secret", "secret_enc", "dsn", "password"}
+
+    def test_a_file_count_is_required(self):
+        with pytest.raises(ValidationError, match="file_count"):
+            ConnectionOut(
+                id="c",
+                name="July",
+                kind="file",
+                selected_tables=1,
+                total_tables=1,
+                catalog_refreshed_at=None,
+            )
+
+
+class TestTableOut:
+    @pytest.mark.parametrize("file", [None, "Q3 sales.csv"])
+    def test_a_table_names_the_file_it_came_from_when_there_is_one(self, file):
+        table = TableOut(name="q3_sales", file=file, selected=False, definition=None, stats=None)
+
+        assert table.file == file
+
+    def test_the_file_is_never_left_out(self):
+        with pytest.raises(ValidationError, match="file"):
+            TableOut(name="q3_sales", selected=False, definition=None, stats=None)
 
 
 class TestUserOut:

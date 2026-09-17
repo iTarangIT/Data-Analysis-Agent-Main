@@ -995,3 +995,107 @@ same symptom as the live store.
 
 364 unit tests pass, lint clean. The polluted row is still in the local store; it is one
 `queries` entry under the live tenant and nothing has recalled it yet.
+
+## Phase 5b — multi-file datasets, built 2026-09-17
+
+A dealer customer's data is several sheets and CSVs, usually with a title above the header and a
+Grand Total at the bottom. A `kind="file"` connection is now a dataset: many uploaded files
+contributing tables to one DuckDB. The agent, the guard, the SSE contract, `database_mcp.py` and
+`connectors/mcp.py` are untouched, and `DuckDBConnector` is the same class.
+
+### What shipped
+
+- `POST /connections/file` takes 1 to 20 files as `files`, plus `name`. `POST
+  /connections/{id}/files` adds files and `DELETE /connections/{id}/files/{filename}` removes one;
+  both return `TablesOut`. Every change to a dataset ends with `tables.refresh`, so added tables
+  arrive unselected and a removed file's tables drop, selected or not.
+- The secret is `{"sources": [{"table", "path", "file", "origin", "profile"}]}`. `origin` is
+  always `"upload"` for now. The old secret shape is not migrated; the local App DB held no live
+  file connection when this shipped.
+- Each ingest writes into a fresh `file_store_dir/{tenant}/{connection}/{uuid}/`. A batch is
+  all-or-nothing: any failure removes that directory (the whole connection directory on a
+  create) and returns a 400 naming the file. A filename already in the dataset, or twice in one
+  request, is refused before anything is written, because removal is by filename.
+- Limits: 25 MB per file (`max_upload_bytes`), 1 to 20 files per request (422 from
+  `File(min_length, max_length)`), and `max_dataset_bytes`, 100 MB of Parquet across the dataset.
+- Naming: a CSV, TSV or Parquet file, or a workbook with one non-empty sheet, is named after the
+  file; a workbook with several is `stem__sheet`; a name already taken gets `_2`, `_3`.
+- `ConnectionOut.file_count` and `TableOut.file` are new. Both come from the secret, decrypted
+  once per connection, through `registry.file_sources`, so `registry.py` is still the only place
+  a file secret is decrypted. A Postgres connection is refused by both file routes before its
+  secret is read.
+- Adding and removing take `SELECT ... FOR UPDATE` on the connection row, so two requests at once
+  cannot write over each other's secret and orphan a batch.
+
+### Ingest hardening, and where the spec's literal rules were wrong
+
+Every frame, whatever the format, goes through one vectorised pass: header row found under any
+title lines, entirely-null `Unnamed:` columns dropped, trailing `Total` / `Grand Total` rows
+dropped and counted, day-first date text parsed, and every name slugged. The profile keeps
+`row_count`, `header_row`, `dropped_total_rows`, the original column names and each date column's
+range.
+
+Four rules were measured against pandas 3.0.5 and duckdb 1.5.5 before they were written, and
+three of them had to change.
+
+1. **`pd.to_datetime(dayfirst=True, errors="coerce")` corrupts dates.** It reads `2026-07-01` as
+   7 January, because with `dayfirst` the inferred format for an ISO string is `%Y-%d-%m`. It
+   turns `July` and `Jul-26` into year-1 timestamps and integers into 1970. A column whose first
+   value is not a date falls back to per-element dateutil with a warning. Decided at planning: a
+   format-guarded parse instead. The format is guessed from the first non-numeric value with
+   `guess_datetime_format`, day-first unless the value starts with a four-digit year. It is used
+   only if it carries a day and a year, then applied with `format=`, under the same 90% rule.
+2. **"A different mix of types" had to mean the set of kinds**, meaning text, number (including
+   numeric strings) and other, among the non-empty cells. Compared cell by cell, a two-line title
+   is detected at row 1 rather than 2. A `header=None` CSV probe is all strings, which is why
+   numeric strings count as numbers.
+3. **Slugging did not make a valid identifier.** All 75 reserved keywords and 30 others (`order`,
+   `group`, `left`, `join`) fail unquoted; a file named `order.csv` broke `CREATE TABLE`. A name
+   in any `duckdb_keywords()` category other than `unreserved` gets a trailing `_`. The `_2`
+   suffix on a 63-character name also overflowed the identifier limit; the stem is shortened now.
+
+The fourth held. The delimiter still comes from DuckDB's `sniff_csv`: pandas with a fixed `sep`
+would read a `;` file as one column, silently.
+
+### The model sees a size, not the profile
+
+Decided at planning: `table_stats` returns `rows`, plus `rows_approx` above 1,000 rows, through the same
+`row_bucket` and `row_magnitude` Postgres uses (renamed from `_bucket` / `_magnitude`). The date
+ranges stay in the encrypted secret. `schema_context.py` renders `covered_to` as "a partition
+ending", which is false for a file, and the 2026-09-12 decision was bounds only, never a value
+read out of a row.
+
+### Verified
+
+- 568 tests: 390 unit, 178 integration. Lint and format clean; mypy adds nothing to its existing
+  errors.
+- Unit: 390 pass. Integration was run against the real local App DB after snapshotting the seven
+  tables it touches (`refresh_tokens`, `users`, `runs`, `connection_tables`, `connections`,
+  `tenants`, `store`) and restored afterwards, with row counts and content hashes matching the
+  snapshot.
+- Full suite: 561 passed, 2 skipped (model key), 4 failed, with coverage at 95% overall and 100%
+  on `sql_guard.py` and `app/security/`. Three of the failures are `test_schema_stats.py` on the
+  un-reseeded `demo`, unchanged. The fourth was not recorded here before and is not caused by
+  this work; see below.
+  `test_file_connection.py` passes 23 of 23, including one test added after the full run for the
+  empty-batch-directory branch.
+- Three of the new integration tests were checked load-bearing: removing the batch cleanup, the
+  Parquet unlink or the dataset cap each fails its test, and restoring it passes.
+
+### Found, not caused: `TestParity` fails on `main`
+
+`tests/integration/test_runs_worker.py::TestParity::test_the_queued_stream_is_identical_to_the_in_process_one`
+fails with `the run stopped responding`. It fails identically on `a0abc63` with this work stashed.
+The test sets `run_stall_timeout_s` to 0.5s, and the reader gave up after 0.5s on a run that
+finished in 1.9s. Nothing here touches the queue or a Postgres run; it is left for its own fix.
+
+### Limits and open items
+
+| # | Item |
+|---|---|
+| 1 | A CSV whose title lines are not padded with delimiters fails to parse and returns a 400 naming the file. Excel pads them when it saves as CSV. |
+| 2 | `DuckDBConnector` loads the whole dataset into memory under a 512 MB limit on every picker action and run; 100 MB of Parquet can expand past that. |
+| 3 | The `golden_file` cassettes will not replay: file tables now render a row-size line in the tool description. No prompt or guard changed, so rule 6 owes no A/B for this. |
+| 4 | `analyst-agent-frontend/lib/api/types.ts` does not carry `file_count` or `file`, and the frontend has no upload UI yet. |
+| 5 | C: fills up on this machine, and `TMPDIR` points at it and overrides `TEMP`. Run the suite with `TMPDIR` and `--basetemp` on D:. |
+| 6 | Not yet done against a running API: a three-file join through a live model, adding a fourth file, removing one, and a real dealer sheet with a title and a Grand Total. |

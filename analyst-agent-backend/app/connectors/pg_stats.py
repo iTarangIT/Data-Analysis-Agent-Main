@@ -94,7 +94,7 @@ SELECT p.relname AS parent,
 """
 
 
-def _bucket(approx_rows: int) -> str:
+def row_bucket(approx_rows: int) -> str:
     if approx_rows < 1_000:
         return "few"
     if approx_rows < 1_000_000:
@@ -102,7 +102,7 @@ def _bucket(approx_rows: int) -> str:
     return "millions"
 
 
-def _magnitude(approx_rows: int) -> int:
+def row_magnitude(approx_rows: int) -> int:
     """Two significant figures.
 
     `reltuples` is a float4, so 45.9 million carries about seven significant digits and the
@@ -232,9 +232,9 @@ def collect(conn, tables: list[str]) -> dict[str, dict[str, Any]]:
                 stats[name] = {"rows": "empty"}
                 continue
         else:
-            entry = {"rows": _bucket(row.approx_rows)}
+            entry = {"rows": row_bucket(row.approx_rows)}
             if entry["rows"] != "few":
-                entry["rows_approx"] = _magnitude(row.approx_rows)
+                entry["rows_approx"] = row_magnitude(row.approx_rows)
             if row.unanalysed:
                 # Some partitions have never been analysed, so the sum is a floor.
                 entry["rows_at_least"] = True

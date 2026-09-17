@@ -6,7 +6,7 @@ The live queries are covered by tests/integration/test_schema_stats.py.
 
 import pytest
 
-from app.connectors.pg_stats import _bucket, _coverage, _magnitude, _upper_bound
+from app.connectors.pg_stats import _coverage, _upper_bound, row_bucket, row_magnitude
 
 
 class Child:
@@ -97,7 +97,7 @@ class TestSizing:
         ],
     )
     def test_buckets(self, rows, expected):
-        assert _bucket(rows) == expected
+        assert row_bucket(rows) == expected
 
     @pytest.mark.parametrize(
         ("rows", "expected"),
@@ -107,4 +107,4 @@ class TestSizing:
         # reltuples is a float4 and its last digits are noise. An exact-looking count would be
         # repeated by the model as a counted one, and would also move the tool description
         # under the eval cassettes every time autovacuum ran.
-        assert _magnitude(rows) == expected
+        assert row_magnitude(rows) == expected

@@ -23,7 +23,7 @@ from app.catalog.relationships import map_relationships
 from app.catalog.types import Catalog, CatalogTable, Relationship, TableDef
 from app.config import get_settings
 from app.connectors.base import SqlConnector
-from app.connectors.registry import connector_for
+from app.connectors.registry import connector_for, file_sources
 from app.db.models import Connection, ConnectionTable
 from app.logging import log
 from app.services.errors import DomainError, SourceUnavailable
@@ -126,11 +126,18 @@ def ensure_listed(db: Session, conn: Connection) -> None:
 
 
 def view(db: Session, conn: Connection) -> dict[str, Any]:
+    files = {s["table"]: s["file"] for s in file_sources(conn)} if conn.kind == "file" else {}
     return {
         "max_selected": get_settings().max_agent_tables,
         "refreshed_at": conn.catalog_refreshed_at,
         "tables": [
-            {"name": r.name, "selected": r.selected, "definition": r.definition, "stats": r.stats}
+            {
+                "name": r.name,
+                "file": files.get(r.name),
+                "selected": r.selected,
+                "definition": r.definition,
+                "stats": r.stats,
+            }
             for r in _rows(db, conn.id)
         ],
         "relationships": conn.relationships or [],

@@ -12,25 +12,40 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+import pandas as pd
+from pandas.tseries.api import guess_datetime_format
 
 from app.catalog.types import Column, TableDef
+from app.connectors.pg_stats import row_bucket, row_magnitude
 from app.services.errors import DomainError
 
 # The table name is interpolated into CREATE TABLE, so it is derived from a validated pattern
 # rather than escaped. Deriving is what stays safe when someone edits this later.
 TABLE_NAME = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+KEYWORDS = frozenset(
+    name
+    for (name,) in duckdb.sql(
+        "SELECT keyword_name FROM duckdb_keywords() WHERE keyword_category <> 'unreserved'"
+    ).fetchall()
+)
+TOTAL_ROW = r"(grand\s+)?total"
 
 
 @dataclass(frozen=True)
 class FileSource:
     table: str
     path: str
+    file: str
+    origin: str
+    profile: dict[str, Any]
 
 
 def _slug(name: str) -> str:
     slug = re.sub(r"[^a-z0-9_]+", "_", name.strip().lower()).strip("_")[:63]
     if not slug or not slug[0].isalpha():
         slug = f"t_{slug}"[:63]
+    if slug in KEYWORDS:
+        slug = f"{slug}_"
     return slug
 
 
@@ -38,12 +53,96 @@ def _unique(slug: str, taken: set[str]) -> str:
     if slug not in taken:
         return slug
     n = 2
-    while f"{slug}_{n}" in taken:
+    while (candidate := f"{slug[: 62 - len(str(n))]}_{n}") in taken:
         n += 1
-    return f"{slug}_{n}"
+    return candidate
 
 
-def ingest_upload(src: Path, dest_dir: Path, filename: str) -> list[FileSource]:
+def _header_row(probe: pd.DataFrame) -> int:
+    filled = probe.notna()
+    number = probe.apply(pd.to_numeric, errors="coerce").notna()
+    text = filled & ~number & probe.map(lambda value: isinstance(value, str))
+    mix = pd.DataFrame(
+        {
+            "text": text.any(axis=1),
+            "number": number.any(axis=1),
+            "other": (filled & ~number & ~text).any(axis=1),
+        }
+    )
+    below = mix.shift(-1, fill_value=False)
+    header = (
+        (text.sum(axis=1) >= 0.7 * filled.sum(axis=1))
+        & filled.any(axis=1)
+        & below.any(axis=1)
+        & mix.ne(below).any(axis=1)
+    )
+    return int(header.idxmax()) if header.any() else 0
+
+
+def _dates(column: pd.Series) -> pd.Series:
+    candidates = column.where(pd.to_numeric(column, errors="coerce").isna())
+    start = candidates.first_valid_index()
+    if start is None:
+        return column
+    first = str(candidates[start])
+    fmt = guess_datetime_format(first, dayfirst=not first[:4].isdigit())
+    if fmt is None or "%d" not in fmt or ("%Y" not in fmt and "%y" not in fmt):
+        return column
+    parsed = pd.to_datetime(candidates, format=fmt, errors="coerce")
+    return parsed if parsed.notna().sum() >= 0.9 * column.notna().sum() else column
+
+
+def _harden(frame: pd.DataFrame, header_row: int) -> tuple[pd.DataFrame, dict[str, Any]]:
+    blank = frame.columns.astype(str).str.startswith("Unnamed:") & frame.isna().all().to_numpy()
+    frame = frame.loc[:, ~blank]
+
+    first_cell = frame.bfill(axis=1).iloc[:, 0].astype(str).str.strip()
+    trailing = first_cell.str.fullmatch(TOTAL_ROW, case=False)[::-1].cummin()[::-1]
+    frame = frame[~trailing]
+
+    taken: set[str] = set()
+    columns: dict[str, str] = {}
+    for original in frame.columns.astype(str):
+        slug = _unique(_slug(original), taken)
+        taken.add(slug)
+        columns[slug] = original
+    frame = frame.set_axis(list(columns), axis=1)
+
+    for name in frame.select_dtypes(include=["object", "str"]).columns:
+        frame[name] = _dates(frame[name])
+
+    dates = frame.select_dtypes(include=["datetime", "datetimetz"]).dropna(axis=1, how="all")
+    profile = {
+        "row_count": len(frame),
+        "header_row": header_row,
+        "dropped_total_rows": int(trailing.sum()),
+        "columns": columns,
+        "date_range": {
+            name: [low.isoformat(), high.isoformat()]
+            for name, low, high in zip(dates.columns, dates.min(), dates.max(), strict=True)
+        },
+    }
+    return frame, profile
+
+
+def _read(
+    con: duckdb.DuckDBPyConnection, src: Path, suffix: str
+) -> dict[str, tuple[int, pd.DataFrame]]:
+    if suffix == ".xlsx":
+        frames: dict[str, tuple[int, pd.DataFrame]] = {}
+        with pd.ExcelFile(src) as book:
+            for sheet in book.sheet_names:
+                header = _header_row(book.parse(sheet, header=None, nrows=10))
+                frames[str(sheet)] = (header, book.parse(sheet, header=header))
+        return frames
+    if suffix == ".parquet":
+        return {"": (0, con.read_parquet(str(src)).df())}
+    [(sep,)] = con.execute("SELECT Delimiter FROM sniff_csv(?)", [str(src)]).fetchall()
+    header = _header_row(pd.read_csv(src, sep=sep, header=None, nrows=10))
+    return {"": (header, pd.read_csv(src, sep=sep, header=header))}
+
+
+def ingest_upload(src: Path, dest_dir: Path, filename: str, taken: set[str]) -> list[FileSource]:
     """Convert an upload into one Parquet file per table.
 
     `src` is where the bytes were staged; `filename` is what the customer called the file, and
@@ -54,36 +153,36 @@ def ingest_upload(src: Path, dest_dir: Path, filename: str) -> list[FileSource]:
     be the worst available failure, so each sheet becomes its own table.
     """
     suffix = Path(filename).suffix.lower()
+    stem = Path(filename).stem
     dest_dir.mkdir(parents=True, exist_ok=True)
     sources: list[FileSource] = []
-    taken: set[str] = set()
 
     con = duckdb.connect()
     try:
-        if suffix == ".xlsx":
-            import pandas as pd
+        tables: dict[str, tuple[pd.DataFrame, dict[str, Any]]] = {}
+        for sheet, (header_row, raw) in _read(con, src, suffix).items():
+            if raw.empty:
+                continue
+            frame, profile = _harden(raw, header_row)
+            if not frame.empty:
+                tables[sheet] = (frame, profile)
 
-            # Written through DuckDB rather than pandas.to_parquet, which needs pyarrow.
-            for sheet, frame in pd.read_excel(src, sheet_name=None).items():
-                if frame.empty:
-                    continue
-                table = _unique(_slug(sheet), taken)
-                taken.add(table)
-                path = dest_dir / f"{table}.parquet"
-                con.from_df(frame).write_parquet(str(path))
-                sources.append(FileSource(table=table, path=str(path)))
-        else:
-            table = _unique(_slug(Path(filename).stem), taken)
+        for sheet, (frame, profile) in tables.items():
+            table = _unique(_slug(f"{stem}__{sheet}" if len(tables) > 1 else stem), taken)
             taken.add(table)
             path = dest_dir / f"{table}.parquet"
-            reader = con.read_parquet if suffix == ".parquet" else con.read_csv
-            reader(str(src)).write_parquet(str(path))
-            sources.append(FileSource(table=table, path=str(path)))
+            # Written through DuckDB rather than pandas.to_parquet, which needs pyarrow.
+            con.from_df(frame).write_parquet(str(path))
+            sources.append(
+                FileSource(
+                    table=table, path=str(path), file=filename, origin="upload", profile=profile
+                )
+            )
     finally:
         con.close()
 
     if not sources:
-        raise DomainError("that file has no readable rows")
+        raise DomainError(f"{filename} has no readable rows")
     return sources
 
 
@@ -106,6 +205,7 @@ class DuckDBConnector:
     def __init__(self, tenant_id: str, sources: list[FileSource]) -> None:
         self.tenant_id = tenant_id
         self.tables = [s.table for s in sources]
+        self.row_counts = {s.table: s.profile["row_count"] for s in sources}
         self.con = duckdb.connect()
         # One tenant's query must not eat the box, and single-threaded is the fairness knob.
         self.con.execute("SET memory_limit='512MB'")
@@ -139,9 +239,15 @@ class DuckDBConnector:
         return [TableDef(name=table, columns=columns[table]) for table in sorted(wanted)]
 
     def table_stats(self, names: list[str]) -> dict[str, dict[str, Any]]:
-        """Nothing to report. An upload is small, never partitioned and held whole in memory, so
-        neither a size bucket nor a coverage date would change the query the model writes."""
-        return {}
+        stats: dict[str, dict[str, Any]] = {}
+        for name in names:
+            if name not in self.row_counts:
+                continue
+            rows = self.row_counts[name]
+            stats[name] = {"rows": row_bucket(rows)}
+            if stats[name]["rows"] != "few":
+                stats[name]["rows_approx"] = row_magnitude(rows)
+        return stats
 
     def run_select(self, sql: str, max_rows: int) -> tuple[list[str], list[tuple]]:
         cursor = self.con.execute(sql)

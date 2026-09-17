@@ -9,6 +9,7 @@ from app.catalog.types import Relationship, TableDef
 # let any tenant register a path of their choosing, which no SQL guard could catch, because
 # the path is inside the connector long before any SQL exists. Uploads go to /connections/file.
 UPLOAD_SUFFIXES = {".csv", ".tsv", ".xlsx", ".parquet"}
+MAX_UPLOAD_FILES = 20
 
 REQUIRED_SECRET_FIELDS: dict[str, set[str]] = {
     "postgres": {"dsn"},
@@ -40,11 +41,13 @@ class ConnectionOut(BaseModel):
     kind: str
     selected_tables: int
     total_tables: int
+    file_count: int
     catalog_refreshed_at: datetime | None
 
 
 class TableOut(BaseModel):
     name: str
+    file: str | None
     selected: bool
     # Both null for a table that is not selected: its structure is not kept.
     definition: TableDef | None

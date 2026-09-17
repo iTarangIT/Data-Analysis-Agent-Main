@@ -5,6 +5,10 @@ from app.db.models import Connection
 from app.security import vault
 
 
+def file_sources(conn: Connection) -> list[dict]:
+    return vault.decrypt(conn.secret_enc)["sources"]
+
+
 def connector_for(conn: Connection) -> Connector:
     """Build the tenant's connector.
 
@@ -15,6 +19,5 @@ def connector_for(conn: Connection) -> Connector:
     if conn.kind == "postgres":
         return McpConnector(conn.tenant_id, conn.id)
     if conn.kind == "file":
-        secret = vault.decrypt(conn.secret_enc)
-        return DuckDBConnector(conn.tenant_id, [FileSource(**s) for s in secret["sources"]])
+        return DuckDBConnector(conn.tenant_id, [FileSource(**s) for s in file_sources(conn)])
     raise ValueError(f"unsupported connection kind {conn.kind}")
