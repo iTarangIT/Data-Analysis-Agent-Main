@@ -1137,14 +1137,22 @@ deviation 13. Supabase is used for identity only; tenants and everything else st
 
 ### Not done
 
-- **Dashboard setup, which only the owner can do:** a Google Cloud OAuth client (redirect URI
-  `https://okifeathrijchctwrdpu.supabase.co/auth/v1/callback`) pasted into Authentication →
-  Providers → Google; Site URL `http://localhost:3000` and `http://localhost:3000/api/auth/**`
-  on the redirect allow list; the "Confirm signup" template linking to
-  `{{ .SiteURL }}/api/auth/confirm?token_hash={{ .TokenHash }}&type=email`.
-- A real Google sign-in and a real email confirmation, end to end, which need the above. That
-  run is also where `user_metadata.email_verified` must be seen on both kinds of token: if it is
-  absent, adopting older accounts by email never happens and they need linking by hand.
+- **A real email sign-up and confirmation, end to end.** Custom SMTP (Gmail) was configured on
+  2026-09-17; whether the "Confirm signup" template links to
+  `{{ .SiteURL }}/api/auth/confirm?token_hash={{ .TokenHash }}&type=email` is not yet confirmed
+  by use. That run is also where `user_metadata.email_verified` must be seen on an email token:
+  if it is absent there, older accounts can only be adopted through Google.
+- The two accounts from before Supabase (`test@gmail.com`, `filetest@gmail.com`) are unlinked
+  and hold the existing connections; they are adopted only by a verified sign-in with that
+  address.
+
+### Verified by the owner, 2026-09-17
+
+Google sign-in works end to end against the live project. A new Google user reached `/welcome`
+(the agent logged `/auth/me` 403, then `/auth/provision` 201, then `/auth/me` 200), and the App
+DB holds an owner linked by `auth_user_id` to the Supabase user. Supabase recorded the identity
+as `google` with `email_verified: true` in both `raw_user_meta_data` and the identity data, so
+the claim adoption relies on is present on Google tokens.
 
 ### Found, not caused: `test_schema_stats.py` needs the demo database reseeded
 
