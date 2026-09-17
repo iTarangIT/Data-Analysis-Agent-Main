@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import time
+import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -242,6 +243,30 @@ async def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> Prepa
     return PreparedRun(run=run, connector=connector, catalog=catalog)
 
 
+def agent_config(run: Run, callbacks: list, limit: int) -> dict[str, Any]:
+    """One run's LangGraph config, which is also everything its LangSmith trace is found by.
+
+    The trace takes the Run row's id, so a run in the history opens its trace directly.
+    LangSmith groups a conversation's traces on `thread_id` in metadata, and it keeps the
+    checkpointer's tenant prefix so two tenants' threads can never merge.
+    """
+    thread_id = f"{run.tenant_id}:{run.thread_id}"
+    return {
+        "configurable": {"thread_id": thread_id},
+        "callbacks": callbacks,
+        "run_id": uuid.UUID(run.id),
+        "run_name": "analyst_run",
+        "tags": [get_settings().env],
+        "metadata": {
+            "tenant_id": run.tenant_id,
+            "run_id": run.id,
+            "thread_id": thread_id,
+            "connection_id": run.connection_id,
+        },
+        "recursion_limit": limit,
+    }
+
+
 def execute_run(
     db: Session,
     run: Run,
@@ -276,12 +301,7 @@ def execute_run(
             agent = build_agent(
                 connector, catalog, checkpointer=saver, store=store, middleware=middleware
             )
-            config = {
-                "configurable": {"thread_id": f"{run.tenant_id}:{run.thread_id}"},
-                "callbacks": [usage],
-                "metadata": {"tenant_id": run.tenant_id, "run_id": run.id},
-                "recursion_limit": limit,
-            }
+            config = agent_config(run, [usage], limit)
             context = RunContext(
                 tenant_id=run.tenant_id,
                 connection_id=run.connection_id,

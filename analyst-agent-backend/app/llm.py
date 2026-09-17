@@ -6,11 +6,18 @@ from app.config import get_settings
 
 
 def configure_tracing() -> None:
+    """Hand the LangSmith settings to the SDK, which reads nothing but `os.environ`.
+
+    pydantic-settings reads `.env` without exporting it, so every process that runs the agent
+    must call this: the API's lifespan and the worker's startup both do.
+    """
     s = get_settings()
     if s.langsmith_tracing and s.langsmith_api_key:
         os.environ["LANGSMITH_TRACING"] = "true"
         os.environ["LANGSMITH_API_KEY"] = s.langsmith_api_key.get_secret_value()
         os.environ["LANGSMITH_PROJECT"] = s.langsmith_project
+        if s.langsmith_endpoint:
+            os.environ["LANGSMITH_ENDPOINT"] = s.langsmith_endpoint
 
 
 def get_llm() -> ChatGoogleGenerativeAI:

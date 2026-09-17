@@ -113,6 +113,8 @@ class Settings(BaseSettings):
     langsmith_tracing: bool = False
     langsmith_api_key: SecretStr | None = None
     langsmith_project: str = "analyst-agent-dev"
+    # Unset keeps the SDK's US default. An EU account's key is refused by that endpoint.
+    langsmith_endpoint: str | None = None
 
 
 @lru_cache
