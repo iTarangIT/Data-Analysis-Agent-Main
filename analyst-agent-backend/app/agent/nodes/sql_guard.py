@@ -61,20 +61,26 @@ def _local_aliases(tree: exp.Expression) -> set[str]:
 
 
 def _with_row_cap(tree: exp.Expression, max_rows: int) -> exp.Expression:
+    # One row past the cap. Capped at `max_rows` exactly, a result cut at the cap and one that
+    # happened to have that many rows come back identical, and truncation is never reported.
+    cap = max_rows + 1
     limit = tree.args.get("limit")
     if limit is not None:
         try:
-            if int(limit.expression.this) <= max_rows:
+            if int(limit.expression.this) <= cap:
                 return tree
         except (AttributeError, TypeError, ValueError):
             pass  # A non-literal limit, such as a parameter, is not a cap we can trust.
-    return tree.limit(max_rows)
+    return tree.limit(cap)
 
 
 def validate_sql(
     sql: str, allowed_tables: set[str], max_rows: int, dialect: str = "postgres"
 ) -> tuple[str, str | None]:
     """Return (safe_sql, None) if `sql` is a single read-only SELECT over allowed tables.
+
+    `safe_sql` reads at most `max_rows + 1` rows, so a caller that keeps `max_rows` knows the
+    result was cut off when the extra row arrives.
 
     Otherwise return (sql, reason). The reason is fed back to the SQL generator as a retry hint,
     so it names what was wrong rather than merely saying no.

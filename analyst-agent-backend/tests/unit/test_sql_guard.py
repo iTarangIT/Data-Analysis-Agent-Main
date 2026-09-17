@@ -20,18 +20,22 @@ def _rejected(sql: str, max_rows: int = 100) -> str:
 
 class TestRowCap:
     def test_injects_limit_when_absent(self):
-        assert "LIMIT 100" in _ok("select name from dealers")
+        assert "LIMIT 101" in _ok("select name from dealers")
 
     def test_caps_a_limit_above_the_maximum(self):
-        assert "LIMIT 100" in _ok("select name from dealers limit 9999")
+        assert "LIMIT 101" in _ok("select name from dealers limit 9999")
 
     def test_preserves_a_limit_below_the_maximum(self):
         safe = _ok("select name from dealers limit 5")
-        assert "LIMIT 5" in safe and "LIMIT 100" not in safe
+        assert "LIMIT 5" in safe and "LIMIT 101" not in safe
+
+    def test_leaves_room_for_the_row_that_shows_a_result_was_cut_off(self):
+        assert _ok("select name from dealers limit 101").endswith("LIMIT 101")
+        assert _ok("select name from dealers limit 102").endswith("LIMIT 101")
 
     def test_caps_a_set_operation(self):
         safe = _ok("select name from dealers union select city from dealers")
-        assert "LIMIT 100" in safe and "UNION" in safe.upper()
+        assert "LIMIT 101" in safe and "UNION" in safe.upper()
 
 
 class TestTableAllowlist:
@@ -106,10 +110,10 @@ class TestNonLiteralRowCap:
     def test_caps_a_limit_that_is_not_a_plain_number(self):
         # A subquery limit cannot be compared against max_rows, so the cap is applied anyway.
         safe = _ok("select name from dealers limit (select 1)")
-        assert "LIMIT 100" in safe
+        assert "LIMIT 101" in safe
 
     def test_limit_all_is_treated_as_uncapped(self):
-        assert "LIMIT 100" in _ok("select name from dealers limit all")
+        assert "LIMIT 101" in _ok("select name from dealers limit all")
 
 
 class TestDuckDBDialect:
@@ -167,7 +171,7 @@ class TestDuckDBDialect:
         safe, err = validate_sql("select * from sales", FILES, 10, "duckdb")
 
         assert err is None
-        assert "LIMIT 10" in safe.upper()
+        assert "LIMIT 11" in safe.upper()
 
     def test_duckdb_syntax_is_not_rewritten_into_something_duckdb_rejects(self):
         """Parsing duckdb as postgres turns EXCLUDE into EXCEPT, which duckdb refuses. This is

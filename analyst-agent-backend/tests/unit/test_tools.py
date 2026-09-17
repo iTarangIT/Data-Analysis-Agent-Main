@@ -9,6 +9,7 @@ from app.agent import memory
 from app.agent.context import RunContext
 from app.agent.tools import PREVIEW_ROWS, make_query_tool, make_tools, remember
 from app.catalog.types import Catalog, CatalogTable, Column, TableDef
+from app.connectors.duckdb import DuckDBConnector, ingest_upload
 
 CONTEXT = RunContext(tenant_id="t_test", connection_id="c1", run_id="r1", thread_id="th1")
 
@@ -138,13 +139,23 @@ class TestExecution:
         _, artifact = call(make_query_tool(Broken(), CATALOG), "select vehicleno from vehicles")
         assert "column does not exist" in artifact["error"]
 
-    def test_truncation_is_reported(self, monkeypatch):
+    @pytest.mark.parametrize(("held", "truncated"), [(3, True), (2, False)])
+    def test_truncation_is_reported_only_when_rows_were_cut_off(
+        self, monkeypatch, tmp_path, held, truncated
+    ):
+        """Through a real connector, so the guard's LIMIT decides how many rows come back. A
+        fake that sliced its own rows passed while every real result was reported whole."""
         from app.config import get_settings
 
-        monkeypatch.setattr(get_settings(), "max_rows", 1, raising=False)
-        conn = FakeConnector(rows=(("a",), ("b",), ("c",)))
+        monkeypatch.setattr(get_settings(), "max_rows", 2, raising=False)
+        src = tmp_path / "vehicles.csv"
+        src.write_text("vehicleno\n" + "".join(f"KA{i}\n" for i in range(held)), encoding="utf-8")
+        conn = DuckDBConnector("t_test", ingest_upload(src, tmp_path / "out", src.name, set()))
+
         _, artifact = call(make_query_tool(conn, CATALOG), "select vehicleno from vehicles")
-        assert artifact["truncated"] is True and artifact["rows"] == [["a"]]
+
+        assert artifact["truncated"] is truncated
+        assert artifact["rows"] == [["KA0"], ["KA1"]]
 
 
 class TestRuntimeIsHiddenFromTheModel:

@@ -128,6 +128,24 @@ def test_a_query_is_allowed_only_over_the_chosen_tables(connection, db, as_token
     assert "dealers" in (refused.error or "")
 
 
+def test_the_row_past_the_cap_comes_back_so_the_caller_can_tell_a_result_was_cut_off(
+    connection, db, as_token, monkeypatch
+):
+    """The server validates again with its own cap. Capping at `max_rows` there dropped the one
+    extra row the API asks for, so no Postgres result was ever reported as cut off."""
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "max_rows", 100, raising=False)
+    db[0].add(ConnectionTable(connection_id=connection.id, name="telemetry", selected=True))
+    db[0].commit()
+    as_token(connection.tenant_id, connection.id)
+
+    result = database_mcp.run_select("SELECT * FROM telemetry", 101)
+
+    assert result.error is None
+    assert len(result.rows) == 101 and result.sql.endswith("LIMIT 101")
+
+
 def test_nothing_is_allowed_before_any_table_is_chosen(connection, as_token):
     """A connection whose tables nobody has chosen answers nothing, rather than everything."""
     as_token(connection.tenant_id, connection.id)
