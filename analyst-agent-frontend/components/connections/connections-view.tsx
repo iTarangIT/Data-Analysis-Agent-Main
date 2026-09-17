@@ -1,13 +1,20 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { Database, FileSpreadsheet, Plus } from "lucide-react";
 import { useState } from "react";
 
 import { ConnectionForm } from "@/components/connections/connection-form";
 import { ConnectionList } from "@/components/connections/connection-list";
+import { DatasetForm } from "@/components/connections/dataset-form";
 import { Eyebrow } from "@/components/panel";
 import { Button } from "@/components/ui/button";
-import type { Connection } from "@/lib/api/types";
+import type { Connection, ConnectionKind } from "@/lib/api/types";
+import { cn } from "@/lib/utils";
+
+const SOURCES: { kind: ConnectionKind; label: string; icon: React.ReactNode }[] = [
+  { kind: "postgres", label: "Database", icon: <Database aria-hidden className="size-4" strokeWidth={1.75} /> },
+  { kind: "file", label: "Spreadsheets", icon: <FileSpreadsheet aria-hidden className="size-4" strokeWidth={1.75} /> },
+];
 
 /**
  * The connections screen.
@@ -19,6 +26,8 @@ import type { Connection } from "@/lib/api/types";
  */
 export function ConnectionsView({ connections }: { connections: Connection[] }) {
   const [adding, setAdding] = useState(connections.length === 0);
+  const [kind, setKind] = useState<ConnectionKind>("postgres");
+  const close = connections.length === 0 ? undefined : () => setAdding(false);
 
   return (
     <div className="flex flex-col gap-4">
@@ -46,17 +55,40 @@ export function ConnectionsView({ connections }: { connections: Connection[] }) 
               <Plus aria-hidden className="size-4" strokeWidth={2} />
             </span>
             <span className="text-[0.875rem] font-medium text-ink">Connect a data source</span>
-            <span className="max-w-[22ch] text-[0.75rem] text-ink-muted">
-              A Postgres database the agent may read.
+            <span className="max-w-[26ch] text-[0.75rem] text-ink-muted">
+              A Postgres database, or spreadsheets, the agent may read.
             </span>
           </button>
         ) : null}
       </ConnectionList>
 
       {adding ? (
-        <ConnectionForm
-          onCancel={connections.length === 0 ? undefined : () => setAdding(false)}
-        />
+        <div className="flex flex-col gap-3">
+          <div
+            role="group"
+            aria-label="Kind of source"
+            className="inline-flex w-fit rounded-md border border-line bg-surface-sunk p-0.5"
+          >
+            {SOURCES.map((source) => (
+              <button
+                key={source.kind}
+                type="button"
+                aria-pressed={kind === source.kind}
+                onClick={() => setKind(source.kind)}
+                className={cn(
+                  "flex h-8 items-center gap-2 rounded-[5px] px-3 text-[0.8125rem] font-medium transition-colors",
+                  kind === source.kind
+                    ? "bg-surface text-ink shadow-sm"
+                    : "text-ink-muted hover:text-ink",
+                )}
+              >
+                {source.icon}
+                {source.label}
+              </button>
+            ))}
+          </div>
+          {kind === "file" ? <DatasetForm onCancel={close} /> : <ConnectionForm onCancel={close} />}
+        </div>
       ) : null}
     </div>
   );

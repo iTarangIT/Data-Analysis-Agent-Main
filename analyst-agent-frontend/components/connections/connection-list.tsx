@@ -80,7 +80,11 @@ export function ConnectionList({
           <p className="mt-4 truncate text-[0.9375rem] font-medium text-ink">
             {connection.name}
           </p>
-          <p className="mt-0.5 font-mono text-[0.75rem] text-ink-muted">{connection.kind}</p>
+          <p className="mt-0.5 font-mono text-[0.75rem] text-ink-muted">
+            {connection.kind === "file"
+              ? `${connection.file_count} ${connection.file_count === 1 ? "file" : "files"}`
+              : connection.kind}
+          </p>
 
           <div className="mt-5 flex items-center border-t border-line pt-3">
             {confirming === connection.id ? (
@@ -107,7 +111,7 @@ export function ConnectionList({
                   href={`/connections/${connection.id}/tables`}
                   className="text-[0.8125rem] font-medium text-brand transition-colors hover:text-brand-hover"
                 >
-                  Choose tables
+                  {connection.kind === "file" ? "Tables and files" : "Choose tables"}
                 </Link>
                 <Button
                   variant="ghost"

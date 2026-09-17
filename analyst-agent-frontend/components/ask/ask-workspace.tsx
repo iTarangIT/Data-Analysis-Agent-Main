@@ -360,8 +360,8 @@ function Welcome({
             Connect a database to get started
           </h1>
           <p className="mt-2 max-w-[46ch] text-[0.9375rem] leading-relaxed text-ink-muted">
-            Point the agent at a Postgres database with a read-only role, then ask it questions in
-            plain English.
+            Point the agent at a Postgres database with a read-only role, or upload spreadsheets,
+            then ask it questions in plain English.
           </p>
           <Link
             href="/connections"

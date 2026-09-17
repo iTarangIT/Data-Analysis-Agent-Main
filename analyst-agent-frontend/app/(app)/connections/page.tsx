@@ -25,8 +25,8 @@ export default async function ConnectionsPage() {
         <header className="mb-7">
           <h1 className="text-2xl font-semibold tracking-tight text-ink">Connections</h1>
           <p className="mt-1.5 max-w-[62ch] text-[0.875rem] leading-relaxed text-ink-muted">
-            The databases you can ask about. Questions are answered by reading them, never by
-            writing to them.
+            The databases and spreadsheets you can ask about. Questions are answered by reading
+            them, never by writing to them.
           </p>
         </header>
 

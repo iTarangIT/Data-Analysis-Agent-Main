@@ -136,6 +136,29 @@ export async function refreshTables(connectionId: string): Promise<RefreshState>
   return { added: result.added, removed: result.removed };
 }
 
+const FileName = z.string().min(1).max(1000);
+
+export async function removeFile(connectionId: string, file: string): Promise<FormState> {
+  const session = await getSession();
+  if (!session) return { message: "Your session has ended. Sign in again." };
+
+  const parsed = FileName.safeParse(file);
+  if (!parsed.success) return { message: "That file name could not be read." };
+
+  try {
+    await agentJson<ConnectionTables>(
+      `/connections/${encodeURIComponent(connectionId)}/files/${encodeURIComponent(parsed.data)}`,
+      { method: "DELETE", token: session.accessToken, timeoutMs: 20_000 },
+    );
+  } catch (error) {
+    const api = error as ApiError;
+    return { message: api.message ?? "Could not remove that file." };
+  }
+
+  revalidateTables(connectionId);
+  return {};
+}
+
 export async function deleteConnection(connectionId: string): Promise<FormState> {
   const session = await getSession();
   if (!session) return { message: "Your session has ended. Sign in again." };

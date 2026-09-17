@@ -47,6 +47,7 @@ export function TablePicker({
   const [refreshing, startRefresh] = useTransition();
 
   const names = catalog.tables.map((t) => t.name);
+  const fileOf = new Map(catalog.tables.map((t) => [t.name, t.file]));
   const shown = filterTables(names, query);
   const cap = catalog.max_selected;
   const atCap = chosen.size >= cap;
@@ -92,7 +93,6 @@ export function TablePicker({
             <span className="font-mono tabular-nums">{names.length}</span> chosen
           </p>
         </div>
-        {/* An upload never changes after it is made, so there is nothing to re-read. */}
         {kind === "postgres" ? (
           <Button
             variant="ghost"
@@ -155,6 +155,11 @@ export function TablePicker({
                 >
                   {name}
                 </span>
+                {fileOf.get(name) ? (
+                  <span className="ml-auto max-w-[45%] shrink-0 truncate text-[0.75rem] text-ink-faint">
+                    {fileOf.get(name)}
+                  </span>
+                ) : null}
               </label>
             </li>
           );
@@ -162,7 +167,7 @@ export function TablePicker({
         {shown.length === 0 ? (
           <li className="px-3 py-6 text-center text-[0.8125rem] text-ink-muted">
             {names.length === 0
-              ? "This database has no tables the agent can read."
+              ? `This ${kind === "file" ? "dataset" : "database"} has no tables the agent can read.`
               : `No table matches "${query.trim()}".`}
           </li>
         ) : null}
@@ -183,7 +188,7 @@ export function TablePicker({
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3">
         {catalog.refreshed_at ? (
           <p className="mr-auto text-[0.75rem] text-ink-muted">
-            Read from the database {when(catalog.refreshed_at)}
+            Read from the {kind === "file" ? "files" : "database"} {when(catalog.refreshed_at)}
           </p>
         ) : null}
         <Button

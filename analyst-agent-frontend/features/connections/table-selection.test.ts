@@ -18,7 +18,7 @@ function definition(over: Partial<TableDefinition> = {}): TableDefinition {
 }
 
 function table(over: Partial<SourceTable> = {}): SourceTable {
-  return { name: "batteries", selected: true, definition: null, stats: null, ...over };
+  return { name: "batteries", file: null, selected: true, definition: null, stats: null, ...over };
 }
 
 describe("toggle", () => {

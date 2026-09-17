@@ -23,9 +23,16 @@ type Options = {
 
 function headers(options: Options): HeadersInit {
   const out: Record<string, string> = { accept: "application/json" };
-  if (options.body !== undefined) out["content-type"] = "application/json";
+  if (options.body !== undefined && !(options.body instanceof FormData)) {
+    out["content-type"] = "application/json";
+  }
   if (options.token) out.authorization = `Bearer ${options.token}`;
   return out;
+}
+
+function encode(body: unknown): BodyInit | undefined {
+  if (body === undefined || body instanceof FormData) return body;
+  return JSON.stringify(body);
 }
 
 /** Perform the call, mapping anything that is not a response into an ApiError. */
@@ -39,7 +46,7 @@ export async function agentFetch(path: string, options: Options = {}): Promise<R
     return await fetch(`${env.AGENT_API_URL}${path}`, {
       method: options.method ?? "GET",
       headers: headers(options),
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body: encode(options.body),
       signal,
       // Every read here is per-tenant and request-time. Caching one would serve one
       // customer's connections to another.

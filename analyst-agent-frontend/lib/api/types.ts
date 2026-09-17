@@ -8,6 +8,7 @@ export type Connection = {
   kind: ConnectionKind;
   selected_tables: number;
   total_tables: number;
+  file_count: number;
   catalog_refreshed_at: string | null;
 };
 
@@ -35,7 +36,7 @@ export type TableDefinition = {
   checks: string[];
 };
 
-/** What a table holds, measured from the catalog. Postgres only; a spreadsheet reports none. */
+/** What a table holds, measured from the catalog. */
 export type TableStats = {
   rows: "empty" | "few" | "thousands" | "millions" | "nonempty" | "unknown";
   rows_approx?: number;
@@ -45,6 +46,7 @@ export type TableStats = {
 
 export type SourceTable = {
   name: string;
+  file: string | null;
   selected: boolean;
   /** Both null unless the table is chosen: the agent keeps no structure it may not use. */
   definition: TableDefinition | null;

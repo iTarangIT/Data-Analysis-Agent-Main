@@ -40,6 +40,14 @@ export class ApiError extends Error {
   }
 }
 
+export function failureResponse(error: unknown, fallback: string): Response {
+  const api = error instanceof ApiError ? error : new ApiError(fallback, 500, "unknown");
+  return Response.json(
+    { error: api.message, code: api.code, fieldErrors: api.fieldErrors },
+    { status: api.status },
+  );
+}
+
 function codeFor(status: number, message: string): ApiErrorCode {
   if (status === 401) return "unauthorized";
   if (status === 403) return "forbidden";
