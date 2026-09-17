@@ -27,6 +27,8 @@ type Props = {
   pendingLabel: string;
   /** Where to return after signing in, carried through the form rather than the URL. */
   next?: string;
+  /** A problem to show before anything is submitted, such as a sign-in that came back failed. */
+  message?: string;
 };
 
 function Submit({ label, pendingLabel }: { label: string; pendingLabel: string }) {
@@ -50,8 +52,8 @@ function Submit({ label, pendingLabel }: { label: string; pendingLabel: string }
   );
 }
 
-export function AuthForm({ action, fields, submitLabel, pendingLabel, next }: Props) {
-  const [state, formAction] = useActionState<FormState, FormData>(action, {});
+export function AuthForm({ action, fields, submitLabel, pendingLabel, next, message }: Props) {
+  const [state, formAction] = useActionState<FormState, FormData>(action, { message });
 
   return (
     <form action={formAction} className="flex flex-col gap-4" noValidate>

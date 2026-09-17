@@ -1,54 +1,50 @@
 import "server-only";
 
 import { cache } from "react";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { agentJson } from "@/lib/api/agent-client";
 import { ApiError } from "@/lib/api/errors";
 import type { User } from "@/lib/api/types";
-
-import { ACCESS_COOKIE, REFRESH_COOKIE, isFresh, sessionCookies } from "./cookies";
-import { refreshSession } from "./tokens";
+import { createClient } from "@/lib/supabase/server";
 
 /**
  * The data access layer.
  *
- * `proxy.ts` does an optimistic cookie check and nothing more, which is all Next's own
- * guidance allows it to do. So this is the real gate, and **every server component, server
- * action and route handler calls it**. A server action in particular is reachable by a direct
- * POST, not only through the form that renders it.
+ * `proxy.ts` refreshes the session and redirects signed-out navigations, but it runs only for
+ * pages. So this is the real gate, and **every server component, server action and route
+ * handler calls it**. A server action in particular is reachable by a direct POST, not only
+ * through the form that renders it.
  *
  * Wrapped in React's `cache` so one render asks once, however many components need it.
  */
 
 export type Session = {
+  /** The Supabase access token, which the agent verifies itself. */
   accessToken: string;
-  /** Set when the token was rotated here and the caller must write the new cookies. */
-  rotated?: ReturnType<typeof sessionCookies>;
+  email: string | null;
 };
 
 /**
- * The current access token, refreshed if it is close to expiring.
+ * The current session, verified, and refreshed if it had expired.
  *
  * Returns null rather than redirecting, so a route handler can answer 401 and a page can
  * redirect, each as appropriate.
  */
 export const getSession = cache(async (): Promise<Session | null> => {
-  const jar = await cookies();
-  const access = jar.get(ACCESS_COOKIE)?.value;
-  if (access && isFresh(access)) return { accessToken: access };
+  const supabase = await createClient();
 
-  const refresh = jar.get(REFRESH_COOKIE)?.value;
-  if (!refresh) return null;
+  // Verifies the token's signature, refreshing it first when it has expired. Only after this
+  // is the session read from the cookie trustworthy.
+  const { data: verified, error } = await supabase.auth.getClaims();
+  if (error || !verified?.claims) return null;
 
-  try {
-    const auth = await refreshSession(refresh);
-    return { accessToken: auth.access_token, rotated: sessionCookies(auth) };
-  } catch {
-    // The refresh token was revoked, expired, or replayed. Either way there is no session.
-    return null;
-  }
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) return null;
+
+  return { accessToken: session.access_token, email: verified.claims.email ?? null };
 });
 
 /** For pages: a session, or a redirect to sign in that comes back here afterwards. */
@@ -67,13 +63,43 @@ export async function requireSessionOr401(): Promise<Session> {
   return session;
 }
 
-/** The signed-in person. Returns null when the token names no user, which /auth/me 404s on. */
-export const getCurrentUser = cache(async (): Promise<User | null> => {
+type Membership =
+  | { status: "member"; user: User }
+  | { status: "onboarding" }
+  | { status: "unknown" };
+
+/** Whether the signed-in person belongs to an organisation yet, as the agent sees it. */
+export const getMembership = cache(async (): Promise<Membership> => {
   const session = await getSession();
-  if (!session) return null;
+  if (!session) return { status: "unknown" };
   try {
-    return await agentJson<User>("/auth/me", { token: session.accessToken });
-  } catch {
-    return null;
+    const user = await agentJson<User>("/auth/me", { token: session.accessToken });
+    return { status: "member", user };
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "onboarding_required") {
+      return { status: "onboarding" };
+    }
+    return { status: "unknown" };
   }
 });
+
+/** The signed-in person, or null when the agent could not say. */
+export const getCurrentUser = cache(async (): Promise<User | null> => {
+  const membership = await getMembership();
+  return membership.status === "member" ? membership.user : null;
+});
+
+/**
+ * For the app's pages: a session and, when the agent can say, the person behind it. Someone
+ * signed in with no organisation yet is sent to name one first.
+ *
+ * An unreachable agent still renders the page, with no user, so it can explain itself.
+ */
+export async function requireMember(
+  returnTo?: string,
+): Promise<{ session: Session; user: User | null }> {
+  const session = await requireSession(returnTo);
+  const membership = await getMembership();
+  if (membership.status === "onboarding") redirect("/welcome");
+  return { session, user: membership.status === "member" ? membership.user : null };
+}

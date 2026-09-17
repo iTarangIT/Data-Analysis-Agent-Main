@@ -1,7 +1,12 @@
 import Link from "next/link";
 
+type Footer =
+  | { prompt: string; href: string; label: string }
+  /** A form post rather than a link, for a footer that changes something, like signing out. */
+  | { prompt: string; action: () => Promise<void>; label: string };
+
 /**
- * The card both auth pages sit in. The wordmark stays the literal lowercase word in mono:
+ * The card every auth page sits in. The wordmark stays the literal lowercase word in mono:
  * this product has no logo, and a monogram tile invented for a sign-in screen would be the
  * only mark in the entire interface.
  */
@@ -12,9 +17,9 @@ export function AuthCard({
   children,
 }: {
   title: string;
-  subtitle: string;
-  footer: { prompt: string; href: string; label: string };
-  children: React.ReactNode;
+  subtitle: React.ReactNode;
+  footer: Footer;
+  children?: React.ReactNode;
 }) {
   return (
     <>
@@ -28,12 +33,23 @@ export function AuthCard({
 
         {children}
 
-        <p className="mt-7 border-t border-line pt-5 text-center text-[0.8125rem] text-ink-muted">
-          {footer.prompt}{" "}
-          <Link href={footer.href} className="font-medium text-brand hover:underline">
-            {footer.label}
-          </Link>
-        </p>
+        <div className="mt-7 border-t border-line pt-5 text-center text-[0.8125rem] text-ink-muted">
+          {"href" in footer ? (
+            <p>
+              {footer.prompt}{" "}
+              <Link href={footer.href} className="font-medium text-brand hover:underline">
+                {footer.label}
+              </Link>
+            </p>
+          ) : (
+            <form action={footer.action}>
+              {footer.prompt}{" "}
+              <button type="submit" className="font-medium text-brand hover:underline">
+                {footer.label}
+              </button>
+            </form>
+          )}
+        </div>
       </div>
     </>
   );

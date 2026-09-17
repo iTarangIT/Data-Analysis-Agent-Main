@@ -87,15 +87,6 @@ export type User = {
   created_at: string;
 };
 
-export type AuthResponse = {
-  access_token: string;
-  token_type: "bearer";
-  expires_in: number;
-  refresh_token: string;
-  refresh_expires_in: number;
-  user: User;
-};
-
 export type ChartSpec = {
   type: "bar" | "line";
   x: string;

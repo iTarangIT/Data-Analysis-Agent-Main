@@ -1,6 +1,7 @@
 import { register } from "@/actions/auth";
 import { AuthCard } from "@/components/auth/auth-card";
 import { AuthForm } from "@/components/auth/auth-form";
+import { SocialAuth } from "@/components/auth/social-auth";
 
 export const metadata = { title: "Create an account" };
 
@@ -32,6 +33,8 @@ export default function RegisterPage() {
           },
         ]}
       />
+
+      <SocialAuth />
     </AuthCard>
   );
 }

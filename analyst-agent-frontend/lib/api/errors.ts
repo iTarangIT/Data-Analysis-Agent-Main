@@ -3,6 +3,7 @@
  * renders "undefined" on the two most common failures.
  *
  *   { "error": "connection not found" }        domain errors: 400, 401, 403, 404, 409, 429
+ *   { "error": "...", "code": "onboarding_required" }   the same, when a client must branch
  *   { "detail": "missing bearer token" }       auth failures raised as HTTPException
  *   { "detail": [ { "loc": [...], "msg": ...}] }   pydantic request validation, 422
  *
@@ -12,6 +13,8 @@
 export type ApiErrorCode =
   | "unauthorized"
   | "forbidden"
+  /** Signed in with Supabase, but no organisation yet: send them to /welcome. */
+  | "onboarding_required"
   | "not_found"
   | "conflict"
   | "rate_limited"
@@ -102,9 +105,13 @@ export async function normalizeAgentError(response: Response): Promise<ApiError>
 
   let message = "";
   let fieldErrors: Record<string, string> = {};
+  let agentCode: ApiErrorCode | undefined;
 
   if (body && typeof body === "object") {
     const record = body as Record<string, unknown>;
+
+    // Only a code this app knows how to act on. Anything else keeps the status-derived one.
+    if (record.code === "onboarding_required") agentCode = record.code;
 
     if (typeof record.error === "string") {
       message = record.error;
@@ -124,5 +131,10 @@ export async function normalizeAgentError(response: Response): Promise<ApiError>
         : `request failed (${response.status})`;
   }
 
-  return new ApiError(message, response.status, codeFor(response.status, message), fieldErrors);
+  return new ApiError(
+    message,
+    response.status,
+    agentCode ?? codeFor(response.status, message),
+    fieldErrors,
+  );
 }

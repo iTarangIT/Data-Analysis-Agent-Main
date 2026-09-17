@@ -1,19 +1,22 @@
 "use server";
 
-import { cookies } from "next/headers";
+import type { AuthError } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
-import { z } from "zod";
 
 import { agentJson } from "@/lib/api/agent-client";
 import { ApiError } from "@/lib/api/errors";
-import type { AuthResponse } from "@/lib/api/types";
-import { REFRESH_COOKIE, clearedCookies, sessionCookies } from "@/lib/auth/cookies";
+import { requireSession } from "@/lib/auth/dal";
+import { fieldErrors, LoginSchema, RegisterSchema, WelcomeSchema } from "@/lib/auth/forms";
+import { whereToLand } from "@/lib/auth/landing";
+import { safeNext } from "@/lib/auth/next";
+import { env } from "@/lib/env";
+import { createClient } from "@/lib/supabase/server";
 
 /**
- * Sign-in, sign-up and sign-out.
+ * Sign-in, sign-up, sign-out, and naming an organisation.
  *
- * Server actions rather than route handlers because each one has to set an httpOnly cookie
- * and then navigate, which is exactly what a server function can do and a client-side submit
+ * Server actions rather than route handlers because each one has to write session cookies and
+ * then navigate, which is exactly what a server function can do and a client-side submit
  * cannot. They also work before the page has hydrated.
  *
  * Errors are returned, never thrown. A thrown error in a form action becomes an error page;
@@ -42,46 +45,9 @@ function keep(formData: FormData, fields: string[]): Record<string, string> {
   return values;
 }
 
-const LoginSchema = z.object({
-  email: z.email({ error: "Enter a valid email address." }).trim(),
-  password: z.string().min(1, { error: "Enter your password." }),
-});
-
-const RegisterSchema = z.object({
-  email: z.email({ error: "Enter a valid email address." }).trim(),
-  password: z
-    .string()
-    .min(12, { error: "Use at least 12 characters." })
-    .max(128, { error: "Use at most 128 characters." }),
-  name: z.string().max(200).optional(),
-  tenant_name: z
-    .string()
-    .min(1, { error: "Name your organisation." })
-    .max(200)
-    .optional(),
-});
-
-/** Same-origin only, or a crafted `next` would send a freshly signed-in person elsewhere. */
-function safeNext(value: FormDataEntryValue | null): string {
-  const next = typeof value === "string" ? value : "";
-  if (!next.startsWith("/") || next.startsWith("//")) return "/ask";
-  return next;
-}
-
-function flatten(error: z.ZodError): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const issue of error.issues) {
-    const key = String(issue.path[0] ?? "form");
-    if (!out[key]) out[key] = issue.message;
-  }
-  return out;
-}
-
-async function writeSession(auth: AuthResponse) {
-  const jar = await cookies();
-  for (const cookie of sessionCookies(auth)) {
-    jar.set(cookie.name, cookie.value, cookie.options);
-  }
+/** Supabase's rate limits apply per IP and per project, and read differently to a person. */
+function isRateLimited(error: AuthError): boolean {
+  return error.status === 429 || (error.code ?? "").startsWith("over_");
 }
 
 export async function login(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -90,28 +56,34 @@ export async function login(_prev: FormState, formData: FormData): Promise<FormS
     password: formData.get("password"),
   });
   const typed = keep(formData, ["email"]);
-  if (!parsed.success) return { fieldErrors: flatten(parsed.error), values: typed };
+  if (!parsed.success) return { fieldErrors: fieldErrors(parsed.error), values: typed };
 
-  try {
-    const auth = await agentJson<AuthResponse>("/auth/login", {
-      method: "POST",
-      body: parsed.data,
-    });
-    await writeSession(auth);
-  } catch (error) {
-    const api = error as ApiError;
-    // One message whatever went wrong, matching the agent. Saying "no such account" here
-    // would undo the enumeration protection it goes to the trouble of providing.
+  const supabase = await createClient();
+  const { error } = await supabase.auth.signInWithPassword(parsed.data);
+
+  if (error) {
+    if (error.code === "email_not_confirmed") {
+      return {
+        values: typed,
+        message: "Confirm your email address first. The link is in your inbox.",
+      };
+    }
+    if (isRateLimited(error)) {
+      return { values: typed, message: "Too many attempts. Wait a minute and try again." };
+    }
+    // One message for a wrong password and an unknown address alike. Saying which would tell
+    // anyone whether an address has an account.
     return {
       values: typed,
       message:
-        api.status === 401
+        error.code === "invalid_credentials"
           ? "That email and password do not match an account."
-          : (api.message ?? "Could not sign in. Try again."),
+          : "Could not sign in. Try again.",
     };
   }
 
-  // Outside the try: redirect works by throwing, so catching it here would swallow it.
+  // Outside any try: redirect works by throwing. The app layout sends someone with no
+  // organisation to /welcome from wherever this lands.
   redirect(safeNext(formData.get("next")));
 }
 
@@ -119,50 +91,111 @@ export async function register(_prev: FormState, formData: FormData): Promise<Fo
   const parsed = RegisterSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),
-    tenant_name: formData.get("tenant_name") || undefined,
-    name: formData.get("name") || undefined,
+    tenant_name: formData.get("tenant_name"),
   });
-  const typed = keep(formData, ["email", "tenant_name", "name"]);
-  if (!parsed.success) return { fieldErrors: flatten(parsed.error), values: typed };
+  const typed = keep(formData, ["email", "tenant_name"]);
+  if (!parsed.success) return { fieldErrors: fieldErrors(parsed.error), values: typed };
 
-  try {
-    const auth = await agentJson<AuthResponse>("/auth/register", {
-      method: "POST",
-      body: parsed.data,
-    });
-    await writeSession(auth);
-  } catch (error) {
-    const api = error as ApiError;
-    if (api.status === 409) {
-      return {
-        values: typed,
-        fieldErrors: { email: "An account with that email already exists." },
-      };
+  const { email, password, tenant_name } = parsed.data;
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: `${env.APP_URL}/api/auth/confirm`,
+      // Kept on the Supabase user until the address is confirmed, then used to create the
+      // organisation, so the name is not asked for a second time.
+      data: { tenant_name },
+    },
+  });
+
+  if (error) {
+    if (error.code === "weak_password") {
+      return { values: typed, fieldErrors: { password: error.message } };
     }
-    if (api.fieldErrors && Object.keys(api.fieldErrors).length > 0) {
-      return { values: typed, fieldErrors: api.fieldErrors };
+    if (error.code === "user_already_exists" || error.code === "email_exists") {
+      return { values: typed, fieldErrors: { email: "An account with that email already exists." } };
     }
-    return { values: typed, message: api.message ?? "Could not create the account. Try again." };
+    if (isRateLimited(error)) {
+      return { values: typed, message: "Too many sign-ups just now. Try again in a little while." };
+    }
+    return { values: typed, message: "Could not create the account. Try again." };
   }
 
-  redirect("/ask");
+  // A session straight away means the project does not require confirming the address.
+  if (data.session) {
+    redirect(
+      await whereToLand({ accessToken: data.session.access_token, next: "/ask", tenantName: tenant_name }),
+    );
+  }
+
+  // Supabase answers the same way for an address that already has an account, so this page
+  // reveals nothing about who has signed up.
+  redirect(`/register/sent?email=${encodeURIComponent(email)}`);
+}
+
+/** Starts Google's sign-in. The person comes back to /api/auth/callback. */
+export async function signInWithGoogle(formData: FormData): Promise<void> {
+  const next = safeNext(formData.get("next"));
+  const callback = new URL("/api/auth/callback", env.APP_URL);
+  if (next !== "/ask") callback.searchParams.set("next", next);
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: callback.toString() },
+  });
+
+  redirect(error || !data.url ? "/login?error=google" : data.url);
+}
+
+export async function createOrganisation(_prev: FormState, formData: FormData): Promise<FormState> {
+  const session = await requireSession("/welcome");
+
+  const parsed = WelcomeSchema.safeParse({ tenant_name: formData.get("tenant_name") });
+  const typed = keep(formData, ["tenant_name"]);
+  if (!parsed.success) return { fieldErrors: fieldErrors(parsed.error), values: typed };
+
+  const next = safeNext(formData.get("next"));
+
+  try {
+    await agentJson("/auth/provision", {
+      method: "POST",
+      token: session.accessToken,
+      body: parsed.data,
+    });
+  } catch (error) {
+    const api = error instanceof ApiError ? error : null;
+    if (api?.code === "conflict") {
+      // A second tab or a double submit already made them a member, which is fine. An address
+      // that belongs to an older account they have not proven is not, and saying so beats
+      // bouncing them back to this page.
+      const landing = await whereToLand({ accessToken: session.accessToken, next });
+      if (!landing.startsWith("/welcome")) redirect(landing);
+      return {
+        values: typed,
+        message:
+          "This email address already has an organisation. Sign in the way you did before, or confirm the address to reach it.",
+      };
+    }
+    if (api && Object.keys(api.fieldErrors).length > 0) {
+      return { values: typed, fieldErrors: api.fieldErrors };
+    }
+    return {
+      values: typed,
+      message:
+        api?.code === "forbidden"
+          ? "New organisations cannot be created right now."
+          : "Could not create the organisation. Try again.",
+    };
+  }
+
+  redirect(next);
 }
 
 export async function logout() {
-  const jar = await cookies();
-  const refresh = jar.get(REFRESH_COOKIE)?.value;
-
-  if (refresh) {
-    try {
-      await agentJson("/auth/logout", { method: "POST", body: { refresh_token: refresh } });
-    } catch {
-      // The session is ending either way. Failing to reach the agent must not strand someone
-      // on a page they are trying to leave.
-    }
-  }
-
-  for (const cookie of clearedCookies()) {
-    jar.set(cookie.name, cookie.value, cookie.options);
-  }
+  const supabase = await createClient();
+  // This device only. Signing out of a laptop should not sign the same person out of a phone.
+  await supabase.auth.signOut({ scope: "local" });
   redirect("/login");
 }

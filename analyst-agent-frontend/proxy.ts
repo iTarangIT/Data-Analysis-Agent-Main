@@ -1,58 +1,48 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { ACCESS_COOKIE, REFRESH_COOKIE, isFresh } from "@/lib/auth/cookies";
+import { updateSession } from "@/lib/supabase/proxy";
 
 /**
  * What Next 15 called middleware. Next 16 renamed the file and the export to `proxy`, and the
  * runtime is Node and cannot be configured: setting a `runtime` export here throws.
  *
- * This does an **optimistic check only**. It reads the cookie, decodes the expiry, and
- * redirects. It never calls the network and never holds module state, because it runs on every
- * navigation including prefetches and may be deployed to a CDN edge. Next's own guidance is
- * explicit that this must not be the only gate, which is why `lib/auth/dal.ts` re-checks
- * inside every server component, server action and route handler.
+ * Two jobs. It keeps the Supabase session alive, because server components cannot write
+ * cookies and so cannot store a refreshed token themselves; and it sends a signed-out
+ * navigation to sign in before a page starts rendering. Verifying the token is local, against
+ * the project's cached public keys; only an expired token costs a call to Supabase.
  *
- * Rotation cannot happen here either: cookies can only be written from a server function or a
- * route handler, so a stale token is handed to `/api/auth/refresh`, which writes the new pair
- * and sends the person on to where they were going.
+ * It is still not the gate. Next's own guidance is explicit that this must not be the only
+ * check, which is why `lib/auth/dal.ts` re-checks inside every server component, server action
+ * and route handler.
  */
 
-const PUBLIC_PATHS = new Set(["/login", "/register"]);
+// Signed-out pages. A signed-in visitor is sent on to the app instead.
+const PUBLIC_PATHS = new Set(["/login", "/register", "/register/sent"]);
 
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
-
-  const access = request.cookies.get(ACCESS_COOKIE)?.value;
-  const refresh = request.cookies.get(REFRESH_COOKIE)?.value;
-  const signedIn = access ? isFresh(access) : false;
+  const { response, signedIn, carrySession } = await updateSession(request);
 
   if (PUBLIC_PATHS.has(pathname)) {
-    return signedIn
-      ? NextResponse.redirect(new URL("/ask", request.nextUrl))
-      : NextResponse.next();
+    return signedIn ? carrySession(NextResponse.redirect(new URL("/ask", request.nextUrl))) : response;
   }
 
-  if (signedIn) return NextResponse.next();
-
-  if (refresh) {
-    const refreshUrl = new URL("/api/auth/refresh", request.nextUrl);
-    refreshUrl.searchParams.set("next", pathname + search);
-    return NextResponse.redirect(refreshUrl);
-  }
+  if (signedIn) return response;
 
   const login = new URL("/login", request.nextUrl);
   if (pathname !== "/") login.searchParams.set("next", pathname + search);
-  return NextResponse.redirect(login);
+  // Carried even here: a refresh that failed clears the dead session's cookies.
+  return carrySession(NextResponse.redirect(login));
 }
 
 export const config = {
   matcher: [
     {
-      // `api` is excluded on purpose. The agent is the authority for API auth, and a matched
-      // path has its request body cloned and buffered in memory, which is the last thing a
-      // long-running run POST needs.
+      // `api` is excluded on purpose. Route handlers check the session themselves, the auth
+      // callbacks must run before there is one, and a matched path has its request body cloned
+      // and buffered in memory, which is the last thing a long-running run POST needs.
       source: "/((?!api|_next/static|_next/image|favicon.ico|.*\\.svg$).*)",
-      // Prefetches would otherwise fire the refresh redirect on every hovered link.
+      // Prefetches would otherwise refresh the session on every hovered link.
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },
