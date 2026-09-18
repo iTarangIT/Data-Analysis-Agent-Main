@@ -1,4 +1,5 @@
 import json
+import time
 from typing import Any
 
 from langchain.tools import ToolRuntime, tool
@@ -11,6 +12,8 @@ from app.agent.nodes.sql_guard import validate_sql
 from app.agent.prompts import (
     QUERY_TOOL_DESC,
     QUERY_TOOL_SQL_ARG,
+    QUERY_TOOL_WHAT_ARG,
+    QUERY_TOOL_WHY_ARG,
     REMEMBER_DEFINITION_ARG,
     REMEMBER_TERM_ARG,
     REMEMBER_TOOL_DESC,
@@ -30,6 +33,10 @@ PREVIEW_ROWS = 50
 
 class QueryDatabaseArgs(BaseModel):
     sql: str = Field(description=QUERY_TOOL_SQL_ARG)
+    # Defaulted, so a model that leaves them out loses a line of explanation rather than a turn
+    # to a validation error.
+    what: str = Field(default="", description=QUERY_TOOL_WHAT_ARG)
+    why: str = Field(default="", description=QUERY_TOOL_WHY_ARG)
 
 
 class RememberArgs(BaseModel):
@@ -50,24 +57,35 @@ def make_query_tool(connector: SqlConnector, catalog: Catalog) -> BaseTool:
         args_schema=QueryDatabaseArgs,
         response_format="content_and_artifact",
     )
-    def query_database(sql: str, runtime: ToolRuntime[RunContext]) -> tuple[str, dict[str, Any]]:
+    def query_database(
+        sql: str, runtime: ToolRuntime[RunContext], what: str = "", why: str = ""
+    ) -> tuple[str, dict[str, Any]]:
         max_rows = get_settings().max_rows
+        explained = {"what": what, "why": why}
 
         safe_sql, err = validate_sql(sql, allowed, max_rows, connector.dialect)
         if err:
             # The artifact carries the rejected SQL so a later success can be recorded against it
-            # as a correction. The translator still reads only `error`, so no event changes.
+            # as a correction.
             return f"Query rejected: {err}.{_prior_fix(runtime, sql)} Rewrite it.", {
                 "error": err,
+                "at": "guard",
                 "sql": sql,
+                **explained,
             }
 
+        t0 = time.perf_counter()
         try:
             # One row beyond the cap tells us whether the result was truncated.
             cols, rows = connector.run_select(safe_sql, max_rows + 1)
         except Exception as e:
             message = f"database error: {e}"
-            return f"Query failed: {message}. Rewrite it.", {"error": message, "sql": sql}
+            return f"Query failed: {message}. Rewrite it.", {
+                "error": message,
+                "at": "database",
+                "sql": sql,
+                **explained,
+            }
 
         capped = [list(r) for r in rows[:max_rows]]
         result = {
@@ -75,6 +93,8 @@ def make_query_tool(connector: SqlConnector, catalog: Catalog) -> BaseTool:
             "columns": cols,
             "rows": capped,
             "truncated": len(rows) > max_rows,
+            "ms": int((time.perf_counter() - t0) * 1000),
+            **explained,
         }
         preview = json.dumps(
             {"columns": cols, "rows": capped[:PREVIEW_ROWS], "row_count": len(capped)},

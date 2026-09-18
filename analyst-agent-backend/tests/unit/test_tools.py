@@ -57,9 +57,9 @@ def runtime(store=None):
     )
 
 
-def call(tool, sql: str | None = None, store=None):
+def call(tool, sql: str | None = None, store=None, **explained):
     """Invoke as the agent does, so the structured artifact comes back on a ToolMessage."""
-    args = {"runtime": runtime(store)}
+    args = {"runtime": runtime(store), **explained}
     if sql is not None:
         args["sql"] = sql
     msg = tool.invoke({"name": tool.name, "args": args, "id": "c1", "type": "tool_call"})
@@ -70,8 +70,11 @@ class TestToolContract:
     def test_it_is_a_real_langchain_tool(self, tool):
         assert isinstance(tool, BaseTool)
 
-    def test_it_declares_a_single_sql_argument(self, tool):
-        assert set(tool.args_schema.model_fields) == {"sql"}
+    def test_it_declares_the_sql_and_its_plain_explanation(self, tool):
+        assert set(tool.args_schema.model_fields) == {"sql", "what", "why"}
+
+    def test_only_the_sql_is_required_so_a_missing_explanation_costs_no_turn(self, tool):
+        assert tool.tool_call_schema.model_json_schema()["required"] == ["sql"]
 
     def test_its_description_names_the_tables_the_model_may_use(self, tool):
         assert "TABLE vehicles" in tool.description and "TABLE alerts" in tool.description
@@ -158,12 +161,44 @@ class TestExecution:
         assert artifact["rows"] == [["KA0"], ["KA1"]]
 
 
+EXPLAINED = {"what": "Lists every vehicle.", "why": "You asked which vehicles there are."}
+
+
+class TestExplanation:
+    """What the query was for travels beside it, so the run can be explained without asking the
+    model a second time."""
+
+    def test_a_result_carries_the_explanation_and_how_long_the_query_took(self, tool):
+        _, artifact = call(tool, "select vehicleno from vehicles", **EXPLAINED)
+        assert artifact["what"] == "Lists every vehicle."
+        assert artifact["why"] == "You asked which vehicles there are."
+        assert isinstance(artifact["ms"], int) and artifact["ms"] >= 0
+
+    def test_a_refusal_carries_it_too_and_says_the_guard_refused(self, tool):
+        _, artifact = call(tool, "delete from vehicles", **EXPLAINED)
+        assert artifact["at"] == "guard"
+        assert artifact["what"] == "Lists every vehicle."
+
+    def test_a_database_failure_says_the_database_refused(self):
+        class Broken(FakeConnector):
+            def run_select(self, sql, max_rows):
+                raise RuntimeError("column does not exist")
+
+        _, artifact = call(make_query_tool(Broken(), CATALOG), "select vehicleno from vehicles")
+        assert artifact["at"] == "database"
+
+    def test_left_out_it_is_empty_rather_than_a_failed_call(self, tool):
+        _, artifact = call(tool, "select vehicleno from vehicles")
+        assert artifact["what"] == "" and artifact["why"] == ""
+        assert "error" not in artifact
+
+
 class TestRuntimeIsHiddenFromTheModel:
     """`runtime` is injected by ToolNode. If it ever showed up in the model-facing schema the
     model would try to supply it, and whatever it sent would be silently overwritten."""
 
-    def test_the_model_is_offered_only_the_sql_argument(self, tool):
-        assert set(tool.tool_call_schema.model_fields) == {"sql"}
+    def test_the_model_is_offered_only_its_own_arguments(self, tool):
+        assert set(tool.tool_call_schema.model_fields) == {"sql", "what", "why"}
 
 
 class TestRememberedCorrections:

@@ -79,7 +79,13 @@ def prompt_sha() -> str:
     from app.agent import prompts
 
     composed = prompts.AGENT_SYSTEM.format(today="{today}", capability=prompts.SQL_CAPABILITY)
-    text = composed + prompts.QUERY_TOOL_DESC + prompts.QUERY_TOOL_SQL_ARG
+    text = (
+        composed
+        + prompts.QUERY_TOOL_DESC
+        + prompts.QUERY_TOOL_SQL_ARG
+        + prompts.QUERY_TOOL_WHAT_ARG
+        + prompts.QUERY_TOOL_WHY_ARG
+    )
     return hashlib.sha256(text.encode()).hexdigest()
 
 

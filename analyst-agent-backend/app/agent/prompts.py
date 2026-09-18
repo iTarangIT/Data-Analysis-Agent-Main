@@ -67,6 +67,14 @@ the question names one, and prefer summary tables over raw readings."""
 
 QUERY_TOOL_SQL_ARG = "One PostgreSQL SELECT statement. No prose, no code fences."
 
+QUERY_TOOL_WHAT_ARG = """One short sentence, in the past tense, for someone who has never seen
+SQL: what this query looked up in their data, e.g. "Counted your dealers and listed their names."
+Plain words only, no table names, column names or SQL terms."""
+
+QUERY_TOOL_WHY_ARG = """One short sentence in the same plain words, speaking to the person as
+"you": why this query answers their question, e.g. "You asked how many dealers there are." If an
+earlier query came back empty, rejected or wrong, say what it showed that led to this one."""
+
 NO_RELATIONSHIPS = "  None. No key links these tables and none could be inferred from their names."
 
 
