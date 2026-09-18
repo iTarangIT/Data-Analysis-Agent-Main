@@ -7,6 +7,6 @@ import { CodeBlock } from "@/components/code-block";
  * worth looking at, and because the person who set up the connection wants to check the query
  * is sane before trusting the number under it.
  */
-export function SqlBlock({ sql }: { sql: string }) {
-  return <CodeBlock code={sql} label="Query" copyLabel="SQL" />;
+export function SqlBlock({ sql, label = "Query" }: { sql: string; label?: string }) {
+  return <CodeBlock code={sql} label={label} copyLabel="SQL" />;
 }

@@ -93,6 +93,40 @@ export type ChartSpec = {
   y: string[];
 };
 
+/**
+ * The agent's five contract stages.
+ *
+ * These are not a ladder. With bounded SQL retries the agent can go
+ * `sql_gen -> sql_guard -> sql_gen` when the guard rejects a query and the model tries again,
+ * so anything that renders them as a fixed five-step progress bar will lie on exactly the
+ * runs worth looking at.
+ */
+export type Stage = "router" | "sql_gen" | "sql_guard" | "db_exec" | "answer";
+
+/**
+ * One pass at writing SQL. `rejected` means the guard or the database refused it and the model
+ * could go again. Everything after those two arrives as the query is checked and run, so any of
+ * it can be missing while a run is live. A saved run sends the missing ones as null.
+ */
+export type Attempt = {
+  sql: string | null;
+  rejected: boolean;
+  /** The model's own plain-English account of the query. Empty when it gave none. */
+  what?: string;
+  why?: string;
+  reason?: string | null;
+  at?: "guard" | "database" | null;
+  rows?: number | null;
+  truncated?: boolean | null;
+  ms?: number | null;
+};
+
+/** How a saved run went, recorded exactly as its stream reported it. Row counts, never rows. */
+export type RunTrace = {
+  stages: Stage[];
+  attempts: Attempt[];
+};
+
 export type RunSummary = {
   id: string;
   thread_id: string;
@@ -130,6 +164,8 @@ export type RunDetail = {
   completion_tokens: number;
   rows_returned: number;
   chart: ChartSpec | null;
+  /** Null for every run saved before steps were recorded. */
+  trace: RunTrace | null;
   duration_ms: number;
   created_at: string;
 };

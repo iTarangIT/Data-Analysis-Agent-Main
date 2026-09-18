@@ -1,14 +1,6 @@
-import type { ChartSpec } from "@/lib/api/types";
+import type { Attempt, ChartSpec, Stage } from "@/lib/api/types";
 
-/**
- * The agent's five contract stages.
- *
- * These are not a ladder. With bounded SQL retries the agent can go
- * `sql_gen -> sql_guard -> sql_gen` when the guard rejects a query and the model tries again,
- * so anything that renders them as a fixed five-step progress bar will lie on exactly the
- * runs worth looking at.
- */
-export type Stage = "router" | "sql_gen" | "sql_guard" | "db_exec" | "answer";
+export type { Attempt, Stage } from "@/lib/api/types";
 
 /**
  * A single table cell.
@@ -34,8 +26,9 @@ export type ResultTable = {
 /** Exactly the frozen SSE contract, one variant per `event:` name. */
 export type RunEvent =
   | { type: "status"; data: { stage: Stage } }
-  | { type: "sql"; data: { sql: string } }
-  | { type: "rows"; data: ResultTable }
+  | { type: "sql"; data: { sql: string; what?: string; why?: string } }
+  | { type: "rejected"; data: { sql: string; reason: string; at: "guard" | "database" } }
+  | { type: "rows"; data: ResultTable & { ms?: number } }
   | { type: "chart"; data: ChartSpec }
   | { type: "token"; data: { text: string } }
   | { type: "done"; data: { run_id: string; duration_ms: number } }
@@ -71,12 +64,6 @@ export type RunError = {
   message: string;
   status?: number;
   code?: string;
-};
-
-/** One pass at writing SQL. `rejected` means the guard bounced it and the model went again. */
-export type Attempt = {
-  sql: string | null;
-  rejected: boolean;
 };
 
 export type RunState = {

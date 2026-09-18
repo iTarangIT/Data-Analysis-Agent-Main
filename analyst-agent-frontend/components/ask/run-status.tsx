@@ -29,7 +29,7 @@ export function RunStatus({ state }: { state: RunState }) {
 
   const seconds = Math.max(0, Math.floor((now - (state.startedAt ?? now)) / 1000));
   const label = STAGE_LABEL[state.stage ?? "router"];
-  const text = `${label}…${confirmedRejections(state) > 0 ? ` · attempt ${state.attempts.length}` : ""}`;
+  const text = `${label}…${confirmedRejections(state.attempts) > 0 ? ` · attempt ${state.attempts.length}` : ""}`;
 
   return (
     <div className="flex min-w-0 items-center gap-2 text-[0.9375rem]">

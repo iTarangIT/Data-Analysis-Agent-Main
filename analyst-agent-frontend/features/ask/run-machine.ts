@@ -16,19 +16,20 @@ const PHASE_FOR: Record<Stage, RunPhase> = {
   answer: "answering",
 };
 
-/** The guard is announced before its verdict is known, so a pending attempt starts rejected. */
-function markPendingRejected(attempts: Attempt[]): Attempt[] {
+/** Every event after `sql_gen` is about the query it started, which is always the last one. */
+function patchLast(attempts: Attempt[], patch: Partial<Attempt>): Attempt[] {
   if (attempts.length === 0) return attempts;
-  const head = attempts.slice(0, -1);
-  const last = attempts[attempts.length - 1];
-  return [...head, { ...last, rejected: true }];
+  return [...attempts.slice(0, -1), { ...attempts[attempts.length - 1], ...patch }];
 }
 
 /** A `sql` event means the guard passed, so the attempt it was about is not rejected. */
-function acceptPending(attempts: Attempt[], sql: string): Attempt[] {
-  if (attempts.length === 0) return [{ sql, rejected: false }];
-  const head = attempts.slice(0, -1);
-  return [...head, { sql, rejected: false }];
+function acceptPending(
+  attempts: Attempt[],
+  accepted: { sql: string; what?: string; why?: string },
+): Attempt[] {
+  const attempt = { ...accepted, rejected: false };
+  if (attempts.length === 0) return [attempt];
+  return [...attempts.slice(0, -1), attempt];
 }
 
 /**
@@ -69,11 +70,13 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case "status": {
       const { stage } = action.data;
+      // The guard is announced before its verdict is known, so a pending attempt starts
+      // rejected until a `sql` event accepts it.
       const attempts =
         stage === "sql_gen"
           ? [...state.attempts, { sql: null, rejected: false }]
           : stage === "sql_guard"
-            ? markPendingRejected(state.attempts)
+            ? patchLast(state.attempts, { rejected: true })
             : state.attempts;
 
       return {
@@ -94,11 +97,22 @@ export function runReducer(state: RunState, action: RunAction): RunState {
         // show a result that never came from it.
         result: null,
         chart: null,
-        attempts: acceptPending(state.attempts, action.data.sql),
+        attempts: acceptPending(state.attempts, action.data),
       };
 
-    case "rows":
-      return { ...state, result: action.data };
+    case "rejected": {
+      const { sql, reason, at } = action.data;
+      return { ...state, attempts: patchLast(state.attempts, { sql, reason, at, rejected: true }) };
+    }
+
+    case "rows": {
+      const { rows, truncated, ms } = action.data;
+      return {
+        ...state,
+        result: action.data,
+        attempts: patchLast(state.attempts, { rows: rows.length, truncated, ms }),
+      };
+    }
 
     case "chart":
       return { ...state, chart: action.data };

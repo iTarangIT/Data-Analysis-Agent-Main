@@ -23,9 +23,12 @@ const HAPPY: RunAction[] = [
   stage("router"),
   stage("sql_gen"),
   stage("sql_guard"),
-  { type: "sql", data: { sql: "SELECT count(*) FROM dealers" } },
+  {
+    type: "sql",
+    data: { sql: "SELECT count(*) FROM dealers", what: "Counts the dealers.", why: "You asked." },
+  },
   stage("db_exec"),
-  { type: "rows", data: { columns: ["count"], rows: [[3]], truncated: false } },
+  { type: "rows", data: { columns: ["count"], rows: [[3]], truncated: false, ms: 38 } },
   stage("answer"),
   { type: "token", data: { text: "There are three dealers." } },
   { type: "done", data: { run_id: "r1", duration_ms: 1840 } },
@@ -62,10 +65,20 @@ describe("runReducer", () => {
       expect(s.error).toBeNull();
     });
 
-    it("records one attempt, accepted", () => {
+    it("records one attempt, accepted, with its explanation and what it returned", () => {
       const s = drive(HAPPY);
 
-      expect(s.attempts).toEqual([{ sql: "SELECT count(*) FROM dealers", rejected: false }]);
+      expect(s.attempts).toEqual([
+        {
+          sql: "SELECT count(*) FROM dealers",
+          rejected: false,
+          what: "Counts the dealers.",
+          why: "You asked.",
+          rows: 1,
+          truncated: false,
+          ms: 38,
+        },
+      ]);
     });
 
     it("keeps the stages in the order they happened", () => {
@@ -121,8 +134,30 @@ describe("runReducer", () => {
       expect(s.phase).toBe("done");
       expect(s.attempts).toHaveLength(2);
       expect(s.attempts[0].rejected).toBe(true);
-      expect(s.attempts[1]).toEqual({ sql: "SELECT 1", rejected: false });
+      expect(s.attempts[1]).toEqual({ sql: "SELECT 1", rejected: false, rows: 1, truncated: false });
       expect(s.stageLog.filter((x) => x === "sql_gen")).toHaveLength(2);
+    });
+
+    it("keeps the refused sql and the reason, so the rejection can be shown", () => {
+      const s = drive([
+        submit,
+        stage("router"),
+        stage("sql_gen"),
+        stage("sql_guard"),
+        {
+          type: "rejected",
+          data: { sql: "DELETE FROM dealers", reason: "only SELECT is allowed", at: "guard" },
+        },
+        stage("sql_gen"),
+      ]);
+
+      expect(s.attempts[0]).toEqual({
+        sql: "DELETE FROM dealers",
+        rejected: true,
+        reason: "only SELECT is allowed",
+        at: "guard",
+      });
+      expect(s.attempts[1]).toEqual({ sql: null, rejected: false });
     });
 
     it("ends in error with no sql when the agent gives up", () => {
