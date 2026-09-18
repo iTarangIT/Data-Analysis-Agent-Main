@@ -1158,3 +1158,37 @@ the claim adoption relies on is present on Google tokens.
 
 Three tests fail with `KeyError: 'trips'` and `'gps_pings'`. They read the demo database
 directly, never the API, and their docstring says to reseed `scripts/demo_customer.sql` first.
+
+## Query visibility and a plain-English explanation, built 2026-09-18
+
+The "How this was answered" panel under each answer now shows every step with what it came to
+(`1 row · 4 ms`, `rejected`, `from 1 row`), the query, any rejected queries behind a closed
+disclosure with their reasons, the run's facts, and a short "In simple terms" block last: What,
+Why and Means.
+
+- **What and why are the model's own words**, written as two optional arguments of
+  `query_database` (`QUERY_TOOL_WHAT_ARG`, `QUERY_TOOL_WHY_ARG`), so no second model call. They
+  default to empty: a model that leaves them out loses a line, not a turn. **Means** is computed
+  in the frontend from the row count and truncation, so it cannot overstate the result.
+- **SSE, additive:** `sql` gains `what`/`why`, `rows` gains `ms`, and a new `rejected`
+  `{sql, reason, at: guard|database}` follows `status: sql_guard` when a query is refused. No
+  stage changed. The contract table in `docs/CLAUDE.md` is updated.
+- **`runs.trace`** (migration `62162b953aa7`, JSON, NULL for older runs) keeps `{stages,
+  attempts}` built exactly as the client builds them from the stream, row counts only. A run
+  reopened from history now shows its steps and summary; one from before shows neither.
+
+### Verified
+
+- Unit tests pass (394) and ruff is clean; frontend vitest (265), tsc and eslint are clean.
+- `alembic upgrade head` against the local `analyst`.
+- In the browser against the live API: the dealers question live and again after a reload (the
+  saved run renders the same steps and summary from `trace`), a question needing no query ("Nothing
+  was looked up"), and the panel at 390px with no horizontal scroll. Gemini filled `what` and
+  `why` on every query call it made.
+
+### Not done
+
+| # | Item | Blocked on |
+|---|---|---|
+| 1 | A rule 6 pass rate for the two new tool arguments. `prompt_sha()` moves from `12f02ab9` to `29d546d4`; the cassettes on disk were already `de39cc3c`, so there is no baseline recording to compare with | reseeding `demo`, then model quota, as for the catalog prompts |
+| 2 | A guard rejection seen in the browser. Covered by the translator, reducer and panel tests; Gemini would not write a refused query on request | a question that makes the model write one |
