@@ -146,8 +146,9 @@ Changing it requires updating both repos in the same PR.
 | event | data |
 |---|---|
 | `status` | `{"stage": router\|sql_gen\|sql_guard\|db_exec\|answer}` |
-| `sql` | `{"sql": "..."}` |
-| `rows` | `{"columns": [...], "rows": [[...]], "truncated": bool}` |
+| `sql` | `{"sql": "...", "what": "...", "why": "..."}` — `what`/`why` may be empty strings |
+| `rejected` | `{"sql": "...", "reason": "...", "at": guard\|database}` — always straight after `status: sql_guard` |
+| `rows` | `{"columns": [...], "rows": [[...]], "truncated": bool, "ms": n}` |
 | `chart` | `{"type": bar\|line, "x": "col", "y": ["col"]}` — optional, always straight after a `rows` |
 | `token` | `{"text": "..."}` |
 | `done` | `{"run_id": "...", "duration_ms": n}` |
@@ -159,6 +160,12 @@ update in the same PR. It is additive: no existing event changed shape, it alway
 because a chart is a payload rather than a step. A client that ignores unknown event names is
 unaffected. Note that `pnpm gen:agent` will not surface it: SSE events do not appear in
 `/openapi.json`.
+
+`rejected`, and the `what`/`why`/`ms` fields, were added on 2026-09-18 the same way: additive, no
+new stage, both clients updated in one change. `what` and `why` are the model's own plain-English
+account of a query, written as arguments of the tool call rather than by a second model call.
+The same facts are saved on the run as `trace` (`{stages, attempts}`, built exactly as the client
+builds them from the stream, row counts only), so a run reopened from history shows its steps.
 
 ## Hard rules
 

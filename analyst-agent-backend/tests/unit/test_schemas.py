@@ -6,6 +6,7 @@ from app.api.schemas import (
     ConnectionOut,
     ProvisionIn,
     RunCreate,
+    RunOut,
     TableOut,
     UserOut,
 )
@@ -136,3 +137,31 @@ class TestFileConnectionsAreNotCreatedFromABody:
 
         assert ".exe" not in UPLOAD_SUFFIXES
         assert ".csv" in UPLOAD_SUFFIXES
+
+
+SAVED_RUN = {
+    "id": "r1", "connection_id": "c1", "thread_id": "t1", "question": "How many?",
+    "status": "done", "tool": "sql", "sql": "SELECT 1", "answer": "One.", "error": None,
+    "model": None, "prompt_tokens": 0, "completion_tokens": 0, "rows_returned": 1,
+    "chart": None, "duration_ms": 10, "created_at": "2026-09-18T00:00:00Z",
+}  # fmt: skip
+
+
+class TestRunTrace:
+    def test_a_run_from_before_the_trace_has_none(self):
+        assert RunOut.model_validate({**SAVED_RUN, "trace": None}).trace is None
+
+    def test_a_stored_trace_reads_back_with_its_attempts(self):
+        trace = {
+            "stages": ["router", "sql_gen", "sql_guard", "db_exec", "answer"],
+            "attempts": [
+                {"sql": "SELECT 1", "rejected": False, "what": "Counts.", "why": "Asked.",
+                 "rows": 1, "truncated": False, "ms": 4},
+            ],
+        }  # fmt: skip
+        attempt = RunOut.model_validate({**SAVED_RUN, "trace": trace}).trace.attempts[0]
+        assert attempt.what == "Counts." and attempt.rows == 1 and attempt.reason is None
+
+    def test_an_unknown_stage_is_refused(self):
+        with pytest.raises(ValidationError):
+            RunOut.model_validate({**SAVED_RUN, "trace": {"stages": ["guess"], "attempts": []}})

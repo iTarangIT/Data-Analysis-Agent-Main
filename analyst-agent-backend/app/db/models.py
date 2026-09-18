@@ -111,6 +111,9 @@ class Run(Base):
     rows_returned: Mapped[int] = mapped_column(Integer, default=0)
     # So a past run can be re-rendered without re-running the customer's query.
     chart: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # The stages the run went through and each query it tried, with row counts but never rows.
+    # NULL for every run that predates the column.
+    trace: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

@@ -57,6 +57,10 @@ class RunOutcome:
     rows: list = field(default_factory=list)
     chart: dict | None = None
     answer: str = ""
+    # Every stage reported and every query tried, built exactly as the client builds them from
+    # the stream, so a saved run shows the same steps a live one did. Row counts, never rows.
+    stages: list[str] = field(default_factory=list)
+    attempts: list[dict] = field(default_factory=list)
 
 
 class EventTranslator:
@@ -77,14 +81,19 @@ class EventTranslator:
         elif node == "tools" and isinstance(message, ToolMessage):
             yield from self._for_tool(message)
 
+    def _status(self, stage: str) -> dict:
+        self.outcome.stages.append(stage)
+        return {"type": "status", "data": {"stage": stage}}
+
     def _for_model(self, message: AIMessage) -> Iterator[dict]:
         if not self._routed:
             self._routed = True
-            yield {"type": "status", "data": {"stage": "router"}}
+            yield self._status("router")
 
         if message.tool_calls:
             self.outcome.tool = "sql"
-            yield {"type": "status", "data": {"stage": "sql_gen"}}
+            self.outcome.attempts.append({"sql": None, "rejected": False})
+            yield self._status("sql_gen")
             return
 
         # Gemini 3 returns a list of content blocks rather than a string, so read `.text`,
@@ -93,7 +102,7 @@ class EventTranslator:
         if answer:
             self.outcome.tool = self.outcome.tool or "clarify"
             self.outcome.answer = answer
-            yield {"type": "status", "data": {"stage": "answer"}}
+            yield self._status("answer")
             yield {"type": "token", "data": {"text": answer}}
 
     def _for_tool(self, message: ToolMessage) -> Iterator[dict]:
@@ -101,23 +110,37 @@ class EventTranslator:
         if not result:
             return  # an unknown tool name or an exception escaping one carries no artifact
 
-        yield {"type": "status", "data": {"stage": "sql_guard"}}
+        yield self._status("sql_guard")
+        attempt = self.outcome.attempts[-1]
+        attempt.update(sql=result["sql"], what=result["what"], why=result["why"])
         if result.get("error"):
-            return  # rejected, so no SQL was run and the model will be asked to correct it
+            # Nothing was returned, and the model will be asked to correct it. Saying why is
+            # what makes a retry legible to whoever is reading the run afterwards.
+            attempt.update(rejected=True, reason=result["error"], at=result["at"])
+            yield {
+                "type": "rejected",
+                "data": {"sql": result["sql"], "reason": result["error"], "at": result["at"]},
+            }
+            return
 
         self.outcome.sql = result["sql"]
-        yield {"type": "sql", "data": {"sql": result["sql"]}}
-        yield {"type": "status", "data": {"stage": "db_exec"}}
-        yield from self._rows(result)
+        yield {
+            "type": "sql",
+            "data": {"sql": result["sql"], "what": result["what"], "why": result["why"]},
+        }
+        yield self._status("db_exec")
+        yield from self._rows(result, attempt)
 
-    def _rows(self, result: dict) -> Iterator[dict]:
+    def _rows(self, result: dict, attempt: dict) -> Iterator[dict]:
         self.outcome.rows = result["rows"]
+        attempt.update(rows=len(result["rows"]), truncated=result["truncated"], ms=result["ms"])
         yield {
             "type": "rows",
             "data": {
                 "columns": result["columns"],
                 "rows": result["rows"],
                 "truncated": result["truncated"],
+                "ms": result["ms"],
             },
         }
         # Emitted per tool call, so a second query supersedes the first exactly as `sql` and
@@ -353,6 +376,7 @@ def execute_run(
         answer=outcome.answer or None,
         rows_returned=len(outcome.rows),
         chart=outcome.chart,
+        trace={"stages": outcome.stages, "attempts": outcome.attempts},
         model=next(iter(usage.usage_metadata), None),
         prompt_tokens=sum(t.get("input_tokens", 0) for t in totals),
         completion_tokens=sum(t.get("output_tokens", 0) for t in totals),

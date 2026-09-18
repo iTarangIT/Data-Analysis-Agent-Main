@@ -82,6 +82,25 @@ class ChartSpec(BaseModel):
     y: list[str]
 
 
+class TraceAttempt(BaseModel):
+    """One pass at a query. `sql` is None when the model asked for a tool that ran no query."""
+
+    sql: str | None
+    rejected: bool
+    what: str = ""
+    why: str = ""
+    reason: str | None = None
+    at: Literal["guard", "database"] | None = None
+    rows: int | None = None
+    truncated: bool | None = None
+    ms: int | None = None
+
+
+class RunTrace(BaseModel):
+    stages: list[Literal["router", "sql_gen", "sql_guard", "db_exec", "answer"]]
+    attempts: list[TraceAttempt]
+
+
 class RunCreate(BaseModel):
     connection_id: str
     thread_id: str = Field(min_length=1, max_length=100)
@@ -106,6 +125,7 @@ class RunOut(BaseModel):
     completion_tokens: int
     rows_returned: int
     chart: ChartSpec | None
+    trace: RunTrace | None
     duration_ms: int
     created_at: datetime
 

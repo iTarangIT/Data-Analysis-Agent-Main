@@ -50,10 +50,10 @@ class FakeConnector:
         return self.columns, self.rows[:max_rows]
 
 
-def _tool_call(sql):
+def _tool_call(sql, **explained):
     return AIMessage(
         content="",
-        tool_calls=[{"name": "query_database", "args": {"sql": sql}, "id": "c1"}],
+        tool_calls=[{"name": "query_database", "args": {"sql": sql, **explained}, "id": "c1"}],
     )
 
 
@@ -165,6 +165,68 @@ class TestGuardRejection:
         assert len(connector.executed) == 1, "the refused statement reached the database"
         assert "DELETE" not in connector.executed[0].upper()
         assert outcome.answer == "Two."
+
+    def test_the_refusal_is_reported_with_its_sql_and_reason_and_no_new_stage(self):
+        model = FakeToolModel(
+            responses=[_tool_call("delete from vehicles"), AIMessage(content="No.")]
+        )
+        events, _ = _run(model, FakeConnector())
+
+        types = [e["type"] for e in events]
+        rejected = events[types.index("rejected")]
+        assert events[types.index("rejected") - 1]["data"] == {"stage": "sql_guard"}
+        assert rejected["data"]["sql"] == "delete from vehicles"
+        assert rejected["data"]["reason"] and rejected["data"]["at"] == "guard"
+        assert _stages(events) == ["router", "sql_gen", "sql_guard", "answer"]
+
+
+EXPLAINED = {"what": "Lists every vehicle.", "why": "You asked which vehicles there are."}
+
+
+class TestTrace:
+    """What a saved run shows of its steps. It must be what the stream said, or a run reloaded
+    from history would tell a different story from the one watched live."""
+
+    @pytest.fixture
+    def result(self):
+        model = FakeToolModel(
+            responses=[
+                _tool_call("delete from vehicles"),
+                _tool_call("select vehicleno from vehicles", **EXPLAINED),
+                AIMessage(content="Two."),
+            ]
+        )
+        return _run(model, FakeConnector())
+
+    def test_the_stages_are_exactly_the_ones_streamed(self, result):
+        events, outcome = result
+        assert outcome.stages == _stages(events)
+
+    def test_each_query_tried_is_kept_with_its_outcome_and_no_rows(self, result):
+        _, outcome = result
+        refused, answered = outcome.attempts
+
+        assert refused["rejected"] is True and refused["at"] == "guard"
+        assert refused["sql"] == "delete from vehicles" and refused["reason"]
+        assert answered["rejected"] is False
+        assert answered["what"] == "Lists every vehicle."
+        assert answered["why"] == "You asked which vehicles there are."
+        assert answered["rows"] == 2 and answered["truncated"] is False
+        assert isinstance(answered["ms"], int)
+        assert "columns" not in answered, "a trace keeps counts, never the result"
+
+    def test_the_sql_event_carries_the_explanation_and_rows_carry_the_time(self, result):
+        events, _ = result
+        sql = next(e for e in events if e["type"] == "sql")["data"]
+        rows = next(e for e in events if e["type"] == "rows")["data"]
+        assert sql["what"] == "Lists every vehicle." and sql["why"].startswith("You asked")
+        assert isinstance(rows["ms"], int)
+
+    def test_a_question_needing_no_query_tries_none(self):
+        model = FakeToolModel(responses=[AIMessage(content="I only answer data questions.")])
+        _, outcome = _run(model, FakeConnector())
+        assert outcome.stages == ["router", "answer"]
+        assert outcome.attempts == []
 
 
 class TestRecursionLimit:
