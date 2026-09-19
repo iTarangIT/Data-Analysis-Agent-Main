@@ -50,6 +50,16 @@ describe("WakingUp", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/health", expect.anything());
   });
 
+  it("admits it is taking too long rather than spinning in silence", async () => {
+    fetchMock.mockReturnValue(answer(false));
+    render(<WakingUp />);
+    await act(async () => {});
+    expect(screen.queryByText(/longer than usual/i)).toBeNull();
+
+    await act(async () => vi.advanceTimersByTimeAsync(180_000));
+    expect(screen.getByText(/longer than usual/i)).toBeTruthy();
+  });
+
   it("stops asking once it is gone", async () => {
     fetchMock.mockReturnValue(answer(false));
     const { unmount } = render(<WakingUp />);

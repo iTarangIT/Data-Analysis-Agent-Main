@@ -22,7 +22,17 @@ describe("GET /api/health", () => {
     agentFetch.mockResolvedValueOnce(new Response(null, { status: 200 }));
 
     expect((await GET()).status).toBe(200);
-    expect(agentFetch).toHaveBeenCalledWith("/health", expect.objectContaining({ timeoutMs: 10_000 }));
+  });
+
+  // A cold start takes a minute or more, and a check that gave up sooner was seen leaving the
+  // agent asleep.
+  it("waits long enough for the agent to finish waking", async () => {
+    agentFetch.mockResolvedValueOnce(new Response(null, { status: 200 }));
+
+    await GET();
+
+    const [, options] = agentFetch.mock.calls[0];
+    expect(options.timeoutMs).toBeGreaterThanOrEqual(90_000);
   });
 
   it("answers 503 while the agent is still waking", async () => {
