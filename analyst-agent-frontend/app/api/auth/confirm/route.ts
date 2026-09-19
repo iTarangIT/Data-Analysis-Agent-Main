@@ -2,6 +2,7 @@ import type { EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { whereToLand } from "@/lib/auth/landing";
+import { env } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -21,11 +22,11 @@ export async function GET(request: NextRequest) {
   const tokenHash = request.nextUrl.searchParams.get("token_hash");
   const type = request.nextUrl.searchParams.get("type") as EmailOtpType | null;
 
-  if (!tokenHash || !type || !CONFIRMATIONS.has(type)) return failed(request);
+  if (!tokenHash || !type || !CONFIRMATIONS.has(type)) return failed();
 
   const supabase = await createClient();
   const { data, error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
-  if (error || !data.session) return failed(request);
+  if (error || !data.session) return failed();
 
   const tenantName = data.user?.user_metadata?.tenant_name;
   const landing = await whereToLand({
@@ -33,9 +34,9 @@ export async function GET(request: NextRequest) {
     next: "/ask",
     tenantName: typeof tenantName === "string" ? tenantName : undefined,
   });
-  return NextResponse.redirect(new URL(landing, request.nextUrl));
+  return NextResponse.redirect(new URL(landing, env.APP_URL));
 }
 
-function failed(request: NextRequest) {
-  return NextResponse.redirect(new URL("/login?error=confirm", request.nextUrl));
+function failed() {
+  return NextResponse.redirect(new URL("/login?error=confirm", env.APP_URL));
 }

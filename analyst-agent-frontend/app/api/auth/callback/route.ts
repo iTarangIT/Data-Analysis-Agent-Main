@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { whereToLand } from "@/lib/auth/landing";
 import { safeNext } from "@/lib/auth/next";
+import { env } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -18,16 +19,16 @@ export async function GET(request: NextRequest) {
   const next = safeNext(params.get("next"));
 
   // Google reports a cancelled or refused consent as `error` rather than a code.
-  if (!code || params.has("error")) return failed(request);
+  if (!code || params.has("error")) return failed();
 
   const supabase = await createClient();
   const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-  if (error || !data.session) return failed(request);
+  if (error || !data.session) return failed();
 
   const landing = await whereToLand({ accessToken: data.session.access_token, next });
-  return NextResponse.redirect(new URL(landing, request.nextUrl));
+  return NextResponse.redirect(new URL(landing, env.APP_URL));
 }
 
-function failed(request: NextRequest) {
-  return NextResponse.redirect(new URL("/login?error=google", request.nextUrl));
+function failed() {
+  return NextResponse.redirect(new URL("/login?error=google", env.APP_URL));
 }

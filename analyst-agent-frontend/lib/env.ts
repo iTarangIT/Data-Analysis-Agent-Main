@@ -20,7 +20,9 @@ const schema = z.object({
   SUPABASE_URL: z.url(),
   SUPABASE_PUBLISHABLE_KEY: z.string().min(1),
   // Where this app is reached, for the links Supabase sends people back to after Google and
-  // after an email confirmation. Must be on the project's redirect allow list.
+  // after an email confirmation. Must be on the project's redirect allow list. Route handlers
+  // redirect against it too: behind a proxy such as Render's, `request.nextUrl` is the address
+  // Next listens on (http://localhost:10000), not the one the browser used.
   APP_URL: z.url().default("http://localhost:3000"),
 });
 
