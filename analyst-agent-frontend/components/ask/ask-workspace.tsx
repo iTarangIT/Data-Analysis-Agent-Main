@@ -2,7 +2,8 @@
 
 import { ChevronDown, Database } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
 import { mutate } from "swr";
 
 import { AgentOrb } from "@/components/ask/agent-orb";
@@ -55,10 +56,13 @@ import { cn } from "@/lib/utils";
 
 export function AskWorkspace({
   connections,
+  unreachable,
   threadId,
   history,
 }: {
   connections: Connection[];
+  /** The agent did not answer, so `connections` is empty for want of an answer, not of any. */
+  unreachable: boolean;
   threadId: string;
   history: RunSummary[];
 }) {
@@ -132,12 +136,14 @@ export function AskWorkspace({
     <div className="flex min-h-0 flex-1 flex-col bg-surface">
       <header className="flex h-14 shrink-0 items-center gap-1 px-2 sm:px-3">
         <SidebarTrigger />
-        <ConnectionPicker
-          connections={connections}
-          value={connectionId}
-          onChange={setConnectionId}
-          active={activeConnection}
-        />
+        {unreachable ? null : (
+          <ConnectionPicker
+            connections={connections}
+            value={connectionId}
+            onChange={setConnectionId}
+            active={activeConnection}
+          />
+        )}
       </header>
 
       <div
@@ -149,7 +155,11 @@ export function AskWorkspace({
       >
         <div ref={contentRef} className="mx-auto w-full max-w-3xl px-4 sm:px-6">
           {empty ? (
-            <Welcome connections={connections} active={activeConnection} />
+            <Welcome
+              connections={connections}
+              active={activeConnection}
+              unreachable={unreachable}
+            />
           ) : (
             <div className="flex flex-col gap-10 pt-4 pb-12">
               {past.map((run, i) => (
@@ -194,7 +204,9 @@ export function AskWorkspace({
             canSend={canSend}
             disabled={connections.length === 0 || needsTables}
             placeholder={
-              connections.length === 0
+              unreachable
+                ? "Waiting for the analyst service"
+                : connections.length === 0
                 ? "Connect a database before asking anything"
                 : needsTables
                   ? "Choose which tables the agent may read before asking"
@@ -346,15 +358,40 @@ function ConnectionPicker({
 function Welcome({
   connections,
   active,
+  unreachable,
 }: {
   connections: Connection[];
   active: Connection | null;
+  unreachable: boolean;
 }) {
+  const router = useRouter();
+  // A refresh re-runs the page's reads, which is the whole retry; the transition is only there
+  // to show it is in flight, because waking the agent can take most of a minute.
+  const [retrying, startRetry] = useTransition();
+
   return (
     <div className="flex flex-col items-center pb-8 text-center">
       <AgentOrb className="mb-6 size-16" />
 
-      {connections.length === 0 ? (
+      {unreachable ? (
+        <>
+          <h1 className="text-2xl font-semibold tracking-tight text-ink">
+            The analyst service didn&rsquo;t answer
+          </h1>
+          <p className="mt-2 max-w-[46ch] text-[0.9375rem] leading-relaxed text-ink-muted">
+            It may still be starting up, which can take up to a minute. Your connections are
+            safe.
+          </p>
+          <button
+            type="button"
+            disabled={retrying}
+            onClick={() => startRetry(() => router.refresh())}
+            className="mt-5 inline-block rounded-full bg-brand px-4 py-2 text-[0.875rem] font-medium text-brand-fg transition-colors hover:bg-brand-hover disabled:opacity-60"
+          >
+            {retrying ? "Trying again…" : "Try again"}
+          </button>
+        </>
+      ) : connections.length === 0 ? (
         <>
           <h1 className="text-2xl font-semibold tracking-tight text-ink">
             Connect a database to get started

@@ -24,11 +24,12 @@ export default async function AskPage({ searchParams }: PageProps<"/ask">) {
 
   // Read straight from the agent. Going through our own route handlers would add a round trip
   // between the handler and this render for nothing. Neither is load-bearing: an unreachable
-  // agent still renders the page, and the composer says why. The thread list is the sidebar's,
-  // read by the layout.
-  const [connections, history] = await Promise.all([
-    agentJson<Connection[]>("/connections", { token: session.accessToken }).catch(
-      (): Connection[] => [],
+  // agent still renders the page, which says so rather than showing an empty list that reads
+  // as "you have no connections". The thread list is the sidebar's, read by the layout.
+  const [{ connections, unreachable }, history] = await Promise.all([
+    agentJson<Connection[]>("/connections", { token: session.accessToken }).then(
+      (connections) => ({ connections, unreachable: false }),
+      () => ({ connections: [] as Connection[], unreachable: true }),
     ),
     continuing
       ? agentJson<RunPage>(
@@ -41,9 +42,11 @@ export default async function AskPage({ searchParams }: PageProps<"/ask">) {
   return (
     <AskWorkspace
       // Keyed on the thread, so opening another conversation starts from a clean transcript
-      // rather than carrying this sitting's turns into it.
-      key={threadId}
+      // rather than carrying this sitting's turns into it. And on whether the agent answered,
+      // so a retry that reaches it remounts and picks a connection from the ones it returned.
+      key={unreachable ? `${threadId}:unreachable` : threadId}
       connections={connections}
+      unreachable={unreachable}
       threadId={threadId}
       // The agent returns newest first; a transcript reads oldest first.
       history={[...history.items].reverse()}
