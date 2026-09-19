@@ -71,7 +71,7 @@ The browser never holds a token at all. It talks only to Next.js, which signs pe
 
 ## Commands
 
-Local development runs on **native Windows Postgres 16 — no Docker** (`DEVELOPMENT.md` §3 has the full setup and the one-time `psql` bootstrap). One server on `localhost:5432` holds three databases: `analyst` (App DB, Alembic), `checkpoints` (LangGraph), `demo` (seeded customer DB, read through the `analyst_ro` role). The manual's 5433/5434/5435 are Compose ports — ignore them locally. `docker-compose.dev.yml` stays in the repo for CI and the VPS; never assume it is running.
+Local development runs on **native Windows Postgres 16 — no Docker** (`DEVELOPMENT.md` §3 has the full setup and the one-time `psql` bootstrap). One server on `localhost:5432` holds three databases: `analyst` (App DB, Alembic), `checkpoints` (LangGraph), `demo` (seeded customer DB, read through the `analyst_ro` role). The manual's 5433/5434/5435 are Compose ports — ignore them locally. `docker-compose.dev.yml` stays in the repo for CI and the VPS; never assume it is running. The running app's App DB and Checkpoint DB are on Supabase since 2026-09-19 (the `analyst` and `checkpoints` schemas, `scripts/bootstrap_supabase.sql`); the test suite still uses the local two, because `tests/conftest.py` sets its own URLs.
 
 analyst-agent (PowerShell):
 ```powershell

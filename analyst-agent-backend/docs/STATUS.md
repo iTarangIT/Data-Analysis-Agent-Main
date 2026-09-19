@@ -1192,3 +1192,55 @@ Why and Means.
 |---|---|---|
 | 1 | A rule 6 pass rate for the two new tool arguments. `prompt_sha()` moves from `12f02ab9` to `29d546d4`; the cassettes on disk were already `de39cc3c`, so there is no baseline recording to compare with | reseeding `demo`, then model quota, as for the catalog prompts |
 | 2 | A guard rejection seen in the browser. Covered by the translator, reducer and panel tests; Gemini would not write a refused query on request | a question that makes the model write one |
+
+## App DB and Checkpoint DB moved to Supabase, 2026-09-19
+
+The running app now keeps both on the Supabase project it already signs people in with
+(`okifeathrijchctwrdpu`, pooler `aws-0-ap-southeast-2`), as two schemas of its `postgres`
+database rather than two databases: `analyst` owned by `analyst_app`, `checkpoints` owned by
+`analyst_ckpt`, each role's `search_path` set to its schema so no code changed. Set up by the
+`analyst_agent_schemas` migration, recorded as `scripts/bootstrap_supabase.sql`. Passwords were
+sent as SCRAM verifiers computed locally, so the plaintext exists only in `.env`.
+
+### Verified
+
+- `alembic upgrade head` ran all eight migrations into `analyst`; `PostgresSaver.setup()` made the
+  four checkpoint tables in `checkpoints`; the API's boot made `store` and `store_migrations`.
+  Nothing landed in `public`.
+- `anon`, `authenticated`, `service_role` and `authenticator` have no usage on either schema, and
+  the two roles cannot read each other's. The only security advisor finding is Auth's leaked
+  password protection, which predates this.
+- The MCP server and the API booted against it and `/health` answered `ok`. A tenant and user,
+  a checkpoint and a memory item were each written, read back and deleted through the app's
+  own code.
+
+### Not done
+
+| # | Item | Blocked on |
+|---|---|---|
+| 1 | Local data was not copied: the account, connections and run history are still only in the local `analyst` | a decision whether dev data belongs in what Render will use |
+| 2 | A question asked in the browser against Supabase | the developer signing in with Google |
+
+## Deployed to Render, 2026-09-19
+
+Two free web services in Oregon, both built from `main`:
+
+| Service | URL | Root | Start |
+|---|---|---|---|
+| backend | https://data-analysis-agent-main.onrender.com | `analyst-agent-backend` | the MCP server on 127.0.0.1:8001, then the API on `$PORT` once it answers |
+| frontend | https://data-analysis-agent-frontend-bly9.onrender.com | `analyst-agent-frontend` | `npm start` |
+
+The backend's build drops `pywin32` from `requirements.lock` before installing, because
+pip-compile on Windows pinned it without its `sys_platform` marker (`mcp` needs it only there),
+and ends with `alembic upgrade head`.
+
+- **Fixed:** the Google callback redirected to `http://localhost:10000/ask`. Behind Render's proxy
+  a route handler's `request.nextUrl` is the address Next listens on, so both auth route handlers
+  now redirect against `APP_URL`. Redirects from `proxy.ts` were never affected: Next makes a
+  middleware redirect to its own origin relative.
+- **Open:** Chrome shows "Dangerous site" on the frontend's `onrender.com` address. Google's
+  transparency report has no data on it; reported as a false positive. A custom domain is the
+  durable fix.
+- **Open:** on the free plan both services sleep after 15 idle minutes, and uploaded files live
+  on the backend's disk, so they are lost whenever it sleeps or redeploys. The IoT source is
+  unreachable from Render until it has a public address; its saved one is the local SSH tunnel.

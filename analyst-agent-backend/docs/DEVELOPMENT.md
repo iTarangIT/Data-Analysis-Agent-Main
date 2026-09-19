@@ -42,11 +42,14 @@ Docker is **not installed** on the dev machine and is not required until deploym
 | Checkpoint DB (LangGraph) | `checkpoints` | `ckpt` / `ckpt` | 5.4 |
 | Demo customer DB (seeded) | `demo` | `analyst_ro` / `ro` (read-only) | 5.5 |
 
-Local `.env` therefore uses port 5432 everywhere (the manual's 5433/5434/5435 are the Compose ports — ignore them locally):
+Since 2026-09-19 the running app keeps its App DB and Checkpoint DB on **Supabase** instead: the `analyst` and `checkpoints` schemas of the project's database, each owned by its own role (`analyst_app`, `analyst_ckpt`) whose `search_path` is that schema, reached through the session pooler because the direct host is IPv6 only. `scripts/bootstrap_supabase.sql` sets it up and says how to create the tables. Neither schema is exposed through the Data API. The demo customer database stays local, and so do `analyst` and `checkpoints` for the test suite: `tests/conftest.py` sets its own `APP_DB_URL` and `CHECKPOINT_DB_URL`, so `.env` pointing at Supabase never sends the integration suite's `DELETE FROM` there — unless those two are exported in your shell.
 
 ```
-APP_DB_URL=postgresql+psycopg://app:app@localhost:5432/analyst
-CHECKPOINT_DB_URL=postgresql://ckpt:ckpt@localhost:5432/checkpoints
+APP_DB_URL=postgresql+psycopg://analyst_app.<ref>:<pw>@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres?sslmode=require
+CHECKPOINT_DB_URL=postgresql://analyst_ckpt.<ref>:<pw>@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres?sslmode=require
+# local, and what the tests use (the manual's 5433/5434/5435 are the Compose ports — ignore them locally):
+# APP_DB_URL=postgresql+psycopg://app:app@localhost:5432/analyst
+# CHECKPOINT_DB_URL=postgresql://ckpt:ckpt@localhost:5432/checkpoints
 # demo connection DSN: postgresql+psycopg://analyst_ro:ro@localhost:5432/demo
 ```
 
