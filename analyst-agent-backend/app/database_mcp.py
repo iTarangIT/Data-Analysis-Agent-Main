@@ -21,7 +21,7 @@ from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, make_url, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -60,7 +60,8 @@ class CustomerDatabase:
     def __init__(self, dsn: str):
         s = get_settings()
         self.engine: Engine = create_engine(
-            dsn,
+            # `postgresql://` means psycopg2 to SQLAlchemy, and only psycopg is installed.
+            make_url(dsn).set(drivername="postgresql+psycopg"),
             pool_pre_ping=True,
             pool_size=2,
             max_overflow=2,
