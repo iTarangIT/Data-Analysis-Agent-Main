@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { AskWorkspace } from "@/components/ask/ask-workspace";
 import { agentJson } from "@/lib/api/agent-client";
+import { agentAwake } from "@/lib/api/agent-awake";
 import type { Connection, RunPage } from "@/lib/api/types";
 import { requireSession } from "@/lib/auth/dal";
 
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
 
 export default async function AskPage({ searchParams }: PageProps<"/ask">) {
   const session = await requireSession("/ask");
+  // The layout shows the agent waking; nothing here could load until it has.
+  if (!(await agentAwake())) return null;
   // searchParams is a promise in Next 16.
   const { thread } = await searchParams;
 

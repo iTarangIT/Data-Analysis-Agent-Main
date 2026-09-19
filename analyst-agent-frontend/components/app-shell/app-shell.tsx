@@ -1,7 +1,7 @@
-import type { Thread, User } from "@/lib/api/types";
+import type { Thread } from "@/lib/api/types";
 
 import { MobileBar } from "./mobile-bar";
-import { Sidebar } from "./sidebar";
+import { type Account, Sidebar } from "./sidebar";
 import { SidebarProvider } from "./sidebar-context";
 
 /**
@@ -29,7 +29,7 @@ export function AppShell({
   collapsed = false,
   children,
 }: {
-  user: User | null;
+  user: Account | null;
   threads?: Thread[];
   collapsed?: boolean;
   children: React.ReactNode;

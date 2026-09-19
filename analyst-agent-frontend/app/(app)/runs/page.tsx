@@ -1,5 +1,6 @@
 import { RunsView } from "@/components/runs/runs-view";
 import { agentJson } from "@/lib/api/agent-client";
+import { agentAwake } from "@/lib/api/agent-awake";
 import type { RunPage, Usage } from "@/lib/api/types";
 import { getCurrentUser, requireSession } from "@/lib/auth/dal";
 
@@ -15,6 +16,8 @@ const NO_USAGE: Usage = {
 
 export default async function RunsPage() {
   const session = await requireSession("/runs");
+  // The layout shows the agent waking; nothing here could load until it has.
+  if (!(await agentAwake())) return null;
   // Cached per request by the DAL, so asking again here costs nothing.
   const user = await getCurrentUser();
 

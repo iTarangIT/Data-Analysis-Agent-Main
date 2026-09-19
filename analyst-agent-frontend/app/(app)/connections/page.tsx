@@ -2,6 +2,7 @@ import { AlertTriangle } from "lucide-react";
 
 import { ConnectionsView } from "@/components/connections/connections-view";
 import { agentJson } from "@/lib/api/agent-client";
+import { agentAwake } from "@/lib/api/agent-awake";
 import type { Connection } from "@/lib/api/types";
 import { requireSession } from "@/lib/auth/dal";
 
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
 
 export default async function ConnectionsPage() {
   const session = await requireSession("/connections");
+  // The layout shows the agent waking; nothing here could load until it has.
+  if (!(await agentAwake())) return null;
 
   let connections: Connection[] = [];
   let unreachable = false;

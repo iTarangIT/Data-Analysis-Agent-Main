@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppShell } from "./app-shell";
@@ -27,5 +27,17 @@ describe("AppShell", () => {
     const root = container.firstElementChild;
     expect(root?.hasAttribute("data-app-shell")).toBe(true);
     expect(root?.className).toContain("h-dvh");
+  });
+
+  it("names the signed-in person even when only the sign-in knows who they are", () => {
+    render(
+      <AppShell user={{ name: null, email: "priya.shah@example.com", tenant_name: null }}>
+        {null}
+      </AppShell>,
+    );
+
+    expect(screen.getAllByText("priya.shah@example.com").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("PS").length).toBeGreaterThan(0);
+    expect(screen.queryByText("?")).toBeNull();
   });
 });

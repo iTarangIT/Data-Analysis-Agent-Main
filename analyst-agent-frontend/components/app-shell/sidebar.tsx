@@ -32,13 +32,19 @@ import { useSidebar } from "./sidebar-context";
 import { ThreadList } from "./thread-list";
 
 /**
+ * Who the account menu names: the agent's account when it answered, otherwise only what the
+ * sign-in itself says, so an agent that is asleep does not leave the menu reading "?".
+ */
+export type Account = Pick<User, "name" | "email"> & { tenant_name: string | null };
+
+/**
  * The one sidebar: new chat, the two other sections, every conversation, and the account.
  *
  * Three presentations of the same content. On desktop it is either the full column or, folded,
  * a rail of icons; below `md` it is a drawer over the page. The drawer closes itself when you
  * follow a link in it, because on a phone the page you asked for is underneath it.
  */
-export function Sidebar({ user, threads }: { user: User | null; threads: Thread[] }) {
+export function Sidebar({ user, threads }: { user: Account | null; threads: Thread[] }) {
   const { collapsed, toggleCollapsed, drawerOpen, setDrawerOpen } = useSidebar();
 
   return (
@@ -105,7 +111,7 @@ function Column({
   onClose,
   onNavigate,
 }: {
-  user: User | null;
+  user: Account | null;
   threads: Thread[];
   closeLabel: string;
   closeIcon: React.ReactNode;
@@ -166,7 +172,7 @@ function Column({
   );
 }
 
-function Rail({ user, onExpand }: { user: User | null; onExpand: () => void }) {
+function Rail({ user, onExpand }: { user: Account | null; onExpand: () => void }) {
   return (
     <div className="flex h-full flex-col items-center gap-1 py-2.5">
       <button
@@ -211,7 +217,7 @@ function Rail({ user, onExpand }: { user: User | null; onExpand: () => void }) {
  * the menu item only submits it. The form sits outside the menu because the menu's content is
  * portalled away and unmounted when it closes.
  */
-function AccountMenu({ user, compact = false }: { user: User | null; compact?: boolean }) {
+function AccountMenu({ user, compact = false }: { user: Account | null; compact?: boolean }) {
   const form = useRef<HTMLFormElement>(null);
   const name = user ? user.name?.trim() || user.email : "Account";
 
@@ -237,7 +243,7 @@ function AccountMenu({ user, compact = false }: { user: User | null; compact?: b
               <span className="block truncate text-[0.8125rem] leading-tight font-medium text-ink">
                 {name}
               </span>
-              {user ? (
+              {user?.tenant_name ? (
                 <span className="block truncate text-xs leading-tight text-ink-muted">
                   {user.tenant_name}
                 </span>
