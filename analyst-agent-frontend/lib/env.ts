@@ -14,6 +14,9 @@ import { z } from "zod";
  * silent leak.
  */
 const schema = z.object({
+  // One exception, and it carries no token: the waking panel is handed `${AGENT_API_URL}/health`
+  // so the browser can wake a sleeping agent, which the host will not do for this server's own
+  // requests. Everything else on the agent still needs a token the browser never holds.
   AGENT_API_URL: z.url(),
   // Applies to the JSON calls only. The run stream is long-lived and sets its own ceiling.
   AGENT_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),

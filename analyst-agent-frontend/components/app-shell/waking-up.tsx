@@ -10,19 +10,36 @@ const SLOW_AFTER_MS = 180_000;
 /**
  * Shown in place of a page while the agent wakes.
  *
- * It asks /api/health, which holds on until the agent answers, and reloads the route's data
- * once it does; the layout then renders the real page and this unmounts, which is what stops
- * the asking. A refresh that lands before the agent is fully up leaves this mounted, so it
- * keeps going rather than stopping at the first answer.
+ * The browser does the waking. Render starts a sleeping free service only for a request from
+ * outside Render, and this app's server is on Render: its checks were turned away in under a
+ * second, for minutes on end, while one request from outside woke the agent at once. So this
+ * sends the agent's /health a request of its own, opaque and unread, and keeps one in flight
+ * until the agent is up.
+ *
+ * Whether it is up comes from /api/health, which the host holds while the agent wakes. Once it
+ * answers, the route's data is reloaded; the layout then renders the real page and this
+ * unmounts, which is what stops the asking. A refresh that lands before the agent is fully up
+ * leaves this mounted, so it keeps going rather than stopping at the first answer.
  */
-export function WakingUp() {
+export function WakingUp({ wakeUrl }: { wakeUrl: string }) {
   const router = useRouter();
   const [slow, setSlow] = useState(false);
 
   useEffect(() => {
     let stopped = false;
+    let waking = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const slowTimer = setTimeout(() => setSlow(true), SLOW_AFTER_MS);
+
+    function wake() {
+      if (waking) return;
+      waking = true;
+      void fetch(wakeUrl, { mode: "no-cors", cache: "no-store" })
+        .catch(() => undefined)
+        .finally(() => {
+          waking = false;
+        });
+    }
 
     async function check() {
       const awake = await fetch("/api/health", { cache: "no-store" }).then(
@@ -31,17 +48,19 @@ export function WakingUp() {
       );
       if (stopped) return;
       if (awake) router.refresh();
+      else wake();
       // Longer after an answer, so the refresh has time to land before another is asked for.
       timer = setTimeout(check, awake ? 10_000 : 3_000);
     }
 
+    wake();
     void check();
     return () => {
       stopped = true;
       clearTimeout(timer);
       clearTimeout(slowTimer);
     };
-  }, [router]);
+  }, [router, wakeUrl]);
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center px-6 text-center">

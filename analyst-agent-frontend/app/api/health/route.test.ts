@@ -24,8 +24,7 @@ describe("GET /api/health", () => {
     expect((await GET()).status).toBe(200);
   });
 
-  // A cold start takes a minute or more, and a check that gave up sooner was seen leaving the
-  // agent asleep.
+  // Once the agent is waking the host holds this request until it is up, which took 58 s live.
   it("waits long enough for the agent to finish waking", async () => {
     agentFetch.mockResolvedValueOnce(new Response(null, { status: 200 }));
 

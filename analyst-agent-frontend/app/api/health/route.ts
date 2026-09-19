@@ -8,10 +8,10 @@ export const dynamic = "force-dynamic";
 /**
  * Whether the agent is awake, for the panel that waits while it wakes.
  *
- * Waits up to two minutes, because waking is what this request is for: the host holds a
- * request to a sleeping service while it starts, which takes a minute or more. With a ten-second
- * limit the panel was seen spinning while the agent stayed asleep, and a single request that
- * waited woke it in 72 seconds.
+ * Waits up to two minutes: once the agent is waking, the host holds requests to it until it is
+ * up, which takes a minute or more. This request does not start the wake - the host turns away
+ * a request from this server to a sleeping service at once - so the panel has the browser do
+ * that.
  */
 export async function GET() {
   const session = await getSession();

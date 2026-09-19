@@ -7,6 +7,7 @@ import { agentJson } from "@/lib/api/agent-client";
 import { agentAwake } from "@/lib/api/agent-awake";
 import type { Thread } from "@/lib/api/types";
 import { requireMember, requireSession } from "@/lib/auth/dal";
+import { env } from "@/lib/env";
 
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   // proxy.ts already redirected a signed-out navigation, but this is the gate that actually
@@ -23,7 +24,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   if (!awake) {
     return (
       <AppShell user={signedIn} collapsed={collapsed}>
-        <WakingUp />
+        <WakingUp wakeUrl={`${env.AGENT_API_URL}/health`} />
       </AppShell>
     );
   }
