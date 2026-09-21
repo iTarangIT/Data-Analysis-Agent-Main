@@ -1,17 +1,17 @@
+import hashlib
 import shutil
 import uuid
 from collections import Counter
-from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.connectors.duckdb import FileSource, ingest_upload
-from app.connectors.registry import file_sources
-from app.db.models import Connection, Tenant
+from app.db.models import Connection, DatasetFile, DatasetSource, Tenant
 from app.logging import log
 from app.security import vault
 from app.services import tables
@@ -87,6 +87,8 @@ def delete_connection(db: Session, tenant_id: str, connection_id: str) -> None:
     if conn.kind == "file":
         # Otherwise the customer's "deleted" spreadsheet stays readable on disk.
         shutil.rmtree(Path(get_settings().file_store_dir) / tenant_id / conn.id, ignore_errors=True)
+        db.execute(delete(DatasetFile).where(DatasetFile.connection_id == conn.id))
+        db.execute(delete(DatasetSource).where(DatasetSource.connection_id == conn.id))
 
     conn.deleted_at = datetime.now(UTC)
     conn.secret_enc = ""
@@ -95,35 +97,105 @@ def delete_connection(db: Session, tenant_id: str, connection_id: str) -> None:
     log.info("connection.deleted", connection_id=conn.id, kind=conn.kind)
 
 
+def file_counts(db: Session, connection_ids: list[str]) -> dict[str, int]:
+    return dict(
+        db.execute(
+            select(DatasetFile.connection_id, func.count())
+            .where(DatasetFile.connection_id.in_(connection_ids), DatasetFile.status == "ready")
+            .group_by(DatasetFile.connection_id)
+        )
+        .tuples()
+        .all()
+    )
+
+
+def _upload_source(db: Session, conn: Connection) -> DatasetSource:
+    return db.scalars(
+        select(DatasetSource).where(
+            DatasetSource.connection_id == conn.id, DatasetSource.origin == "upload"
+        )
+    ).one()
+
+
+def _store(tenant_id: str, connection_id: str, file_id: str, source: FileSource) -> dict:
+    path = Path(source.path)
+    with path.open("rb") as f:
+        digest = hashlib.file_digest(f, "sha256").hexdigest()
+    key = f"{tenant_id}/{connection_id}/{file_id}/{source.table}-{digest[:12]}.parquet"
+    stored = path.replace(Path(get_settings().file_store_dir) / key)
+    return {
+        "sheet": source.sheet,
+        "table": source.table,
+        "storage_key": key,
+        "sha256": digest,
+        "bytes": stored.stat().st_size,
+        "profile": source.profile,
+    }
+
+
+def _discard(tenant_id: str, connection_id: str, file: DatasetFile) -> None:
+    root = Path(get_settings().file_store_dir)
+    for part in file.parts:
+        (root / part["storage_key"]).unlink(missing_ok=True)
+    shutil.rmtree(root / tenant_id / connection_id / file.id, ignore_errors=True)
+
+
 def _ingest_batch(
-    tenant_id: str, connection_id: str, uploads: list[tuple[Path, str]], existing: list[dict]
-) -> list[dict]:
-    names = [s["file"] for s in existing] + [filename for _, filename in uploads]
+    tenant_id: str,
+    connection_id: str,
+    source_id: str,
+    uploads: list[tuple[Path, str]],
+    held: list[DatasetFile],
+) -> list[DatasetFile]:
+    names = [f.name for f in held if f.source_id == source_id and f.status != "failed"]
+    names += [filename for _, filename in uploads]
     repeated = sorted(name for name, count in Counter(names).items() if count > 1)
     if repeated:
         raise DomainError(f"a dataset cannot hold two files named {', '.join(repeated)}")
 
     settings = get_settings()
-    batch = Path(settings.file_store_dir) / tenant_id / connection_id / uuid.uuid4().hex
-    taken = {s["table"] for s in existing}
-    added: list[FileSource] = []
+    root = Path(settings.file_store_dir) / tenant_id / connection_id
+    taken = {part["table"] for f in held for part in f.parts}
+    staged: list[tuple[str, str, int, list[FileSource]]] = []
+    dirs: list[Path] = []
     try:
         for src, filename in uploads:
-            added += ingest_upload(src, batch, filename, taken)
-        sources = existing + [asdict(s) for s in added]
-        if sum(Path(s["path"]).stat().st_size for s in sources) > settings.max_dataset_bytes:
+            file_id = str(uuid.uuid4())
+            dirs.append(root / file_id)
+            sources = ingest_upload(src, root / file_id, filename, taken)
+            staged.append((file_id, filename, src.stat().st_size, sources))
+        held_bytes = sum(part["bytes"] for f in held for part in f.parts)
+        added = sum(Path(s.path).stat().st_size for *_, sources in staged for s in sources)
+        if held_bytes + added > settings.max_dataset_bytes:
             raise DomainError(
                 f"a dataset is limited to {settings.max_dataset_bytes} bytes once converted, "
                 "and these files would take it past that"
             )
     except DomainError:
-        shutil.rmtree(batch if existing else batch.parent, ignore_errors=True)
+        for path in dirs if held else [root]:
+            shutil.rmtree(path, ignore_errors=True)
         raise
     except Exception as e:
-        shutil.rmtree(batch if existing else batch.parent, ignore_errors=True)
+        for path in dirs if held else [root]:
+            shutil.rmtree(path, ignore_errors=True)
         log.warning("upload.ingest_failed", file=filename, error=str(e))
         raise DomainError(f"{filename} could not be read as a spreadsheet") from e
-    return sources
+
+    now = datetime.now(UTC)
+    return [
+        DatasetFile(
+            id=file_id,
+            source_id=source_id,
+            connection_id=connection_id,
+            remote_id=filename,
+            name=filename,
+            status="ready",
+            bytes=size,
+            parts=[_store(tenant_id, connection_id, file_id, s) for s in sources],
+            synced_at=now,
+        )
+        for file_id, filename, size, sources in staged
+    ]
 
 
 def create_file_connection(
@@ -138,15 +210,28 @@ def create_file_connection(
     """
     ensure_tenant(db, tenant_id)
     connection_id = str(uuid.uuid4())
-    sources = _ingest_batch(tenant_id, connection_id, uploads, [])
+    source_id = str(uuid.uuid4())
+    uploaded = _ingest_batch(tenant_id, connection_id, source_id, uploads, [])
     conn = Connection(
         id=connection_id,
         tenant_id=tenant_id,
         name=name,
         kind="file",
-        secret_enc=vault.encrypt({"sources": sources}),
+        secret_enc=vault.encrypt({}),
     )
     db.add(conn)
+    db.flush()
+    db.add(
+        DatasetSource(
+            id=source_id,
+            connection_id=connection_id,
+            origin="upload",
+            label="Uploads",
+            status="active",
+        )
+    )
+    db.flush()
+    db.add_all(uploaded)
     db.commit()
     db.refresh(conn)
     tables.ensure_listed(db, conn)
@@ -157,9 +242,17 @@ def add_files(db: Session, conn: Connection, uploads: list[tuple[Path, str]]) ->
     if conn.kind != "file":
         raise DomainError("only an uploaded dataset holds files")
     db.refresh(conn, with_for_update=True)
-    sources = _ingest_batch(conn.tenant_id, conn.id, uploads, file_sources(conn))
-    conn.secret_enc = vault.encrypt({"sources": sources})
+    source = _upload_source(db, conn)
+    held = list(conn.files)
+    uploaded = _ingest_batch(conn.tenant_id, conn.id, source.id, uploads, held)
+    names = {f.name for f in uploaded}
+    for f in held:
+        if f.source_id == source.id and f.status == "failed" and f.name in names:
+            db.delete(f)
+    db.flush()
+    db.add_all(uploaded)
     db.commit()
+    db.expire(conn, ["files"])
     return tables.refresh(db, conn)
 
 
@@ -167,18 +260,15 @@ def remove_file(db: Session, conn: Connection, filename: str) -> dict[str, Any]:
     if conn.kind != "file":
         raise DomainError("only an uploaded dataset holds files")
     db.refresh(conn, with_for_update=True)
-    sources = file_sources(conn)
-    kept = [s for s in sources if s["file"] != filename]
-    if len(kept) == len(sources):
+    source = _upload_source(db, conn)
+    held = list(conn.files)
+    found = next((f for f in held if f.source_id == source.id and f.remote_id == filename), None)
+    if found is None:
         raise NotFound(f"this dataset has no file named {filename}")
-    if not kept:
+    if found.status == "ready" and sum(f.status == "ready" for f in held) == 1:
         raise DomainError("a dataset needs at least one file - delete the connection instead")
-    conn.secret_enc = vault.encrypt({"sources": kept})
+    db.delete(found)
     db.commit()
-
-    removed = [Path(s["path"]) for s in sources if s["file"] == filename]
-    for path in removed:
-        path.unlink(missing_ok=True)
-    for batch in {p.parent for p in removed} - {Path(s["path"]).parent for s in kept}:
-        batch.rmdir()
+    db.expire(conn, ["files"])
+    _discard(conn.tenant_id, conn.id, found)
     return tables.refresh(db, conn)

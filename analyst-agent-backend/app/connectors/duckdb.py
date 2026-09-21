@@ -38,6 +38,7 @@ class FileSource:
     file: str
     origin: str
     profile: dict[str, Any]
+    sheet: str = ""
 
 
 def _slug(name: str) -> str:
@@ -173,9 +174,16 @@ def ingest_upload(src: Path, dest_dir: Path, filename: str, taken: set[str]) -> 
             path = dest_dir / f"{table}.parquet"
             # Written through DuckDB rather than pandas.to_parquet, which needs pyarrow.
             con.from_df(frame).write_parquet(str(path))
+            described = con.execute("DESCRIBE SELECT * FROM read_parquet(?)", [str(path)])
+            profile["types"] = {name: type_ for name, type_, *_ in described.fetchall()}
             sources.append(
                 FileSource(
-                    table=table, path=str(path), file=filename, origin="upload", profile=profile
+                    table=table,
+                    path=str(path),
+                    file=filename,
+                    origin="upload",
+                    profile=profile,
+                    sheet=sheet,
                 )
             )
     finally:

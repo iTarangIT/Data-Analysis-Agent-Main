@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -38,7 +40,7 @@ class Tenant(Base):
 
 
 class Connection(Base):
-    """A customer data source. `secret_enc` holds the Fernet-encrypted DSN or file sources."""
+    """A customer data source. `secret_enc` holds the Fernet-encrypted DSN."""
 
     __tablename__ = "connections"
 
@@ -56,8 +58,57 @@ class Connection(Base):
     # Soft delete, because runs reference this row and they are the ledger we price from.
     # Deleting also blanks secret_enc, so a deleted connection holds no customer credential.
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sync_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tenant: Mapped[Tenant] = relationship(back_populates="connections")
+    files: Mapped[list["DatasetFile"]] = relationship(order_by="DatasetFile.name", viewonly=True)
+
+
+class DatasetSource(Base):
+    __tablename__ = "dataset_sources"
+    __table_args__ = (
+        Index(
+            "uq_dataset_sources_upload",
+            "connection_id",
+            unique=True,
+            postgresql_where=text("origin = 'upload'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    connection_id: Mapped[str] = mapped_column(ForeignKey("connections.id"), index=True)
+    origin: Mapped[str] = mapped_column(String(20))
+    remote_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    resource_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    label: Mapped[str] = mapped_column(String(500))
+    rules: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    combine: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    seen_folders: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DatasetFile(Base):
+    __tablename__ = "dataset_files"
+    __table_args__ = (
+        UniqueConstraint("source_id", "remote_id", name="uq_dataset_files_source_id_remote_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    source_id: Mapped[str] = mapped_column(ForeignKey("dataset_sources.id"))
+    connection_id: Mapped[str] = mapped_column(ForeignKey("connections.id"), index=True)
+    remote_id: Mapped[str] = mapped_column(String(1000))
+    name: Mapped[str] = mapped_column(String(1000))
+    mime: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    remote_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    status: Mapped[str] = mapped_column(String(20))
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    parts: Mapped[list] = mapped_column(JSON, default=list)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    source: Mapped[DatasetSource] = relationship(lazy="joined")
 
 
 class ConnectionTable(Base):

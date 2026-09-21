@@ -66,11 +66,28 @@ def _tables(client, token: str, connection_id: str) -> dict[str, dict]:
 
 
 def _sources(db, connection_id: str) -> list[dict]:
-    from app.db.models import Connection
-    from app.security import vault
+    from sqlalchemy import select
+
+    from app.config import get_settings
+    from app.db.models import DatasetFile
 
     db.expire_all()
-    return vault.decrypt(db.get(Connection, connection_id).secret_enc)["sources"]
+    root = Path(get_settings().file_store_dir)
+    files = db.scalars(
+        select(DatasetFile)
+        .where(DatasetFile.connection_id == connection_id)
+        .order_by(DatasetFile.name)
+    ).all()
+    return [
+        {
+            "file": f.name,
+            "origin": f.source.origin,
+            "table": part["table"],
+            "path": str(root / part["storage_key"]),
+        }
+        for f in files
+        for part in f.parts
+    ]
 
 
 def _ask(client, token: str, connection_id: str, sql: str, thread_id: str):
@@ -173,6 +190,12 @@ class TestUpload:
     def test_another_tenant_cannot_see_it(self, client, other_token, connection_id):
         assert client.get("/connections", headers=_auth(other_token)).json() == []
 
+    def test_the_secret_holds_no_file_list(self, connection_id, clean_app_db):
+        from app.db.models import Connection
+        from app.security import vault
+
+        assert vault.decrypt(clean_app_db.get(Connection, connection_id).secret_enc) == {}
+
 
 class TestDataset:
     def test_several_files_in_one_request_make_one_connection(
@@ -224,6 +247,36 @@ class TestDataset:
         assert r.status_code == 400
         assert "Q3 sales.csv" in r.json()["error"]
         assert sorted(connection_dir.iterdir()) == before
+
+    def test_a_lost_file_can_be_uploaded_again(self, client, token, connection_id, clean_app_db):
+        from sqlalchemy import select
+
+        from app.db.models import DatasetFile, DatasetSource
+
+        source = clean_app_db.scalars(
+            select(DatasetSource).where(DatasetSource.connection_id == connection_id)
+        ).one()
+        clean_app_db.add(
+            DatasetFile(
+                source_id=source.id,
+                connection_id=connection_id,
+                remote_id="dealers.csv",
+                name="dealers.csv",
+                status="failed",
+                reason="file lost, re-upload it",
+                parts=[],
+            )
+        )
+        clean_app_db.commit()
+
+        r = _add(client, token, connection_id, ("dealers.csv", DEALERS.encode()))
+
+        assert r.status_code == 200, r.text
+        assert "dealers" in {t["name"] for t in r.json()["tables"]}
+        clean_app_db.expire_all()
+        assert clean_app_db.scalars(
+            select(DatasetFile.status).where(DatasetFile.name == "dealers.csv")
+        ).all() == ["ready"]
 
     def test_removing_a_file_takes_its_tables_away(self, client, token, clean_app_db, uploads_dir):
         connection_id = _upload(

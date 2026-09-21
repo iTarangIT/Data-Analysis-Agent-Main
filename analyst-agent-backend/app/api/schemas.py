@@ -43,6 +43,8 @@ class ConnectionOut(BaseModel):
     total_tables: int
     file_count: int
     catalog_refreshed_at: datetime | None
+    sync_status: str | None
+    synced_at: datetime | None
 
 
 class TableOut(BaseModel):

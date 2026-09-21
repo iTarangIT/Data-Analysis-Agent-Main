@@ -49,6 +49,8 @@ class TestConnectionOut:
             "total_tables",
             "file_count",
             "catalog_refreshed_at",
+            "sync_status",
+            "synced_at",
         }
         assert not fields & {"secret", "secret_enc", "dsn", "password"}
 
@@ -61,6 +63,8 @@ class TestConnectionOut:
                 selected_tables=1,
                 total_tables=1,
                 catalog_refreshed_at=None,
+                sync_status=None,
+                synced_at=None,
             )
 
 

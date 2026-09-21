@@ -19,7 +19,6 @@ from app.api.schemas import (
     TablesRefreshOut,
 )
 from app.config import get_settings
-from app.connectors.registry import file_sources
 from app.db.models import Connection
 from app.db.session import get_db
 from app.security.auth import TenantContext
@@ -31,7 +30,7 @@ router = APIRouter()
 Uploads = Annotated[list[UploadFile], File(min_length=1, max_length=MAX_UPLOAD_FILES)]
 
 
-def _out(c: Connection, counts: dict[str, tuple[int, int]]) -> ConnectionOut:
+def _out(c: Connection, counts: dict[str, tuple[int, int]], files: dict[str, int]) -> ConnectionOut:
     selected, total = counts.get(c.id, (0, 0))
     return ConnectionOut(
         id=c.id,
@@ -39,8 +38,10 @@ def _out(c: Connection, counts: dict[str, tuple[int, int]]) -> ConnectionOut:
         kind=c.kind,
         selected_tables=selected,
         total_tables=total,
-        file_count=len({s["file"] for s in file_sources(c)}) if c.kind == "file" else 0,
+        file_count=files.get(c.id, 0),
         catalog_refreshed_at=c.catalog_refreshed_at,
+        sync_status=c.sync_status,
+        synced_at=c.synced_at,
     )
 
 
@@ -80,7 +81,7 @@ def create(
     db: Session = Depends(get_db),
 ) -> ConnectionOut:
     conn = svc.create_connection(db, ctx.tenant_id, body.name, body.kind, body.secret)
-    return _out(conn, tables_svc.counts(db, [conn.id]))
+    return _out(conn, tables_svc.counts(db, [conn.id]), svc.file_counts(db, [conn.id]))
 
 
 @router.get("", response_model=list[ConnectionOut])
@@ -88,8 +89,9 @@ def list_(
     ctx: TenantContext = Depends(current_tenant), db: Session = Depends(get_db)
 ) -> list[ConnectionOut]:
     connections = svc.list_connections(db, ctx.tenant_id)
-    counts = tables_svc.counts(db, [c.id for c in connections])
-    return [_out(c, counts) for c in connections]
+    ids = [c.id for c in connections]
+    counts, files = tables_svc.counts(db, ids), svc.file_counts(db, ids)
+    return [_out(c, counts, files) for c in connections]
 
 
 @router.post("/file", response_model=ConnectionOut, status_code=201)
@@ -102,7 +104,7 @@ def create_from_file(
 
     with _staged(files) as uploads:
         conn = svc.create_file_connection(db, ctx.tenant_id, name, uploads)
-    return _out(conn, tables_svc.counts(db, [conn.id]))
+    return _out(conn, tables_svc.counts(db, [conn.id]), svc.file_counts(db, [conn.id]))
 
 
 @router.post("/{connection_id}/files", response_model=TablesOut)

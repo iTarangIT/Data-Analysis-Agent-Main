@@ -23,6 +23,8 @@ def clean_app_db():
         db.execute(text("DELETE FROM users"))
         db.execute(text("DELETE FROM runs"))
         db.execute(text("DELETE FROM connection_tables"))
+        db.execute(text("DELETE FROM dataset_files"))
+        db.execute(text("DELETE FROM dataset_sources"))
         db.execute(text("DELETE FROM connections"))
         db.execute(text("DELETE FROM tenants"))
         db.commit()
