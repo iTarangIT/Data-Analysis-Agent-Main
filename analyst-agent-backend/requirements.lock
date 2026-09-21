@@ -38,7 +38,10 @@ certifi==2026.7.22
 cffi==2.1.1
     # via cryptography
 charset-normalizer==3.5.1
-    # via requests
+    # via
+    #   pdfminer-six
+    #   reportlab
+    #   requests
 click==8.5.0
     # via
     #   arq
@@ -54,6 +57,7 @@ cryptography==50.0.1
     # via
     #   analyst-agent (pyproject.toml)
     #   google-auth
+    #   pdfminer-six
     #   pyjwt
     #   python-jose
 distro==1.9.0
@@ -193,6 +197,14 @@ pandas==3.0.5
     # via analyst-agent (pyproject.toml)
 pathspec==1.1.1
     # via mypy
+pdfminer-six==20260107
+    # via pdfplumber
+pdfplumber==0.11.10
+    # via analyst-agent (pyproject.toml)
+pillow==12.3.0
+    # via
+    #   pdfplumber
+    #   reportlab
 pip-tools==7.6.1
     # via analyst-agent (pyproject.toml)
 pluggy==1.6.0
@@ -243,6 +255,8 @@ pyjwt[crypto]==2.13.0
     #   analyst-agent (pyproject.toml)
     #   mcp
     #   redis
+pypdfium2==5.13.0
+    # via pdfplumber
 pyproject-hooks==1.2.0
     # via
     #   build
@@ -285,6 +299,8 @@ referencing==0.37.0
     # via
     #   jsonschema
     #   jsonschema-specifications
+reportlab==5.0.1
+    # via analyst-agent (pyproject.toml)
 requests==2.34.2
     # via
     #   google-auth

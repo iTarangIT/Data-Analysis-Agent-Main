@@ -1,0 +1,23 @@
+# Golden questions for a PDF source, run against evals/fixtures/statement.pdf: a bank statement
+# whose one table runs across three pages, with Indian-format amounts and Dr/Cr balances.
+#
+#   $env:CONN="<a file connection id>"
+#   python evals/run_evals.py --cases golden_pdf.yaml       # live
+#
+# Register the connection first by uploading the fixture:
+#   curl -X POST localhost:8000/connections/file -H "Authorization: Bearer $env:TOKEN" `
+#        -F name="statement" -F files=@evals/fixtures/statement.pdf
+#
+# Tie-free: Invoice 89 carries the largest amount, 90,23,456.50, against Invoice 87's 88,23,456.50.
+
+- q: How many transactions does the statement list?
+  expect_value: 110
+
+- q: What is the total of all the amounts in the statement?
+  expect_value: 222397607.5
+
+- q: Which invoice has the largest amount?
+  expect_contains: Invoice 89
+
+- q: How many transactions have a debit balance?
+  expect_value: 74

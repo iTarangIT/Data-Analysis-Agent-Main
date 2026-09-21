@@ -44,6 +44,62 @@ def client():
     return TestClient(app)
 
 
+STATEMENT_HEADER = ["Date", "Particulars", "Amount", "Balance"]
+
+
+def _statement_rows(count: int) -> list[list[str]]:
+    return [
+        [
+            f"{day % 28 + 1:02d}/07/2026",
+            f"Invoice {day}",
+            f"{day % 90 + 1},23,456.50" if day % 2 else f"Rs. {day},500.00",
+            f"{day * 100:,}.00 {'Dr' if day % 3 else 'Cr'}",
+        ]
+        for day in range(1, count + 1)
+    ]
+
+
+@pytest.fixture
+def statement_pdf(tmp_path):
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+
+    path = tmp_path / "statement.pdf"
+    table = Table([STATEMENT_HEADER, *_statement_rows(110)], repeatRows=1)
+    table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, colors.black)]))
+    SimpleDocTemplate(str(path), pagesize=A4).build([table])
+    return path
+
+
+@pytest.fixture
+def narrative_pdf(tmp_path):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate
+
+    path = tmp_path / "notes.pdf"
+    body = getSampleStyleSheet()["BodyText"]
+    story = [Paragraph(f"Dealer {i} sold more cells this month than last.", body) for i in range(8)]
+    story += [PageBreak(), Paragraph("Stock is low at the Pune warehouse.", body)]
+    SimpleDocTemplate(str(path), pagesize=A4).build(story)
+    return path
+
+
+@pytest.fixture
+def scanned_pdf(tmp_path):
+    from PIL import Image
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas
+
+    path = tmp_path / "scan.pdf"
+    page = canvas.Canvas(str(path))
+    page.drawImage(ImageReader(Image.new("RGB", (400, 200), "white")), 72, 500)
+    page.showPage()
+    page.save()
+    return path
+
+
 class FakeStorage:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}

@@ -39,6 +39,8 @@ dependencies = [
     # python-jose cannot fetch or select by `kid`. jose stays for the MCP server's own tokens.
     "pyjwt[crypto]>=2.10",
     "httpx>=0.27",
+    # MIT, where PyMuPDF is AGPL.
+    "pdfplumber>=0.11",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +55,8 @@ dev = [
     "pip-tools>=7",
     # scripts/supabase_token.py reads .env the way the service does.
     "python-dotenv>=1.0",
+    # Builds the PDF fixtures the tests read.
+    "reportlab>=4",
 ]
 
 [tool.setuptools.packages.find]

@@ -220,6 +220,16 @@ class TestDataset:
             "stock": (["stock.csv"], True),
         }
 
+    def test_a_pdf_statement_becomes_a_table(
+        self, client, token, clean_app_db, uploads_dir, statement_pdf
+    ):
+        r = _upload(client, token, "Bank", ("statement.pdf", statement_pdf.read_bytes()))
+
+        assert r.status_code == 201, r.text
+        tables = _tables(client, token, r.json()["id"])
+        assert {name: t["files"] for name, t in tables.items()} == {"statement": ["statement.pdf"]}
+        assert tables["statement"]["definition"]["comment"].startswith("From statement.pdf")
+
     def test_added_files_arrive_unselected(self, client, token, connection_id):
         r = _add(
             client,

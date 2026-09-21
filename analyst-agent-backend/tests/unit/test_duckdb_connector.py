@@ -18,6 +18,7 @@ from app.connectors.duckdb import (
     _numbers,
     ingest_upload,
 )
+from app.connectors.sandbox import Sandbox
 from app.services.errors import DomainError
 
 CSV = "region,product,units,revenue_inr\nWest,Cell,10,2500.50\nEast,Pack,4,1800.00\n"
@@ -287,6 +288,76 @@ class TestNumbers:
 
         assert _types(sources)["amount"] == "DOUBLE"
         assert rows == [(122456.0,)]
+
+
+class TestPdf:
+    def test_a_table_across_three_pages_is_one_table(self, statement_pdf, tmp_path):
+        (source,) = ingest_upload(statement_pdf, tmp_path / "out", "statement.pdf", set())
+
+        _, rows = DuckDBConnector("t_a", [source]).run_select(
+            "select count(*), count(*) filter (where particulars = 'Particulars') from statement",
+            1,
+        )
+
+        assert source.table == "statement"
+        assert rows == [(110, 0)]
+        assert source.profile["comment"] == "From statement.pdf, pages 1\N{EN DASH}3"
+
+    def test_indian_amounts_and_dr_cr_balances_are_numbers(self, statement_pdf, tmp_path):
+        (source,) = ingest_upload(statement_pdf, tmp_path / "out", "statement.pdf", set())
+
+        _, rows = DuckDBConnector("t_a", [source]).run_select(
+            "select amount, balance from statement where particulars in ('Invoice 1', "
+            "'Invoice 2', 'Invoice 3') order by particulars",
+            3,
+        )
+
+        assert rows == [(223456.5, -100.0), (2500.0, -200.0), (423456.5, 300.0)]
+
+    def test_the_provenance_reaches_the_model_as_the_table_comment(self, statement_pdf, tmp_path):
+        sources = ingest_upload(statement_pdf, tmp_path / "out", "statement.pdf", set())
+
+        (table,) = _dataset(sources).read_tables(["statement"])
+
+        assert table.comment == "From statement.pdf, pages 1\N{EN DASH}3"
+
+    def test_a_pdf_of_text_alone_becomes_a_table_of_chunks(self, narrative_pdf, tmp_path):
+        (source,) = ingest_upload(narrative_pdf, tmp_path / "out", "notes.pdf", set())
+
+        _, rows = DuckDBConnector("t_a", [source]).run_select(
+            "select page, chunk, text from notes__text order by page, chunk", 10
+        )
+
+        assert source.table == "notes__text"
+        assert [(page, chunk) for page, chunk, _ in rows] == [(1, 1), (2, 1)]
+        assert "Pune warehouse" in rows[1][2]
+        assert source.profile["comment"] == "From notes.pdf, pages 1\N{EN DASH}2"
+
+    def test_a_scanned_pdf_is_refused(self, scanned_pdf, tmp_path):
+        with pytest.raises(
+            DomainError, match=r"scan\.pdf is a scanned PDF; scanned PDFs aren't supported yet"
+        ):
+            ingest_upload(scanned_pdf, tmp_path / "out", "scan.pdf", set())
+
+    def test_a_pdf_past_the_page_limit_is_refused(self, statement_pdf, tmp_path, monkeypatch):
+        from app.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "max_pdf_pages", 2, raising=False)
+
+        with pytest.raises(DomainError, match=r"statement\.pdf has 3 pages"):
+            ingest_upload(statement_pdf, tmp_path / "out", "statement.pdf", set())
+
+    def test_a_parse_that_runs_too_long_is_stopped(self, statement_pdf, tmp_path, monkeypatch):
+        from app.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "ingest_timeout_s", 0.01, raising=False)
+
+        with (
+            Sandbox() as sandbox,
+            pytest.raises(DomainError, match=r"statement\.pdf took too long to read"),
+        ):
+            name = "statement.pdf"
+            sandbox.run(name, ingest_upload, statement_pdf, tmp_path / "out", name, set())
 
 
 class TestSchema:

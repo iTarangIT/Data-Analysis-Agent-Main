@@ -8,7 +8,7 @@ from app.catalog.types import Relationship, TableDef
 # A file connection is never created from a client-supplied body: `kind="file"` there would
 # let any tenant register a path of their choosing, which no SQL guard could catch, because
 # the path is inside the connector long before any SQL exists. Uploads go to /connections/file.
-UPLOAD_SUFFIXES = {".csv", ".tsv", ".xlsx", ".parquet"}
+UPLOAD_SUFFIXES = {".csv", ".tsv", ".xlsx", ".parquet", ".pdf"}
 MAX_UPLOAD_FILES = 20
 
 REQUIRED_SECRET_FIELDS: dict[str, set[str]] = {

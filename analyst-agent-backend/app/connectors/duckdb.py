@@ -13,9 +13,11 @@ from typing import Any
 
 import duckdb
 import pandas as pd
+import pdfplumber
 from pandas.tseries.api import guess_datetime_format
 
 from app.catalog.types import Column, TableDef
+from app.config import get_settings
 from app.connectors import storage
 from app.connectors.pg_stats import row_bucket, row_magnitude
 from app.services.errors import DomainError
@@ -36,6 +38,7 @@ AMOUNT = re.compile(
     r"\s*(\))?\s*(dr|cr)?\.?$",
     re.IGNORECASE,
 )
+CHUNK_CHARS = 1500
 
 
 @dataclass(frozen=True)
@@ -173,21 +176,107 @@ def _harden(frame: pd.DataFrame, header_row: int) -> tuple[pd.DataFrame, dict[st
     return frame, profile
 
 
+def _cell(value: str | None) -> str | None:
+    return " ".join(value.split()) or None if value else None
+
+
+def _pages(filename: str, first: int, last: int) -> str:
+    if first == last:
+        return f"From {filename}, page {first}"
+    return f"From {filename}, pages {first}\u2013{last}"
+
+
+def _chunks(text: str) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+    for paragraph in re.split(r"\n\s*\n", text.strip()):
+        for piece in [paragraph] if len(paragraph) <= CHUNK_CHARS else paragraph.splitlines():
+            if current and len(current) + len(piece) + 1 > CHUNK_CHARS:
+                chunks.append(current)
+                current = piece
+            else:
+                current = f"{current}\n{piece}" if current else piece
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _pdf(src: Path, filename: str) -> dict[str, tuple[int, pd.DataFrame, str | None]]:
+    limit = get_settings().max_pdf_pages
+    found: list[list[Any]] = []
+    texts: list[tuple[int, str]] = []
+    chars = images = 0
+    with pdfplumber.open(src) as pdf:
+        if len(pdf.pages) > limit:
+            raise DomainError(f"{filename} has {len(pdf.pages)} pages; a PDF is limited to {limit}")
+        for number, page in enumerate(pdf.pages, start=1):
+            chars += len(page.chars)
+            images += len(page.images)
+            for index, table in enumerate(page.extract_tables()):
+                rows = [[_cell(value) for value in row] for row in table]
+                previous = found[-1] if found else None
+                if (
+                    index == 0
+                    and previous is not None
+                    and previous[1] == number - 1
+                    and len(rows[0]) == len(previous[2][0])
+                ):
+                    previous[2].extend(rows[1:] if rows[0] == previous[2][0] else rows)
+                    previous[1] = number
+                else:
+                    found.append([number, number, rows])
+            texts.append((number, page.extract_text() or ""))
+            page.close()
+    if not chars and images:
+        raise DomainError(f"{filename} is a scanned PDF; scanned PDFs aren't supported yet")
+
+    frames: dict[str, tuple[int, pd.DataFrame, str | None]] = {}
+    for first, last, rows in found:
+        header = _header_row(pd.DataFrame(rows[:10]))
+        columns = [name or f"Unnamed: {i}" for i, name in enumerate(rows[header])]
+        key = _unique(f"p{first}", set(frames))
+        frames[key] = (
+            header,
+            pd.DataFrame(rows[header + 1 :], columns=columns),
+            _pages(filename, first, last),
+        )
+    if frames:
+        return frames
+
+    chunks = [
+        (number, index, chunk)
+        for number, text in texts
+        for index, chunk in enumerate(_chunks(text), start=1)
+    ]
+    if not chunks:
+        return {}
+    pages = [number for number, _, _ in chunks]
+    return {
+        "text": (
+            0,
+            pd.DataFrame(chunks, columns=["page", "chunk", "text"]),
+            _pages(filename, min(pages), max(pages)),
+        )
+    }
+
+
 def _read(
-    con: duckdb.DuckDBPyConnection, src: Path, suffix: str
-) -> dict[str, tuple[int, pd.DataFrame]]:
+    con: duckdb.DuckDBPyConnection, src: Path, suffix: str, filename: str
+) -> dict[str, tuple[int, pd.DataFrame, str | None]]:
+    if suffix == ".pdf":
+        return _pdf(src, filename)
     if suffix == ".xlsx":
-        frames: dict[str, tuple[int, pd.DataFrame]] = {}
+        frames: dict[str, tuple[int, pd.DataFrame, str | None]] = {}
         with pd.ExcelFile(src) as book:
             for sheet in book.sheet_names:
                 header = _header_row(book.parse(sheet, header=None, nrows=10))
-                frames[str(sheet)] = (header, book.parse(sheet, header=header))
+                frames[str(sheet)] = (header, book.parse(sheet, header=header), None)
         return frames
     if suffix == ".parquet":
-        return {"": (0, con.read_parquet(str(src)).df())}
+        return {"": (0, con.read_parquet(str(src)).df(), None)}
     [(sep,)] = con.execute("SELECT Delimiter FROM sniff_csv(?)", [str(src)]).fetchall()
     header = _header_row(pd.read_csv(src, sep=sep, header=None, nrows=10))
-    return {"": (header, pd.read_csv(src, sep=sep, header=header))}
+    return {"": (header, pd.read_csv(src, sep=sep, header=header), None)}
 
 
 def ingest_upload(src: Path, dest_dir: Path, filename: str, taken: set[str]) -> list[FileSource]:
@@ -208,15 +297,18 @@ def ingest_upload(src: Path, dest_dir: Path, filename: str, taken: set[str]) -> 
     con = duckdb.connect()
     try:
         tables: dict[str, tuple[pd.DataFrame, dict[str, Any]]] = {}
-        for sheet, (header_row, raw) in _read(con, src, suffix).items():
+        for sheet, (header_row, raw, comment) in _read(con, src, suffix, filename).items():
             if raw.empty:
                 continue
             frame, profile = _harden(raw, header_row)
+            if comment:
+                profile["comment"] = comment
             if not frame.empty:
                 tables[sheet] = (frame, profile)
 
         for sheet, (frame, profile) in tables.items():
-            table = _unique(_slug(f"{stem}__{sheet}" if len(tables) > 1 else stem), taken)
+            suffixed = len(tables) > 1 or (suffix == ".pdf" and sheet == "text")
+            table = _unique(_slug(f"{stem}__{sheet}" if suffixed else stem), taken)
             taken.add(table)
             path = dest_dir / f"{table}.parquet"
             # Written through DuckDB rather than pandas.to_parquet, which needs pyarrow.
@@ -254,13 +346,16 @@ class Dataset:
     def read_tables(self, names: list[str]) -> list[TableDef]:
         wanted = set(names)
         types: dict[str, dict[str, list[str]]] = {}
+        comments: dict[str, str | None] = {}
         for part in self.parts:
             if part.table in wanted:
+                comments.setdefault(part.table, part.profile.get("comment"))
                 for column, type_ in part.profile["types"].items():
                     types.setdefault(part.table, {}).setdefault(column, []).append(type_)
         return [
             TableDef(
                 name=table,
+                comment=comments[table],
                 columns=[Column(name=name, type=_column_type(t)) for name, t in columns.items()],
             )
             for table, columns in sorted(types.items())

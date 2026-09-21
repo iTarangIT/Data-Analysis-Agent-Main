@@ -107,6 +107,7 @@ class Settings(BaseSettings):
     storage_bucket: str = "datasets"
     ingest_timeout_s: int = 90
     ingest_memory_mb: int = 2048
+    max_pdf_pages: int = 150
     # Bounds resident memory per concurrent run, because an upload is materialised in full.
     max_upload_bytes: int = 25 * 1024 * 1024
     max_dataset_bytes: int = 100 * 1024 * 1024
