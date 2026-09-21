@@ -65,7 +65,9 @@ How the tables join:
 Queries run under a short statement timeout. Constrain time columns, filter by entity where
 the question names one, and prefer summary tables over raw readings."""
 
-QUERY_TOOL_SQL_ARG = "One PostgreSQL SELECT statement. No prose, no code fences."
+QUERY_TOOL_SQL_ARG = "One {dialect} SELECT statement. No prose, no code fences."
+
+DIALECTS = {"postgres": "PostgreSQL", "duckdb": "DuckDB"}
 
 QUERY_TOOL_WHAT_ARG = """One short sentence, in the past tense, for someone who has never seen
 SQL: what this query looked up in their data, e.g. "Counted your dealers and listed their names."

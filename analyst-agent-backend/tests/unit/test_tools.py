@@ -73,6 +73,16 @@ class TestToolContract:
     def test_it_declares_the_sql_and_its_plain_explanation(self, tool):
         assert set(tool.args_schema.model_fields) == {"sql", "what", "why"}
 
+    @pytest.mark.parametrize("dialect,name", [("postgres", "PostgreSQL"), ("duckdb", "DuckDB")])
+    def test_the_sql_argument_names_the_connectors_dialect(self, connector, dialect, name):
+        connector.dialect = dialect
+
+        schema = make_query_tool(connector, CATALOG).tool_call_schema.model_json_schema()
+
+        assert schema["properties"]["sql"]["description"] == (
+            f"One {name} SELECT statement. No prose, no code fences."
+        )
+
     def test_only_the_sql_is_required_so_a_missing_explanation_costs_no_turn(self, tool):
         assert tool.tool_call_schema.model_json_schema()["required"] == ["sql"]
 

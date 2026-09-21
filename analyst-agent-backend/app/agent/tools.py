@@ -4,12 +4,13 @@ from typing import Any
 
 from langchain.tools import ToolRuntime, tool
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from app.agent import memory
 from app.agent.context import RunContext
 from app.agent.nodes.sql_guard import validate_sql
 from app.agent.prompts import (
+    DIALECTS,
     QUERY_TOOL_DESC,
     QUERY_TOOL_SQL_ARG,
     QUERY_TOOL_WHAT_ARG,
@@ -31,14 +32,6 @@ REMEMBER_TOOL_NAME = "remember"
 PREVIEW_ROWS = 50
 
 
-class QueryDatabaseArgs(BaseModel):
-    sql: str = Field(description=QUERY_TOOL_SQL_ARG)
-    # Defaulted, so a model that leaves them out loses a line of explanation rather than a turn
-    # to a validation error.
-    what: str = Field(default="", description=QUERY_TOOL_WHAT_ARG)
-    why: str = Field(default="", description=QUERY_TOOL_WHY_ARG)
-
-
 class RememberArgs(BaseModel):
     term: str = Field(description=REMEMBER_TERM_ARG)
     definition: str = Field(description=REMEMBER_DEFINITION_ARG)
@@ -48,13 +41,22 @@ def make_query_tool(connector: SqlConnector, catalog: Catalog) -> BaseTool:
     # The catalog holds only the tables a person chose, so it is the allowlist as well as the
     # description: a table left out is one the model is neither told about nor allowed to query.
     allowed = catalog.table_names
+    dialect = DIALECTS[connector.dialect]
+    args = create_model(
+        "QueryDatabaseArgs",
+        sql=(str, Field(description=QUERY_TOOL_SQL_ARG.format(dialect=dialect))),
+        # Defaulted, so a model that leaves them out loses a line of explanation rather than a turn
+        # to a validation error.
+        what=(str, Field(default="", description=QUERY_TOOL_WHAT_ARG)),
+        why=(str, Field(default="", description=QUERY_TOOL_WHY_ARG)),
+    )
 
     @tool(
         TOOL_NAME,
         description=QUERY_TOOL_DESC.format(
             tables=render_tables(catalog), relationships=render_relationships(catalog)
         ),
-        args_schema=QueryDatabaseArgs,
+        args_schema=args,
         response_format="content_and_artifact",
     )
     def query_database(
