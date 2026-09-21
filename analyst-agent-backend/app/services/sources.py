@@ -4,9 +4,12 @@ from googleapiclient.errors import HttpError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
+from app.connectors import storage
 from app.connectors.gdrive import SHORTCUT, Drive, kind_of, parse_link, reason
 from app.db.models import Connection, DatasetFile, DatasetSource, User
 from app.logging import log
+from app.services import sync, tables
 from app.services.errors import DomainError, Forbidden, NotFound, SourceUnavailable
 
 NEEDS_SHARE = {
@@ -91,10 +94,11 @@ def _listing(folder_id: str, nodes: list[dict[str, Any]]) -> dict[str, Any]:
 
 def tree(db: Session, conn: Connection, source_id: str, folder_id: str | None) -> dict[str, Any]:
     source = source_of(db, conn, source_id)
+    root = sync.root_of(source)
     drive = drive_for(conn, source)
     if source.origin == "gsheet":
         try:
-            tabs = drive.sheet_tabs(source.remote_id)
+            tabs = drive.sheet_tabs(root)
         except HttpError as e:
             raise unreachable(e) from e
         nodes = [
@@ -108,14 +112,14 @@ def tree(db: Session, conn: Connection, source_id: str, folder_id: str | None) -
             }
             for tab in tabs
         ]
-        return _listing(source.remote_id, nodes)
+        return _listing(root, nodes)
     if source.origin != "gdrive_folder":
         raise DomainError("only a folder or a sheet can be browsed")
 
-    folder = folder_id or source.remote_id
+    folder = folder_id or root
     db.refresh(source, with_for_update=True)
     seen = list(source.seen_folders or [])
-    if folder != source.remote_id and folder not in seen:
+    if folder != root and folder not in seen:
         raise NotFound("that folder is not part of this source")
     try:
         nodes = [_node(item) for item in drive.children([folder])]
@@ -126,6 +130,84 @@ def tree(db: Session, conn: Connection, source_id: str, folder_id: str | None) -
     ]
     db.commit()
     return _listing(folder, nodes)
+
+
+def _check(source: DatasetSource, rules: list[dict[str, Any]], dry_run: bool) -> None:
+    if source.origin == "upload":
+        raise DomainError("uploaded files are chosen by uploading them")
+    if not rules and not dry_run:
+        raise DomainError("choose at least one folder, file or tab")
+    kinds = {"gdrive_folder": {"folder", "file"}, "gsheet": {"sheet"}, "gdrive_file": {"file"}}
+    if any(rule["kind"] not in kinds[source.origin] for rule in rules) or (
+        source.origin == "gdrive_file" and any(r["id"] != source.remote_id for r in rules)
+    ):
+        raise DomainError("those choices do not fit this source")
+    known = {source.remote_id, *(source.seen_folders or [])}
+    if any(rule["kind"] == "folder" and rule["id"] not in known for rule in rules):
+        raise NotFound("that folder is not part of this source")
+
+
+def choose(
+    db: Session,
+    conn: Connection,
+    source_id: str,
+    rules: list[dict[str, Any]],
+    combine: bool,
+    dry_run: bool,
+) -> dict[str, Any]:
+    source = source_of(db, conn, source_id)
+    _check(source, rules, dry_run)
+    if not dry_run:
+        source.rules, source.combine, source.status = rules, combine, "active"
+        db.commit()
+        return view(source, [f for f in conn.files if f.source_id == source.id])
+
+    try:
+        found, skipped = sync.walk(drive_for(conn, source), source, rules)
+    except HttpError as e:
+        raise unreachable(e) from e
+    size = sum(int(item.get("size") or 0) for item in found)
+    held = sum(part["bytes"] for f in conn.files if f.source_id != source.id for part in f.parts)
+    limit = get_settings().max_dataset_bytes
+    return {
+        "files": len(found),
+        "bytes": size,
+        "skipped": skipped,
+        "fits": held + size <= limit,
+        "limit": limit,
+    }
+
+
+def overview(db: Session, conn: Connection) -> dict[str, Any]:
+    sources = db.scalars(
+        select(DatasetSource)
+        .where(DatasetSource.connection_id == dataset(conn).id)
+        .order_by(DatasetSource.created_at)
+    ).all()
+    files: dict[str, list[DatasetFile]] = {}
+    for f in conn.files:
+        files.setdefault(f.source_id, []).append(f)
+    return {
+        "sync_status": conn.sync_status,
+        "synced_at": conn.synced_at,
+        "sources": [view(source, files.get(source.id, [])) for source in sources],
+    }
+
+
+def remove(db: Session, conn: Connection, source_id: str) -> dict[str, Any]:
+    source = source_of(db, conn, source_id)
+    if source.origin == "upload":
+        raise DomainError("uploaded files are removed one at a time")
+    files = [f for f in conn.files if f.source_id == source.id]
+    for f in files:
+        db.delete(f)
+    db.flush()
+    db.delete(source)
+    db.commit()
+    storage.delete([part for f in files for part in f.parts])
+    db.expire(conn, ["files"])
+    tables.refresh(db, conn)
+    return overview(db, conn)
 
 
 def _shared_by_member(db: Session, tenant_id: str, email: str | None) -> bool:

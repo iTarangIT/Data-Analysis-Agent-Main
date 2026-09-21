@@ -16,8 +16,12 @@ from app.api.schemas import (
     ConnectionOut,
     DatasetCreate,
     DriveListing,
+    DryRunOut,
     GoogleLink,
     ResolveOut,
+    SourceOut,
+    SourceRules,
+    SourcesOut,
     TableSelection,
     TablesOut,
     TablesRefreshOut,
@@ -145,6 +149,42 @@ def google_tree(
 ) -> DriveListing:
     conn = svc.get_connection(db, ctx.tenant_id, connection_id)
     return DriveListing.model_validate(sources_svc.tree(db, conn, source_id, folder_id))
+
+
+@router.post("/{connection_id}/sources", response_model=SourceOut | DryRunOut)
+def choose_source(
+    connection_id: str,
+    body: SourceRules,
+    ctx: TenantContext = Depends(current_tenant),
+    db: Session = Depends(get_db),
+) -> SourceOut | DryRunOut:
+    conn = svc.get_connection(db, ctx.tenant_id, connection_id)
+    rules = [rule.model_dump() for rule in body.rules]
+    chosen = sources_svc.choose(db, conn, body.source_id, rules, body.combine, body.dry_run)
+    if body.dry_run:
+        return DryRunOut.model_validate(chosen)
+    return SourceOut.model_validate(chosen)
+
+
+@router.get("/{connection_id}/sources", response_model=SourcesOut)
+def list_sources(
+    connection_id: str,
+    ctx: TenantContext = Depends(current_tenant),
+    db: Session = Depends(get_db),
+) -> SourcesOut:
+    conn = svc.get_connection(db, ctx.tenant_id, connection_id)
+    return SourcesOut.model_validate(sources_svc.overview(db, conn))
+
+
+@router.delete("/{connection_id}/sources/{source_id}", response_model=SourcesOut)
+def remove_source(
+    connection_id: str,
+    source_id: str,
+    ctx: TenantContext = Depends(current_tenant),
+    db: Session = Depends(get_db),
+) -> SourcesOut:
+    conn = svc.get_connection(db, ctx.tenant_id, connection_id)
+    return SourcesOut.model_validate(sources_svc.remove(db, conn, source_id))
 
 
 @router.post("/{connection_id}/files", response_model=TablesOut)
