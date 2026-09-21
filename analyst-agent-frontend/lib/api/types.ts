@@ -78,6 +78,66 @@ export type TablesRefresh = ConnectionTables & {
   removed: string[];
 };
 
+export type Rule = {
+  id: string;
+  kind: "folder" | "file" | "sheet";
+  recursive: boolean;
+};
+
+export type SourceFile = {
+  id: string;
+  name: string;
+  status: "ready" | "skipped" | "failed";
+  reason: string | null;
+  tables: string[];
+};
+
+export type DatasetSource = {
+  id: string;
+  origin: "upload" | "gdrive_folder" | "gdrive_file" | "gsheet";
+  label: string;
+  status: "pending" | "active";
+  combine: boolean;
+  rules: Rule[];
+  files: SourceFile[];
+};
+
+export type DatasetSources = {
+  sync_status: Connection["sync_status"];
+  synced_at: string | null;
+  sources: DatasetSource[];
+};
+
+export type ResolveResult = {
+  status: "needs_share" | "unverified" | "resolved";
+  share_with: string | null;
+  source: DatasetSource | null;
+};
+
+export type DriveNode = {
+  id: string;
+  name: string;
+  kind: "folder" | "sheet" | "xlsx" | "csv" | "tsv" | "pdf" | "other";
+  supported: boolean;
+  bytes: number | null;
+};
+
+export type DriveListing = {
+  folder_id: string;
+  children: DriveNode[];
+  supported: number;
+  unsupported: number;
+  bytes: number;
+};
+
+export type DryRun = {
+  files: number;
+  bytes: number;
+  skipped: { name: string; reason: string }[];
+  fits: boolean;
+  limit: number;
+};
+
 export type User = {
   id: string;
   email: string;

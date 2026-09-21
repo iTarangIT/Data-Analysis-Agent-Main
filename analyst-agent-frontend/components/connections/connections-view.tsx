@@ -1,19 +1,23 @@
 "use client";
 
-import { Database, FileSpreadsheet, Plus } from "lucide-react";
+import { Cloud, Database, FileSpreadsheet, Plus } from "lucide-react";
 import { useState } from "react";
 
 import { ConnectionForm } from "@/components/connections/connection-form";
 import { ConnectionList } from "@/components/connections/connection-list";
 import { DatasetForm } from "@/components/connections/dataset-form";
+import { GoogleSource } from "@/components/connections/google-source";
 import { Eyebrow } from "@/components/panel";
 import { Button } from "@/components/ui/button";
-import type { Connection, ConnectionKind } from "@/lib/api/types";
+import type { Connection } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
-const SOURCES: { kind: ConnectionKind; label: string; icon: React.ReactNode }[] = [
+type SourceKind = "postgres" | "file" | "google";
+
+const SOURCES: { kind: SourceKind; label: string; icon: React.ReactNode }[] = [
   { kind: "postgres", label: "Database", icon: <Database aria-hidden className="size-4" strokeWidth={1.75} /> },
-  { kind: "file", label: "Spreadsheets", icon: <FileSpreadsheet aria-hidden className="size-4" strokeWidth={1.75} /> },
+  { kind: "file", label: "Files", icon: <FileSpreadsheet aria-hidden className="size-4" strokeWidth={1.75} /> },
+  { kind: "google", label: "Google Drive / Sheets", icon: <Cloud aria-hidden className="size-4" strokeWidth={1.75} /> },
 ];
 
 /**
@@ -24,9 +28,15 @@ const SOURCES: { kind: ConnectionKind; label: string; icon: React.ReactNode }[] 
  * like a preamble to it. Still not a dialog -- it opens in place, below the grid, like the
  * delete confirmation does inside a card.
  */
-export function ConnectionsView({ connections }: { connections: Connection[] }) {
+export function ConnectionsView({
+  connections,
+  isOwner,
+}: {
+  connections: Connection[];
+  isOwner: boolean;
+}) {
   const [adding, setAdding] = useState(connections.length === 0);
-  const [kind, setKind] = useState<ConnectionKind>("postgres");
+  const [kind, setKind] = useState<SourceKind>("postgres");
   const close = connections.length === 0 ? undefined : () => setAdding(false);
 
   return (
@@ -87,7 +97,13 @@ export function ConnectionsView({ connections }: { connections: Connection[] }) 
               </button>
             ))}
           </div>
-          {kind === "file" ? <DatasetForm onCancel={close} /> : <ConnectionForm onCancel={close} />}
+          {kind === "file" ? (
+            <DatasetForm onCancel={close} />
+          ) : kind === "google" ? (
+            <GoogleSource onCancel={close} isOwner={isOwner} />
+          ) : (
+            <ConnectionForm onCancel={close} />
+          )}
         </div>
       ) : null}
     </div>

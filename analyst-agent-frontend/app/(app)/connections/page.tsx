@@ -4,7 +4,7 @@ import { ConnectionsView } from "@/components/connections/connections-view";
 import { agentJson } from "@/lib/api/agent-client";
 import { agentAwake } from "@/lib/api/agent-awake";
 import type { Connection } from "@/lib/api/types";
-import { requireSession } from "@/lib/auth/dal";
+import { getCurrentUser, requireSession } from "@/lib/auth/dal";
 
 export const metadata = { title: "Connections" };
 export const dynamic = "force-dynamic";
@@ -21,6 +21,7 @@ export default async function ConnectionsPage() {
   } catch {
     unreachable = true;
   }
+  const user = await getCurrentUser();
 
   return (
     <main className="flex-1 overflow-y-auto">
@@ -40,7 +41,7 @@ export default async function ConnectionsPage() {
           </p>
         ) : null}
 
-        <ConnectionsView connections={connections} />
+        <ConnectionsView connections={connections} isOwner={user?.role === "owner"} />
       </div>
     </main>
   );
