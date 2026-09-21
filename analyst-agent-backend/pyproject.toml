@@ -101,4 +101,7 @@ disallow_untyped_defs = false
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q --cov=app --cov-report=term-missing"
-markers = ["integration: needs the local analyst, checkpoints and demo databases"]
+markers = [
+    "integration: needs the local analyst, checkpoints and demo databases",
+    "google: reads the real Drive folder GOOGLE_TEST_FOLDER_ID through GOOGLE_SERVICE_ACCOUNT_JSON",
+]
