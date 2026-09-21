@@ -147,3 +147,73 @@ class TestResolving:
 
         assert r.status_code == 400
         assert r.json()["error"] == "Google sources aren't configured"
+
+
+CSV_MIME = "text/csv"
+
+
+@pytest.fixture
+def folder_source(client, token, dataset_id, drive, clean_app_db) -> str:
+    drive.add(ROOT, "Sales 2025", FOLDER, sharer=_member_email(clean_app_db))
+    drive.add("1QuarterOneFolderId", "Q1", FOLDER, parent=ROOT)
+    drive.add("1JanuaryCsvFileId000", "Jan.csv", CSV_MIME, parent=ROOT, content=b"a,b\n1,2\n")
+    drive.add("1NotesDocumentFileId", "Notes.docx", "application/msword", parent=ROOT, content=b"x")
+    drive.add("1DeepFileInQuarterOne", "Feb.csv", CSV_MIME, parent="1QuarterOneFolderId")
+    return _resolve(client, token, dataset_id, FOLDER_LINK).json()["source"]["id"]
+
+
+def _tree(client, token, dataset_id: str, source_id: str, folder_id: str | None = None):
+    params = {"source_id": source_id} | ({"folder_id": folder_id} if folder_id else {})
+    return client.get(f"/connections/{dataset_id}/google/tree", headers=_auth(token), params=params)
+
+
+class TestBrowsing:
+    def test_the_root_lists_its_own_children_with_counts(
+        self, client, token, dataset_id, folder_source
+    ):
+        r = _tree(client, token, dataset_id, folder_source)
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert [(n["name"], n["kind"], n["supported"]) for n in body["children"]] == [
+            ("Q1", "folder", True),
+            ("Jan.csv", "csv", True),
+            ("Notes.docx", "other", False),
+        ]
+        assert (body["supported"], body["unsupported"], body["bytes"]) == (2, 1, 9)
+
+    def test_a_folder_it_has_not_listed_is_refused(
+        self, client, token, dataset_id, folder_source, drive
+    ):
+        drive.add("1SomeoneElsesFolder00", "Payroll", FOLDER)
+
+        r = _tree(client, token, dataset_id, folder_source, "1SomeoneElsesFolder00")
+
+        assert r.status_code == 404
+        assert ("children", "1SomeoneElsesFolder00") not in drive.calls
+
+    def test_a_folder_seen_in_a_listing_can_be_opened(
+        self, client, token, dataset_id, folder_source
+    ):
+        _tree(client, token, dataset_id, folder_source)
+
+        r = _tree(client, token, dataset_id, folder_source, "1QuarterOneFolderId")
+
+        assert r.status_code == 200, r.text
+        assert [n["name"] for n in r.json()["children"]] == ["Feb.csv"]
+
+    def test_a_sheet_source_lists_its_tabs(self, client, token, dataset_id, drive, clean_app_db):
+        drive.add(SHEET_ID, "Monthly targets", SHEET, sharer=_member_email(clean_app_db))
+        drive.tabs[SHEET_ID] = [
+            {"sheetId": 0, "title": "January", "sheetType": "GRID"},
+            {"sheetId": 7, "title": "Chart", "sheetType": "OBJECT"},
+        ]
+        link = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
+        source_id = _resolve(client, token, dataset_id, link).json()["source"]["id"]
+
+        r = _tree(client, token, dataset_id, source_id)
+
+        assert [(n["id"], n["kind"], n["supported"]) for n in r.json()["children"]] == [
+            ("7", "sheet", False),
+            ("0", "sheet", True),
+        ]

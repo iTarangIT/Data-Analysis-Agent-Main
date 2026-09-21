@@ -60,6 +60,74 @@ def view(source: DatasetSource, files: list[DatasetFile]) -> dict[str, Any]:
     }
 
 
+def drive_for(conn: Connection, source: DatasetSource) -> Drive:
+    if source.remote_id and source.resource_key:
+        return Drive(conn.tenant_id, {source.remote_id: source.resource_key})
+    return Drive(conn.tenant_id)
+
+
+def _node(item: dict[str, Any]) -> dict[str, Any]:
+    kind = kind_of(item)
+    return {
+        "id": item["id"],
+        "name": item["name"],
+        "kind": kind,
+        "supported": kind != "other",
+        "bytes": int(item["size"]) if "size" in item else None,
+        "modified": item.get("modifiedTime"),
+    }
+
+
+def _listing(folder_id: str, nodes: list[dict[str, Any]]) -> dict[str, Any]:
+    nodes.sort(key=lambda node: (node["kind"] != "folder", node["name"].lower()))
+    return {
+        "folder_id": folder_id,
+        "children": nodes,
+        "supported": sum(node["supported"] for node in nodes),
+        "unsupported": sum(not node["supported"] for node in nodes),
+        "bytes": sum(node["bytes"] or 0 for node in nodes if node["kind"] != "folder"),
+    }
+
+
+def tree(db: Session, conn: Connection, source_id: str, folder_id: str | None) -> dict[str, Any]:
+    source = source_of(db, conn, source_id)
+    drive = drive_for(conn, source)
+    if source.origin == "gsheet":
+        try:
+            tabs = drive.sheet_tabs(source.remote_id)
+        except HttpError as e:
+            raise unreachable(e) from e
+        nodes = [
+            {
+                "id": str(tab["sheetId"]),
+                "name": tab["title"],
+                "kind": "sheet",
+                "supported": tab.get("sheetType", "GRID") == "GRID",
+                "bytes": None,
+                "modified": None,
+            }
+            for tab in tabs
+        ]
+        return _listing(source.remote_id, nodes)
+    if source.origin != "gdrive_folder":
+        raise DomainError("only a folder or a sheet can be browsed")
+
+    folder = folder_id or source.remote_id
+    db.refresh(source, with_for_update=True)
+    seen = list(source.seen_folders or [])
+    if folder != source.remote_id and folder not in seen:
+        raise NotFound("that folder is not part of this source")
+    try:
+        nodes = [_node(item) for item in drive.children([folder])]
+    except HttpError as e:
+        raise unreachable(e) from e
+    source.seen_folders = seen + [
+        node["id"] for node in nodes if node["kind"] == "folder" and node["id"] not in seen
+    ]
+    db.commit()
+    return _listing(folder, nodes)
+
+
 def _shared_by_member(db: Session, tenant_id: str, email: str | None) -> bool:
     if email is None:
         return False

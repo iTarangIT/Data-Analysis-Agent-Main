@@ -15,6 +15,7 @@ from app.api.schemas import (
     ConnectionCreate,
     ConnectionOut,
     DatasetCreate,
+    DriveListing,
     GoogleLink,
     ResolveOut,
     TableSelection,
@@ -132,6 +133,18 @@ def resolve_google_link(
     return ResolveOut.model_validate(
         sources_svc.resolve(db, conn, ctx.user_id, body.url, body.confirm_unverified)
     )
+
+
+@router.get("/{connection_id}/google/tree", response_model=DriveListing)
+def google_tree(
+    connection_id: str,
+    source_id: str,
+    folder_id: str | None = None,
+    ctx: TenantContext = Depends(current_tenant),
+    db: Session = Depends(get_db),
+) -> DriveListing:
+    conn = svc.get_connection(db, ctx.tenant_id, connection_id)
+    return DriveListing.model_validate(sources_svc.tree(db, conn, source_id, folder_id))
 
 
 @router.post("/{connection_id}/files", response_model=TablesOut)
