@@ -91,3 +91,101 @@ def mcp_in_process(monkeypatch):
         return as_wire(tools[tool](**args))
 
     monkeypatch.setattr(mcp_client, "call", call)
+
+
+def http_error(status: int, reason: str):
+    import json
+
+    import httplib2
+    from googleapiclient.errors import HttpError
+
+    body = {"error": {"code": status, "message": reason, "errors": [{"reason": reason}]}}
+    return HttpError(httplib2.Response({"status": status}), json.dumps(body).encode())
+
+
+class FakeDrive:
+    email = "reader@analyst-test.iam.gserviceaccount.com"
+
+    def __init__(self) -> None:
+        self.items: dict[str, dict] = {}
+        self.content: dict[str, bytes] = {}
+        self.tabs: dict[str, list[dict]] = {}
+        self.values: dict[str, dict[str, list[list]]] = {}
+        self.too_big_to_export: set[str] = set()
+        self.calls: list[tuple[str, str]] = []
+        self.keys: dict[str, str] = {}
+
+    def __call__(self, tenant_id: str, keys: dict[str, str] | None = None) -> "FakeDrive":
+        self.keys = dict(keys or {})
+        return self
+
+    def add(
+        self,
+        item_id: str,
+        name: str,
+        mime: str,
+        parent: str | None = None,
+        content: bytes = b"",
+        sharer: str | None = None,
+        version: str = "v1",
+    ) -> dict:
+        item = {
+            "id": item_id,
+            "name": name,
+            "mimeType": mime,
+            "parents": [parent] if parent else [],
+            "size": str(len(content)),
+            "modifiedTime": f"2026-09-{version}",
+            "capabilities": {"canDownload": True},
+        }
+        if not mime.startswith("application/vnd.google-apps"):
+            item["md5Checksum"] = f"md5-{version}"
+        if sharer:
+            item["sharingUser"] = {"emailAddress": sharer}
+        self.items[item_id] = item
+        self.content[item_id] = content
+        return item
+
+    def get(self, file_id: str) -> dict:
+        self.calls.append(("get", file_id))
+        if file_id not in self.items:
+            raise http_error(404, "notFound")
+        return self.items[file_id]
+
+    def get_many(self, ids: list[str]) -> dict[str, dict]:
+        self.calls.append(("get_many", ",".join(ids)))
+        return {i: self.items[i] for i in ids if i in self.items}
+
+    def children(self, folder_ids: list[str]) -> list[dict]:
+        self.calls.append(("children", ",".join(folder_ids)))
+        return [item for item in self.items.values() if set(item["parents"]) & set(folder_ids)]
+
+    def download(self, file_id: str, dest) -> None:
+        self.calls.append(("download", file_id))
+        dest.write_bytes(self.content[file_id])
+
+    def export_xlsx(self, file_id: str, dest) -> None:
+        self.calls.append(("export", file_id))
+        if file_id in self.too_big_to_export:
+            raise http_error(403, "exportSizeLimitExceeded")
+        dest.write_bytes(self.content[file_id])
+
+    def sheet_tabs(self, spreadsheet_id: str) -> list[dict]:
+        self.calls.append(("tabs", spreadsheet_id))
+        return self.tabs[spreadsheet_id]
+
+    def sheet_values(self, spreadsheet_id: str, titles: list[str]) -> dict[str, list[list]]:
+        self.calls.append(("values", spreadsheet_id))
+        return {title: self.values[spreadsheet_id][title] for title in titles}
+
+    def downloads(self) -> list[str]:
+        return [item for call, item in self.calls if call in ("download", "export", "values")]
+
+
+@pytest.fixture
+def drive(monkeypatch) -> FakeDrive:
+    from app.services import sources
+
+    fake = FakeDrive()
+    monkeypatch.setattr(sources, "Drive", fake)
+    return fake

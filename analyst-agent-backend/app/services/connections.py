@@ -258,6 +258,17 @@ def create_file_connection(
     return conn
 
 
+def create_dataset(db: Session, tenant_id: str, name: str) -> Connection:
+    ensure_tenant(db, tenant_id)
+    conn = Connection(tenant_id=tenant_id, name=name, kind="file", secret_enc=vault.encrypt({}))
+    db.add(conn)
+    db.flush()
+    db.add(DatasetSource(connection_id=conn.id, origin="upload", label="Uploads", status="active"))
+    db.commit()
+    db.refresh(conn)
+    return conn
+
+
 def add_files(db: Session, conn: Connection, uploads: list[tuple[Path, str]]) -> dict[str, Any]:
     if conn.kind != "file":
         raise DomainError("only an uploaded dataset holds files")

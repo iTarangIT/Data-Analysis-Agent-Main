@@ -74,6 +74,90 @@ class TableSelection(BaseModel):
     tables: list[str] = Field(max_length=1000)
 
 
+class DatasetCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class GoogleLink(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
+    confirm_unverified: bool = False
+
+
+class Rule(BaseModel):
+    id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
+    kind: Literal["folder", "file", "sheet"]
+    recursive: bool = False
+
+
+class SourceRules(BaseModel):
+    source_id: str
+    rules: list[Rule] = Field(max_length=500)
+    combine: bool = True
+    dry_run: bool = False
+
+
+class SourceFileOut(BaseModel):
+    id: str
+    name: str
+    status: Literal["ready", "skipped", "failed"]
+    reason: str | None
+    bytes: int | None
+    synced_at: datetime | None
+    tables: list[str]
+
+
+class SourceOut(BaseModel):
+    id: str
+    origin: Literal["upload", "gdrive_folder", "gdrive_file", "gsheet"]
+    label: str
+    status: Literal["pending", "active"]
+    combine: bool
+    rules: list[Rule]
+    files: list[SourceFileOut]
+
+
+class SourcesOut(BaseModel):
+    sync_status: Literal["syncing", "ready", "failed"] | None
+    synced_at: datetime | None
+    sources: list[SourceOut]
+
+
+class ResolveOut(BaseModel):
+    status: Literal["needs_share", "unverified", "resolved"]
+    share_with: str | None = None
+    source: SourceOut | None = None
+
+
+class DriveNode(BaseModel):
+    id: str
+    name: str
+    kind: Literal["folder", "sheet", "xlsx", "csv", "tsv", "pdf", "other"]
+    supported: bool
+    bytes: int | None
+    modified: str | None
+
+
+class DriveListing(BaseModel):
+    folder_id: str
+    children: list[DriveNode]
+    supported: int
+    unsupported: int
+    bytes: int
+
+
+class Skipped(BaseModel):
+    name: str
+    reason: str
+
+
+class DryRunOut(BaseModel):
+    files: int
+    bytes: int
+    skipped: list[Skipped]
+    fits: bool
+    limit: int
+
+
 class ChartSpec(BaseModel):
     """A suggestion rendered beside the table, never instead of it."""
 

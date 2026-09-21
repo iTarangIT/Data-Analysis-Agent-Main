@@ -14,6 +14,9 @@ from app.api.schemas import (
     UPLOAD_SUFFIXES,
     ConnectionCreate,
     ConnectionOut,
+    DatasetCreate,
+    GoogleLink,
+    ResolveOut,
     TableSelection,
     TablesOut,
     TablesRefreshOut,
@@ -23,6 +26,7 @@ from app.db.models import Connection
 from app.db.session import get_db
 from app.security.auth import TenantContext
 from app.services import connections as svc
+from app.services import sources as sources_svc
 from app.services import tables as tables_svc
 
 router = APIRouter()
@@ -105,6 +109,29 @@ def create_from_file(
     with _staged(files) as uploads:
         conn = svc.create_file_connection(db, ctx.tenant_id, name, uploads)
     return _out(conn, tables_svc.counts(db, [conn.id]), svc.file_counts(db, [conn.id]))
+
+
+@router.post("/dataset", response_model=ConnectionOut, status_code=201)
+def create_dataset(
+    body: DatasetCreate,
+    ctx: TenantContext = Depends(current_tenant),
+    db: Session = Depends(get_db),
+) -> ConnectionOut:
+    conn = svc.create_dataset(db, ctx.tenant_id, body.name)
+    return _out(conn, tables_svc.counts(db, [conn.id]), svc.file_counts(db, [conn.id]))
+
+
+@router.post("/{connection_id}/google/resolve", response_model=ResolveOut)
+def resolve_google_link(
+    connection_id: str,
+    body: GoogleLink,
+    ctx: TenantContext = Depends(current_tenant),
+    db: Session = Depends(get_db),
+) -> ResolveOut:
+    conn = svc.get_connection(db, ctx.tenant_id, connection_id)
+    return ResolveOut.model_validate(
+        sources_svc.resolve(db, conn, ctx.user_id, body.url, body.confirm_unverified)
+    )
 
 
 @router.post("/{connection_id}/files", response_model=TablesOut)
