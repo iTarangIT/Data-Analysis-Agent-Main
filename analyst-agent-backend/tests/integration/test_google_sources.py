@@ -325,3 +325,264 @@ class TestChoosing:
         assert removed.status_code == 200, removed.text
         assert [s["origin"] for s in removed.json()["sources"]] == ["upload"]
         assert refused.status_code == 400
+
+
+MONTH = "region,units\nWest,{west}\nEast,{east}\n"
+
+
+def _month(drive, number: int, version: str = "v1") -> None:
+    body = MONTH.format(west=10 * number, east=number).encode()
+    drive.add(
+        f"1SalesMonthFile00{number:02d}",
+        f"Sales 2025-{number:02d}.csv",
+        CSV_MIME,
+        parent=ROOT,
+        content=body,
+        version=version,
+    )
+
+
+def _sheet_bytes(rows: list[list]) -> bytes:
+    import io
+
+    from openpyxl import Workbook
+
+    book = Workbook()
+    for row in rows:
+        book.active.append(row)
+    out = io.BytesIO()
+    book.save(out)
+    return out.getvalue()
+
+
+@pytest.fixture
+def sales_folder(client, token, dataset_id, drive, clean_app_db) -> str:
+    drive.add(ROOT, "Sales 2025", FOLDER, sharer=_member_email(clean_app_db))
+    for number in (1, 2, 3):
+        _month(drive, number)
+    drive.add(
+        "1ReturnsFileId000000",
+        "Returns.csv",
+        CSV_MIME,
+        parent=ROOT,
+        content=b"reason,count\nDamaged,3\nLate,1\n",
+    )
+    return _resolve(client, token, dataset_id, FOLDER_LINK).json()["source"]["id"]
+
+
+def _tables_of(client, token, dataset_id: str) -> dict[str, dict]:
+    r = client.get(f"/connections/{dataset_id}/tables", headers=_auth(token))
+    return {t["name"]: t for t in r.json()["tables"]}
+
+
+def _sources_of(client, token, dataset_id: str) -> dict:
+    return client.get(f"/connections/{dataset_id}/sources", headers=_auth(token)).json()
+
+
+def _google_of(client, token, dataset_id: str) -> dict:
+    sources = _sources_of(client, token, dataset_id)["sources"]
+    return next(s for s in sources if s["origin"] != "upload")
+
+
+def _sync(client, token, dataset_id: str):
+    return client.post(f"/connections/{dataset_id}/sync", headers=_auth(token))
+
+
+class TestSyncing:
+    def test_saving_a_choice_syncs_the_chosen_files(
+        self, client, token, dataset_id, sales_folder, drive
+    ):
+        r = _choose(client, token, dataset_id, sales_folder, _root_rule(False))
+
+        assert r.status_code == 200, r.text
+        assert _sources_of(client, token, dataset_id)["sync_status"] == "ready"
+        assert sorted(
+            (f["name"], f["status"]) for f in _google_of(client, token, dataset_id)["files"]
+        ) == [
+            ("Returns.csv", "ready"),
+            ("Sales 2025-01.csv", "ready"),
+            ("Sales 2025-02.csv", "ready"),
+            ("Sales 2025-03.csv", "ready"),
+        ]
+        assert sorted(drive.downloads()) == sorted(
+            ["1ReturnsFileId000000", *(f"1SalesMonthFile00{n:02d}" for n in (1, 2, 3))]
+        )
+
+    def test_a_second_sync_of_unchanged_files_downloads_nothing(
+        self, client, token, dataset_id, sales_folder, drive
+    ):
+        _choose(client, token, dataset_id, sales_folder, _root_rule(False))
+        drive.calls.clear()
+
+        r = _sync(client, token, dataset_id)
+
+        assert (r.status_code, r.json()) == (202, {"status": "queued"})
+        assert drive.downloads() == []
+        assert _sources_of(client, token, dataset_id)["sync_status"] == "ready"
+
+    def test_a_changed_file_is_fetched_again_and_a_vanished_one_leaves(
+        self, client, token, dataset_id, sales_folder, drive
+    ):
+        _choose(client, token, dataset_id, sales_folder, _root_rule(False))
+        _month(drive, 1, version="v2")
+        del drive.items["1SalesMonthFile0002"]
+        drive.calls.clear()
+
+        _sync(client, token, dataset_id)
+
+        assert drive.downloads() == ["1SalesMonthFile0001"]
+        assert sorted(f["name"] for f in _google_of(client, token, dataset_id)["files"]) == [
+            "Returns.csv",
+            "Sales 2025-01.csv",
+            "Sales 2025-03.csv",
+        ]
+        assert _tables_of(client, token, dataset_id)["sales_2025"]["files"] == [
+            "Sales 2025-01.csv",
+            "Sales 2025-03.csv",
+        ]
+
+    def test_a_file_over_the_size_limit_is_skipped_with_its_reason(
+        self, client, token, dataset_id, sales_folder, monkeypatch
+    ):
+        from app.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "max_upload_bytes", 29, raising=False)
+
+        _choose(client, token, dataset_id, sales_folder, _root_rule(False))
+
+        files = _google_of(client, token, dataset_id)["files"]
+        statuses = {f["name"]: (f["status"], f["reason"]) for f in files}
+        assert statuses["Returns.csv"] == ("skipped", "over the 0 MB limit for one file")
+        assert statuses["Sales 2025-01.csv"][0] == "ready"
+
+    def test_a_sheet_over_the_export_limit_is_read_through_the_sheets_api(
+        self, client, token, dataset_id, drive, clean_app_db
+    ):
+        drive.add(SHEET_ID, "Monthly targets", SHEET, sharer=_member_email(clean_app_db))
+        drive.tabs[SHEET_ID] = [{"sheetId": 0, "title": "Targets", "sheetType": "GRID"}]
+        drive.values[SHEET_ID] = {"Targets": [["dealer", "target"], ["Pune", 12], ["Nashik", 9]]}
+        drive.too_big_to_export.add(SHEET_ID)
+        link = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
+        source = _resolve(client, token, dataset_id, link).json()["source"]
+
+        _choose(client, token, dataset_id, source["id"], source["rules"])
+
+        tables = _tables_of(client, token, dataset_id)
+        assert ("export", SHEET_ID) in drive.calls
+        assert ("values", SHEET_ID) in drive.calls
+        assert tables["monthly_targets"]["files"] == ["Monthly targets"]
+        assert [c["name"] for c in tables["monthly_targets"]["definition"]["columns"]] == [
+            "dealer",
+            "target",
+            "_source_file",
+        ]
+
+    def test_a_sheet_that_exports_is_read_as_a_workbook(
+        self, client, token, dataset_id, drive, clean_app_db
+    ):
+        drive.add(
+            SHEET_ID,
+            "Monthly targets",
+            SHEET,
+            sharer=_member_email(clean_app_db),
+            content=_sheet_bytes([["dealer", "target"], ["Pune", 12]]),
+        )
+        drive.tabs[SHEET_ID] = [{"sheetId": 0, "title": "Sheet", "sheetType": "GRID"}]
+        link = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
+        source = _resolve(client, token, dataset_id, link).json()["source"]
+
+        _choose(client, token, dataset_id, source["id"], source["rules"])
+
+        assert ("values", SHEET_ID) not in drive.calls
+        assert "monthly_targets" in _tables_of(client, token, dataset_id)
+
+    def test_only_one_sync_runs_at_a_time(self, dataset_id, sales_folder, drive):
+        from sqlalchemy import func
+
+        from app.db.session import _engine
+        from app.services import sync
+
+        drive.calls.clear()
+        lock = func.hashtext(f"sync:{dataset_id}")
+        with _engine.connect() as held:
+            held.execute(select(func.pg_advisory_lock(lock)))
+            held.commit()
+
+            sync.sync_dataset(dataset_id)
+
+            held.execute(select(func.pg_advisory_unlock(lock)))
+            held.commit()
+
+        assert drive.calls == []
+
+    def test_a_question_on_a_stale_dataset_queues_a_sync_and_still_answers(
+        self, client, token, dataset_id, sales_folder, clean_app_db, monkeypatch
+    ):
+        from app.services import sync
+        from tests.integration.test_file_connection import _ask
+
+        _choose(client, token, dataset_id, sales_folder, _root_rule(False))
+        clean_app_db.execute(
+            text("UPDATE connections SET synced_at = now() - interval '2 hours' WHERE id = :id"),
+            {"id": dataset_id},
+        )
+        clean_app_db.commit()
+        queued: list[str] = []
+        monkeypatch.setattr(sync, "sync_dataset", queued.append)
+
+        events = _ask(client, token, dataset_id, "select count(*) as n from returns", "stale-1")
+
+        assert dict(events)["rows"]["rows"] == [[2]]
+        assert queued == [dataset_id]
+
+
+class TestCombining:
+    def test_three_months_share_one_table_and_a_different_file_gets_its_own(
+        self, client, token, dataset_id, sales_folder
+    ):
+        from tests.integration.test_file_connection import _ask
+
+        _choose(client, token, dataset_id, sales_folder, _root_rule(False))
+
+        tables = _tables_of(client, token, dataset_id)
+        assert sorted(tables) == ["returns", "sales_2025"]
+        assert tables["sales_2025"]["files"] == [f"Sales 2025-{n:02d}.csv" for n in (1, 2, 3)]
+        assert tables["sales_2025"]["definition"]["comment"].startswith(
+            "Google Drive: Sales 2025, 3 files, synced "
+        )
+        events = _ask(
+            client,
+            token,
+            dataset_id,
+            "select _source_file, sum(units) as units from sales_2025 group by _source_file",
+            "union-1",
+        )
+        assert sorted(dict(events)["rows"]["rows"]) == [
+            ["Sales 2025-01.csv", 11],
+            ["Sales 2025-02.csv", 22],
+            ["Sales 2025-03.csv", 33],
+        ]
+
+    def test_a_table_keeps_its_name_when_another_month_arrives(
+        self, client, token, dataset_id, sales_folder, drive
+    ):
+        _choose(client, token, dataset_id, sales_folder, _root_rule(False))
+        _month(drive, 4)
+
+        _sync(client, token, dataset_id)
+
+        tables = _tables_of(client, token, dataset_id)
+        assert sorted(tables) == ["returns", "sales_2025"]
+        assert len(tables["sales_2025"]["files"]) == 4
+
+    def test_without_combining_each_file_is_its_own_table(
+        self, client, token, dataset_id, sales_folder
+    ):
+        _choose(client, token, dataset_id, sales_folder, _root_rule(False), combine=False)
+
+        assert sorted(_tables_of(client, token, dataset_id)) == [
+            "returns",
+            "sales_2025_01",
+            "sales_2025_02",
+            "sales_2025_03",
+        ]

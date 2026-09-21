@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
@@ -9,6 +9,7 @@ from app.api.schemas import RunCreate, RunOut, RunPage, ThreadOut
 from app.db.session import get_db
 from app.security.auth import TenantContext
 from app.services import runs as svc
+from app.services import sync as sync_svc
 
 router = APIRouter()
 
@@ -16,12 +17,14 @@ router = APIRouter()
 @router.post("")
 async def create_run(
     body: RunCreate,
+    tasks: BackgroundTasks,
     ctx: TenantContext = Depends(current_tenant),
     db: Session = Depends(get_db),
 ) -> EventSourceResponse:
     # Runs before the response starts, so a missing connection, an exhausted budget or a rate
     # limit still surfaces as a real HTTP status rather than an SSE error event.
     prepared = await svc.prepare_run(db, ctx, body)
+    await sync_svc.refresh_if_stale(db, prepared.run.connection_id, tasks)
     return EventSourceResponse(svc.stream_run(db, ctx, prepared))
 
 

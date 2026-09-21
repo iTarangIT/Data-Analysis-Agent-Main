@@ -120,7 +120,7 @@ def _upload_source(db: Session, conn: Connection) -> DatasetSource:
     ).one()
 
 
-def _store(tenant_id: str, connection_id: str, file_id: str, source: FileSource) -> dict:
+def store_part(tenant_id: str, connection_id: str, file_id: str, source: FileSource) -> dict:
     path = Path(source.path)
     with path.open("rb") as f:
         digest = hashlib.file_digest(f, "sha256").hexdigest()
@@ -183,7 +183,7 @@ def _ingest_batch(
         for file_id, filename, size, sources in staged:
             parts = []
             for source in sources:
-                parts.append(_store(tenant_id, connection_id, file_id, source))
+                parts.append(store_part(tenant_id, connection_id, file_id, source))
                 stored.append(parts[-1])
             files.append(
                 DatasetFile(

@@ -184,8 +184,9 @@ class FakeDrive:
 
 @pytest.fixture
 def drive(monkeypatch) -> FakeDrive:
-    from app.services import sources
+    from app.services import sources, sync
 
     fake = FakeDrive()
     monkeypatch.setattr(sources, "Drive", fake)
+    monkeypatch.setattr(sync, "Drive", fake)
     return fake

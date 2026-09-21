@@ -21,7 +21,7 @@ from app.llm import configure_tracing
 from app.logging import configure_logging, log
 from app.mcp_client import probe_mcp
 from app.services import runs as svc
-from app.services import tables
+from app.services import sync, tables
 
 
 async def _heartbeat(ctx: dict, run_id: str) -> None:
@@ -90,6 +90,10 @@ def _publish_sync(run_id: str, frame: dict[str, str]) -> None:
         client.close()
 
 
+async def sync_dataset(ctx: dict, connection_id: str) -> None:
+    await asyncio.to_thread(sync.sync_dataset, connection_id)
+
+
 async def reap_stale(ctx: dict) -> None:
     db = SessionLocal()
     try:
@@ -112,7 +116,8 @@ class WorkerSettings:
     # max_tries=1: a failed run must never be retried, or it spends a tenant's tokens twice
     # and streams to a client that has already been told what happened.
     functions: ClassVar[list[Any]] = [
-        func(run_question, name="run_question", max_tries=1, timeout=get_settings().run_timeout_s)
+        func(run_question, name="run_question", max_tries=1, timeout=get_settings().run_timeout_s),
+        func(sync_dataset, name="sync_dataset", max_tries=1, timeout=get_settings().sync_timeout_s),
     ]
     cron_jobs: ClassVar[list[Any]] = [cron(reap_stale, minute=None, run_at_startup=True)]
     redis_settings = queue.redis_settings()

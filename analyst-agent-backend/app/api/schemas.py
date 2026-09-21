@@ -158,6 +158,10 @@ class DryRunOut(BaseModel):
     limit: int
 
 
+class SyncOut(BaseModel):
+    status: Literal["queued"]
+
+
 class ChartSpec(BaseModel):
     """A suggestion rendered beside the table, never instead of it."""
 

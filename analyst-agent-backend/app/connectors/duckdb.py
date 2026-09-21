@@ -6,6 +6,7 @@ once external access is off. It also moves CSV type sniffing out of the query pa
 column cannot change type between runs and make the cached schema a lie.
 """
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -265,8 +266,22 @@ def _read(
 ) -> dict[str, tuple[int, pd.DataFrame, str | None]]:
     if suffix == ".pdf":
         return _pdf(src, filename)
-    if suffix == ".xlsx":
+    if suffix == ".json":
         frames: dict[str, tuple[int, pd.DataFrame, str | None]] = {}
+        for title, rows in json.loads(src.read_text(encoding="utf-8")).items():
+            grid = pd.DataFrame(rows)
+            if grid.empty:
+                continue
+            header = _header_row(grid.head(10))
+            columns = [
+                name if name not in (None, "") else f"Unnamed: {i}"
+                for i, name in enumerate(grid.iloc[header])
+            ]
+            body = grid.iloc[header + 1 :].set_axis(columns, axis=1).reset_index(drop=True)
+            frames[title] = (header, body, None)
+        return frames
+    if suffix == ".xlsx":
+        frames = {}
         with pd.ExcelFile(src) as book:
             for sheet in book.sheet_names:
                 header = _header_row(book.parse(sheet, header=None, nrows=10))
@@ -279,7 +294,14 @@ def _read(
     return {"": (header, pd.read_csv(src, sep=sep, header=header), None)}
 
 
-def ingest_upload(src: Path, dest_dir: Path, filename: str, taken: set[str]) -> list[FileSource]:
+def ingest_upload(
+    src: Path,
+    dest_dir: Path,
+    filename: str,
+    taken: set[str],
+    source_column: bool = False,
+    sheets: list[str] | None = None,
+) -> list[FileSource]:
     """Convert an upload into one Parquet file per table.
 
     `src` is where the bytes were staged; `filename` is what the customer called the file, and
@@ -289,8 +311,8 @@ def ingest_upload(src: Path, dest_dir: Path, filename: str, taken: set[str]) -> 
     A spreadsheet routinely has several sheets, and answering from the first one silently would
     be the worst available failure, so each sheet becomes its own table.
     """
-    suffix = Path(filename).suffix.lower()
-    stem = Path(filename).stem
+    suffix = src.suffix.lower()
+    stem = filename[: -len(suffix)] if filename.lower().endswith(suffix) else filename
     dest_dir.mkdir(parents=True, exist_ok=True)
     sources: list[FileSource] = []
 
@@ -298,7 +320,7 @@ def ingest_upload(src: Path, dest_dir: Path, filename: str, taken: set[str]) -> 
     try:
         tables: dict[str, tuple[pd.DataFrame, dict[str, Any]]] = {}
         for sheet, (header_row, raw, comment) in _read(con, src, suffix, filename).items():
-            if raw.empty:
+            if raw.empty or (sheets is not None and sheet not in sheets):
                 continue
             frame, profile = _harden(raw, header_row)
             if comment:
@@ -311,6 +333,9 @@ def ingest_upload(src: Path, dest_dir: Path, filename: str, taken: set[str]) -> 
             table = _unique(_slug(f"{stem}__{sheet}" if suffixed else stem), taken)
             taken.add(table)
             path = dest_dir / f"{table}.parquet"
+            if source_column:
+                label = filename if len(tables) == 1 else f"{filename} / {sheet}"
+                frame = frame.assign(_source_file=label)
             # Written through DuckDB rather than pandas.to_parquet, which needs pyarrow.
             con.from_df(frame).write_parquet(str(path))
             described = con.execute("DESCRIBE SELECT * FROM read_parquet(?)", [str(path)])

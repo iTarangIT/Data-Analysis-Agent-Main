@@ -5,7 +5,17 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+import anyio
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Response,
+    UploadFile,
+)
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_tenant
@@ -22,6 +32,7 @@ from app.api.schemas import (
     SourceOut,
     SourceRules,
     SourcesOut,
+    SyncOut,
     TableSelection,
     TablesOut,
     TablesRefreshOut,
@@ -32,6 +43,7 @@ from app.db.session import get_db
 from app.security.auth import TenantContext
 from app.services import connections as svc
 from app.services import sources as sources_svc
+from app.services import sync as sync_svc
 from app.services import tables as tables_svc
 
 router = APIRouter()
@@ -155,6 +167,7 @@ def google_tree(
 def choose_source(
     connection_id: str,
     body: SourceRules,
+    tasks: BackgroundTasks,
     ctx: TenantContext = Depends(current_tenant),
     db: Session = Depends(get_db),
 ) -> SourceOut | DryRunOut:
@@ -163,7 +176,20 @@ def choose_source(
     chosen = sources_svc.choose(db, conn, body.source_id, rules, body.combine, body.dry_run)
     if body.dry_run:
         return DryRunOut.model_validate(chosen)
+    anyio.from_thread.run(sync_svc.request, conn.id, tasks)
     return SourceOut.model_validate(chosen)
+
+
+@router.post("/{connection_id}/sync", response_model=SyncOut, status_code=202)
+async def sync_now(
+    connection_id: str,
+    tasks: BackgroundTasks,
+    ctx: TenantContext = Depends(current_tenant),
+    db: Session = Depends(get_db),
+) -> SyncOut:
+    conn = sources_svc.dataset(svc.get_connection(db, ctx.tenant_id, connection_id))
+    await sync_svc.request(conn.id, tasks)
+    return SyncOut(status="queued")
 
 
 @router.get("/{connection_id}/sources", response_model=SourcesOut)

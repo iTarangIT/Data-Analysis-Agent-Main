@@ -151,10 +151,12 @@ class TestWorkerSettings:
     only surface when someone actually starts a worker."""
 
     def test_the_worker_module_is_importable_and_wired(self):
-        from app.workers.runs import WorkerSettings, run_question
+        from app.workers.runs import WorkerSettings, run_question, sync_dataset
 
-        assert [f.name for f in WorkerSettings.functions] == ["run_question"]
+        assert [f.name for f in WorkerSettings.functions] == ["run_question", "sync_dataset"]
         assert WorkerSettings.functions[0].coroutine is run_question
+        assert WorkerSettings.functions[1].coroutine is sync_dataset
+        assert WorkerSettings.functions[1].max_tries == 1
         assert callable(WorkerSettings.on_startup)
 
     def test_a_failed_run_is_never_retried(self):

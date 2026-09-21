@@ -23,9 +23,9 @@ def _serve(conn: Channel, memory_mb: int) -> None:
         limit = memory_mb * 1024 * 1024
         resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
     while (job := conn.recv()) is not None:
-        fn, args = job
+        fn, args, kwargs = job
         try:
-            conn.send(("ok", fn(*args)))
+            conn.send(("ok", fn(*args, **kwargs)))
         except MemoryError:
             conn.send(("memory", ""))
         except DomainError as e:
@@ -65,9 +65,9 @@ class Sandbox:
             self._conn.close()
         self._process = self._conn = None
 
-    def run(self, name: str, fn: Callable[..., Any], *args: Any) -> Any:
+    def run(self, name: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         conn = self._start()
-        conn.send((fn, args))
+        conn.send((fn, args, kwargs))
         if not conn.poll(get_settings().ingest_timeout_s):
             self._stop()
             raise DomainError(f"{name} took too long to read")
