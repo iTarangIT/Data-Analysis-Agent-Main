@@ -389,6 +389,49 @@ class TestDataset:
         assert not connection_dir.exists()
 
 
+class TestSupabaseStorage:
+    def test_a_dataset_still_answers_after_the_local_cache_is_gone(
+        self, client, token, clean_app_db, supabase_storage, tmp_path
+    ):
+        import shutil
+
+        r = _upload(client, token, "Q3 sales", ("Q3 sales.csv", CSV.encode()))
+        assert r.status_code == 201, r.text
+        assert len(supabase_storage.objects) == 1
+        shutil.rmtree(tmp_path / "cache")
+
+        events = _ask(
+            client, token, r.json()["id"], "select sum(units) as units from q3_sales", "sb-1"
+        )
+
+        assert dict(events)["rows"]["rows"] == [[20]]
+        assert [method for method, _ in supabase_storage.requests] == ["POST", "GET"]
+
+    def test_removing_a_file_deletes_its_object(
+        self, client, token, clean_app_db, supabase_storage
+    ):
+        connection_id = _upload(
+            client, token, "July", ("Q3 sales.csv", CSV.encode()), ("dealers.csv", DEALERS.encode())
+        ).json()["id"]
+
+        r = client.delete(f"/connections/{connection_id}/files/dealers.csv", headers=_auth(token))
+
+        assert r.status_code == 200, r.text
+        assert [key.rsplit("/", 1)[1][:8] for key in supabase_storage.objects] == ["q3_sales"]
+
+    def test_deleting_the_dataset_deletes_every_object(
+        self, client, token, clean_app_db, supabase_storage
+    ):
+        connection_id = _upload(
+            client, token, "July", ("Q3 sales.csv", CSV.encode()), ("dealers.csv", DEALERS.encode())
+        ).json()["id"]
+
+        r = client.delete(f"/connections/{connection_id}", headers=_auth(token))
+
+        assert r.status_code == 204
+        assert supabase_storage.objects == {}
+
+
 class TestAsking:
     def test_a_question_about_the_file_streams_the_whole_contract(
         self, client, token, connection_id, clean_app_db

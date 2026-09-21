@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.connectors import storage
 from app.connectors.duckdb import FileSource, ingest_upload
 from app.db.models import Connection, DatasetFile, DatasetSource, Tenant
 from app.logging import log
@@ -86,6 +87,7 @@ def delete_connection(db: Session, tenant_id: str, connection_id: str) -> None:
 
     if conn.kind == "file":
         # Otherwise the customer's "deleted" spreadsheet stays readable on disk.
+        storage.delete([part for f in conn.files for part in f.parts])
         shutil.rmtree(Path(get_settings().file_store_dir) / tenant_id / conn.id, ignore_errors=True)
         db.execute(delete(DatasetFile).where(DatasetFile.connection_id == conn.id))
         db.execute(delete(DatasetSource).where(DatasetSource.connection_id == conn.id))
@@ -122,22 +124,24 @@ def _store(tenant_id: str, connection_id: str, file_id: str, source: FileSource)
     with path.open("rb") as f:
         digest = hashlib.file_digest(f, "sha256").hexdigest()
     key = f"{tenant_id}/{connection_id}/{file_id}/{source.table}-{digest[:12]}.parquet"
-    stored = path.replace(Path(get_settings().file_store_dir) / key)
+    size = path.stat().st_size
+    storage.put(path, key, digest)
     return {
         "sheet": source.sheet,
         "table": source.table,
         "storage_key": key,
         "sha256": digest,
-        "bytes": stored.stat().st_size,
+        "bytes": size,
         "profile": source.profile,
     }
 
 
 def _discard(tenant_id: str, connection_id: str, file: DatasetFile) -> None:
-    root = Path(get_settings().file_store_dir)
-    for part in file.parts:
-        (root / part["storage_key"]).unlink(missing_ok=True)
-    shutil.rmtree(root / tenant_id / connection_id / file.id, ignore_errors=True)
+    storage.delete(file.parts)
+    shutil.rmtree(
+        Path(get_settings().file_store_dir) / tenant_id / connection_id / file.id,
+        ignore_errors=True,
+    )
 
 
 def _ingest_batch(
@@ -158,6 +162,7 @@ def _ingest_batch(
     taken = {part["table"] for f in held for part in f.parts}
     staged: list[tuple[str, str, int, list[FileSource]]] = []
     dirs: list[Path] = []
+    stored: list[dict] = []
     try:
         for src, filename in uploads:
             file_id = str(uuid.uuid4())
@@ -171,31 +176,43 @@ def _ingest_batch(
                 f"a dataset is limited to {settings.max_dataset_bytes} bytes once converted, "
                 "and these files would take it past that"
             )
+        files = []
+        for file_id, filename, size, sources in staged:
+            parts = []
+            for source in sources:
+                parts.append(_store(tenant_id, connection_id, file_id, source))
+                stored.append(parts[-1])
+            files.append(
+                DatasetFile(
+                    id=file_id,
+                    source_id=source_id,
+                    connection_id=connection_id,
+                    remote_id=filename,
+                    name=filename,
+                    status="ready",
+                    bytes=size,
+                    parts=parts,
+                    synced_at=datetime.now(UTC),
+                )
+            )
     except DomainError:
-        for path in dirs if held else [root]:
-            shutil.rmtree(path, ignore_errors=True)
+        _undo(stored, dirs if held else [root])
         raise
     except Exception as e:
-        for path in dirs if held else [root]:
-            shutil.rmtree(path, ignore_errors=True)
+        _undo(stored, dirs if held else [root])
         log.warning("upload.ingest_failed", file=filename, error=str(e))
         raise DomainError(f"{filename} could not be read as a spreadsheet") from e
 
-    now = datetime.now(UTC)
-    return [
-        DatasetFile(
-            id=file_id,
-            source_id=source_id,
-            connection_id=connection_id,
-            remote_id=filename,
-            name=filename,
-            status="ready",
-            bytes=size,
-            parts=[_store(tenant_id, connection_id, file_id, s) for s in sources],
-            synced_at=now,
-        )
-        for file_id, filename, size, sources in staged
-    ]
+    for path in dirs:
+        if path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
+    return files
+
+
+def _undo(stored: list[dict], dirs: list[Path]) -> None:
+    for path in dirs:
+        shutil.rmtree(path, ignore_errors=True)
+    storage.delete(stored)
 
 
 def create_file_connection(

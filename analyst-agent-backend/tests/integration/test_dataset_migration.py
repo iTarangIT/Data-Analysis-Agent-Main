@@ -2,9 +2,10 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
+
+from alembic import command
 
 pytestmark = pytest.mark.integration
 
@@ -43,7 +44,7 @@ def seeded(clean_app_db, alembic_config, root):
     sources = [
         {
             "table": "sales",
-            "path": _parquet(batch / "b1" / "sales.parquet", "SELECT 1 AS units UNION ALL SELECT 2"),
+            "path": _parquet(batch / "b1" / "sales.parquet", "SELECT unnest([1, 2]) AS units"),
             "file": "sales.csv",
             "origin": "upload",
             "profile": {"row_count": 2},

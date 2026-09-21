@@ -1,6 +1,4 @@
-from pathlib import Path
-
-from app.config import get_settings
+from app.connectors import storage
 from app.connectors.base import Connector
 from app.connectors.duckdb import DuckDBConnector, FileSource
 from app.connectors.mcp import McpConnector
@@ -16,13 +14,12 @@ def connector_for(conn: Connection) -> Connector:
     if conn.kind == "postgres":
         return McpConnector(conn.tenant_id, conn.id)
     if conn.kind == "file":
-        root = Path(get_settings().file_store_dir)
         return DuckDBConnector(
             conn.tenant_id,
             [
                 FileSource(
                     table=part["table"],
-                    path=str(root / part["storage_key"]),
+                    path=str(storage.local(part["storage_key"], part["sha256"])),
                     file=file.name,
                     origin=file.source.origin,
                     profile=part["profile"],

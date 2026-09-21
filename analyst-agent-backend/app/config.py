@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     keep_messages: int = 20
 
     file_store_dir: str = "./uploads"
+    file_store_backend: Literal["local", "supabase"] = "local"
+    supabase_secret_key: SecretStr | None = None
+    storage_bucket: str = "datasets"
     # Bounds resident memory per concurrent run, because an upload is materialised in full.
     max_upload_bytes: int = 25 * 1024 * 1024
     max_dataset_bytes: int = 100 * 1024 * 1024
