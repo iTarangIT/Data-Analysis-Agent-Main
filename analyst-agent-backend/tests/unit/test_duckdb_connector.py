@@ -15,6 +15,7 @@ from app.connectors.duckdb import (
     DuckDBConnector,
     FileSource,
     Part,
+    _numbers,
     ingest_upload,
 )
 from app.services.errors import DomainError
@@ -248,6 +249,44 @@ class TestHardening:
         )
 
         assert list(source.profile["columns"]) == ["dealer", "unnamed_1", "units", "note"]
+
+
+class TestNumbers:
+    @pytest.mark.parametrize(
+        ("values", "expected"),
+        [
+            (["1,23,456.50", "2,000.25"], [123456.5, 2000.25]),
+            (["123,456.50", "7.25"], [123456.5, 7.25]),
+            (["₹1,23,456", "Rs. 2,000", "INR 500", "rs 12"], [123456, 2000, 500, 12]),
+            (["(1,234)", "500", "-20"], [-1234, 500, -20]),
+            (["1,000.00 Dr", "250.00 Cr", "75.50 dr."], [-1000.0, 250.0, -75.5]),
+            (["1,000.00 Dr", "250.00 Dr"], [1000.0, 250.0]),
+        ],
+    )
+    def test_an_amount_column_becomes_numbers(self, values, expected):
+        import pandas as pd
+
+        assert _numbers(pd.Series(values)).tolist() == expected
+
+    def test_whole_amounts_stay_whole(self):
+        import pandas as pd
+
+        assert str(_numbers(pd.Series(["1,200", "Rs. 30"])).dtype) == "Int64"
+
+    def test_a_column_under_ninety_percent_amounts_stays_text(self):
+        import pandas as pd
+
+        column = pd.Series(["1,234", "pending", "2,000", "n/a"])
+
+        assert _numbers(column).tolist() == ["1,234", "pending", "2,000", "n/a"]
+
+    def test_amounts_in_a_csv_are_summed_as_numbers(self, tmp_path):
+        sources = _csv(tmp_path, "ledger.csv", 'party,amount\nA,"₹1,23,456.50"\nB,"(1,000.50)"\n')
+
+        _, rows = DuckDBConnector("t_a", sources).run_select("select sum(amount) from ledger", 1)
+
+        assert _types(sources)["amount"] == "DOUBLE"
+        assert rows == [(122456.0,)]
 
 
 class TestSchema:

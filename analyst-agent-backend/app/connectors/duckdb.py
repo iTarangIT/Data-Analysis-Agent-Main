@@ -30,6 +30,12 @@ KEYWORDS = frozenset(
     ).fetchall()
 )
 TOTAL_ROW = r"(grand\s+)?total"
+AMOUNT = re.compile(
+    r"^(\()?(-)?\s*(?:₹|rs\.?|inr)?\s*(-)?\s*"
+    r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{1,2}(?:,\d{2})+,\d{3}(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"\s*(\))?\s*(dr|cr)?\.?$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -113,6 +119,27 @@ def _dates(column: pd.Series) -> pd.Series:
     return parsed if parsed.notna().sum() >= 0.9 * column.notna().sum() else column
 
 
+def _numbers(column: pd.Series) -> pd.Series:
+    text = column.dropna().astype(str).str.strip()
+    if text.empty:
+        return column
+    opened, minus, minus_after, digits, closed, side = (
+        part for _, part in text.str.extract(AMOUNT).items()
+    )
+    parsed = digits.notna() & (opened.notna() == closed.notna())
+    if parsed.sum() < 0.9 * len(text):
+        return column
+    values = digits[parsed].str.replace(",", "", regex=False).astype(float)
+    negative = (opened.notna() | minus.notna() | minus_after.notna())[parsed]
+    sides = side[parsed].str.lower()
+    if {"dr", "cr"} <= set(sides.dropna()):
+        negative |= sides.eq("dr")
+    signed = values.where(~negative, -values).reindex(column.index)
+    if digits[parsed].str.contains(".", regex=False).any():
+        return signed
+    return signed.astype("Int64")
+
+
 def _harden(frame: pd.DataFrame, header_row: int) -> tuple[pd.DataFrame, dict[str, Any]]:
     blank = frame.columns.astype(str).str.startswith("Unnamed:") & frame.isna().all().to_numpy()
     frame = frame.loc[:, ~blank]
@@ -130,7 +157,7 @@ def _harden(frame: pd.DataFrame, header_row: int) -> tuple[pd.DataFrame, dict[st
     frame = frame.set_axis(list(columns), axis=1)
 
     for name in frame.select_dtypes(include=["object", "str"]).columns:
-        frame[name] = _dates(frame[name])
+        frame[name] = _dates(_numbers(frame[name]))
 
     dates = frame.select_dtypes(include=["datetime", "datetimetz"]).dropna(axis=1, how="all")
     profile = {
