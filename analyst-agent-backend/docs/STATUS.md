@@ -1434,7 +1434,7 @@ phase on red" rule was set aside for this work. 0.5 stays on its branch until th
 
 | # | Item | Blocked on |
 |---|---|---|
-| 1 | Rule 6 for 0.5 and scoring `golden_pdf.yaml` | a Supabase TOKEN and Gemini quota |
+| 1 | ~~Rule 6 for 0.5 and scoring `golden_pdf.yaml`~~ | done, see below: 6/7 before and after, PDF 4/4 |
 | 2 | Any call against real Google: the live test skips | `GOOGLE_SERVICE_ACCOUNT_JSON` and a shared `GOOGLE_TEST_FOLDER_ID` |
 | 3 | The Linux `RLIMIT_AS` limit | a Linux run |
 | 4 | A real Supabase bucket | `SUPABASE_SECRET_KEY` and a private `datasets` bucket |
@@ -1489,3 +1489,20 @@ phase on red" rule was set aside for this work. 0.5 stays on its branch until th
   which attaches injected background tasks to a returned response.
 - Next.js 16.3.4: `node_modules/next/dist/docs` (route handlers, `params` as a Promise, server
   actions running one at a time).
+
+### The 0.5 eval gate, run live 2026-09-21
+
+`evals/run_evals.py` over real HTTP against the local API on the local App DB, as a Supabase
+email-and-password user, with `GEMINI_MODEL=gemini-3.5-flash-lite`.
+
+| Suite | Before (`main`, `d0a996e`) | After (0.5, `15bed9e`) |
+|---|---|---|
+| `golden_file.yaml` (7) | 6/7, 86% | 6/7, 86% |
+| `golden_pdf.yaml` (4) | — | 4/4, 100% |
+
+The pass rate did not fall, so 0.5 was fast-forwarded onto `main`. Both runs failed the same
+case, and for the same reason: "How many orders came from the West region?" was answered with
+`SUM(units)` (48) instead of a count of orders (5). That is the model's reading of "orders", not
+the dialect line, and it is the case to look at if the suite's wording is revisited.
+`golden_pdf` was scored on `main` with 0.5 in place, against `evals/fixtures/statement.pdf`
+uploaded through the API.
