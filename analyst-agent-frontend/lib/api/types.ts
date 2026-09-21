@@ -10,6 +10,8 @@ export type Connection = {
   total_tables: number;
   file_count: number;
   catalog_refreshed_at: string | null;
+  sync_status: "syncing" | "ready" | "failed" | null;
+  synced_at: string | null;
 };
 
 export type ColumnDefinition = {
@@ -46,7 +48,7 @@ export type TableStats = {
 
 export type SourceTable = {
   name: string;
-  file: string | null;
+  files: string[];
   selected: boolean;
   /** Both null unless the table is chosen: the agent keeps no structure it may not use. */
   definition: TableDefinition | null;

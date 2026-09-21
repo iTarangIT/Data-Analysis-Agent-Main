@@ -14,7 +14,7 @@ from arq import cron, func
 
 from app import queue
 from app.config import get_settings
-from app.connectors.registry import connector_for
+from app.connectors.registry import connector_for, open_for_run
 from app.db.models import Connection, Run
 from app.db.session import SessionLocal
 from app.llm import configure_tracing
@@ -59,10 +59,11 @@ async def run_question(ctx: dict, run_id: str) -> None:
         if run is None:
             log.warning("worker.run_missing", run_id=run_id)
             return
-        conn = db.get(Connection, run.connection_id)
-        connector = connector_for(conn)
+        conn = db.get_one(Connection, run.connection_id)
+        reader = connector_for(conn)
         # Read from the store, not the source: `prepare_run` has just brought it up to date.
-        catalog = await tables.load_for_run(db, conn, connector)
+        catalog = await tables.load_for_run(db, conn, reader)
+        connector = await asyncio.to_thread(open_for_run, reader, catalog.table_names)
         await asyncio.to_thread(svc.execute_run, db, run, connector, catalog, emit)
     except asyncio.CancelledError:
         # The client went away, or the job timed out. Report it before the task dies, using the

@@ -101,6 +101,8 @@ class TestParity:
     ):
         """A real worker is not needed to prove the transport: the same `execute_run` publishes
         the same frames, which is the property the shared encoder guarantees."""
+        from app.connectors.registry import connector_for, open_for_run
+        from app.db.models import Connection
         from app.db.session import SessionLocal
         from app.services import runs as svc
 
@@ -127,9 +129,9 @@ class TestParity:
             def work():
                 worker_db = SessionLocal()
                 try:
-                    svc.execute_run(
-                        worker_db, prepared.run, prepared.connector, prepared.catalog, emit
-                    )
+                    conn = worker_db.get_one(Connection, prepared.run.connection_id)
+                    connector = open_for_run(connector_for(conn), prepared.catalog.table_names)
+                    svc.execute_run(worker_db, prepared.run, connector, prepared.catalog, emit)
                 finally:
                     worker_db.close()
 

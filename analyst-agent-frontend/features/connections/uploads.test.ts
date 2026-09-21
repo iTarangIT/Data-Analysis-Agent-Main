@@ -15,8 +15,8 @@ import {
 
 const sheet = (name: string, size = 1024) => ({ name, size });
 
-function table(name: string, file: string | null): SourceTable {
-  return { name, file, selected: false, definition: null, stats: null };
+function table(name: string, files: string[]): SourceTable {
+  return { name, files, selected: false, definition: null, stats: null };
 }
 
 describe("uploadProblem", () => {
@@ -99,9 +99,9 @@ describe("filesOf", () => {
   it("groups a dataset's tables under the file each came from, sorted by file", () => {
     expect(
       filesOf([
-        table("book__sales", "book.xlsx"),
-        table("dealers", "dealers.csv"),
-        table("book__returns", "book.xlsx"),
+        table("book__sales", ["book.xlsx"]),
+        table("dealers", ["dealers.csv"]),
+        table("book__returns", ["book.xlsx"]),
       ]),
     ).toEqual([
       { file: "book.xlsx", tables: ["book__sales", "book__returns"] },
@@ -110,7 +110,14 @@ describe("filesOf", () => {
   });
 
   it("has nothing to say about a database's tables", () => {
-    expect(filesOf([table("vehicles", null)])).toEqual([]);
+    expect(filesOf([table("vehicles", [])])).toEqual([]);
+  });
+
+  it("lists a table under every file that feeds it", () => {
+    expect(filesOf([table("sales", ["July.xlsx", "August.xlsx"])])).toEqual([
+      { file: "August.xlsx", tables: ["sales"] },
+      { file: "July.xlsx", tables: ["sales"] },
+    ]);
   });
 });
 

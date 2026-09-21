@@ -16,6 +16,7 @@ import pandas as pd
 from pandas.tseries.api import guess_datetime_format
 
 from app.catalog.types import Column, TableDef
+from app.connectors import storage
 from app.connectors.pg_stats import row_bucket, row_magnitude
 from app.services.errors import DomainError
 
@@ -39,6 +40,25 @@ class FileSource:
     origin: str
     profile: dict[str, Any]
     sheet: str = ""
+
+
+@dataclass(frozen=True)
+class Part:
+    table: str
+    file: str
+    origin: str
+    storage_key: str
+    sha256: str
+    profile: dict[str, Any]
+    sheet: str = ""
+
+
+def _column_type(types: list[str]) -> str:
+    if len(set(types)) == 1:
+        return types[0]
+    if set(types) == {"BIGINT", "DOUBLE"}:
+        return "DOUBLE"
+    return "VARCHAR"
 
 
 def _slug(name: str) -> str:
@@ -194,6 +214,62 @@ def ingest_upload(src: Path, dest_dir: Path, filename: str, taken: set[str]) -> 
     return sources
 
 
+class Dataset:
+    kind = "file"
+
+    def __init__(self, tenant_id: str, parts: list[Part]) -> None:
+        self.tenant_id = tenant_id
+        self.parts = parts
+
+    def list_tables(self) -> list[str]:
+        return sorted({part.table for part in self.parts})
+
+    def read_tables(self, names: list[str]) -> list[TableDef]:
+        wanted = set(names)
+        types: dict[str, dict[str, list[str]]] = {}
+        for part in self.parts:
+            if part.table in wanted:
+                for column, type_ in part.profile["types"].items():
+                    types.setdefault(part.table, {}).setdefault(column, []).append(type_)
+        return [
+            TableDef(
+                name=table,
+                columns=[Column(name=name, type=_column_type(t)) for name, t in columns.items()],
+            )
+            for table, columns in sorted(types.items())
+        ]
+
+    def table_stats(self, names: list[str]) -> dict[str, dict[str, Any]]:
+        wanted = set(names)
+        rows: dict[str, int] = {}
+        for part in self.parts:
+            if part.table in wanted:
+                rows[part.table] = rows.get(part.table, 0) + part.profile["row_count"]
+        stats: dict[str, dict[str, Any]] = {}
+        for name, count in rows.items():
+            stats[name] = {"rows": row_bucket(count)}
+            if stats[name]["rows"] != "few":
+                stats[name]["rows_approx"] = row_magnitude(count)
+        return stats
+
+    def open(self, names: set[str]) -> "DuckDBConnector":
+        return DuckDBConnector(
+            self.tenant_id,
+            [
+                FileSource(
+                    table=part.table,
+                    path=str(storage.local(part.storage_key, part.sha256)),
+                    file=part.file,
+                    origin=part.origin,
+                    profile=part.profile,
+                    sheet=part.sheet,
+                )
+                for part in self.parts
+                if part.table in names
+            ],
+        )
+
+
 class DuckDBConnector:
     """A tenant's uploaded file, queried in memory.
 
@@ -212,50 +288,23 @@ class DuckDBConnector:
 
     def __init__(self, tenant_id: str, sources: list[FileSource]) -> None:
         self.tenant_id = tenant_id
-        self.tables = [s.table for s in sources]
-        self.row_counts = {s.table: s.profile["row_count"] for s in sources}
+        paths: dict[str, list[str]] = {}
+        for source in sources:
+            if not TABLE_NAME.match(source.table):
+                raise ValueError(f"unsafe table name {source.table!r}")
+            paths.setdefault(source.table, []).append(source.path)
         self.con = duckdb.connect()
         # One tenant's query must not eat the box, and single-threaded is the fairness knob.
         self.con.execute("SET memory_limit='512MB'")
         self.con.execute("SET threads=1")
-        for source in sources:
-            if not TABLE_NAME.match(source.table):
-                raise ValueError(f"unsafe table name {source.table!r}")
+        self.con.execute("SET temp_directory=''")
+        for table, files in paths.items():
             self.con.execute(
-                f"CREATE TABLE {source.table} AS SELECT * FROM read_parquet(?)", [source.path]
+                f"CREATE TABLE {table} AS SELECT * FROM read_parquet(?, union_by_name = true)",
+                [files],
             )
         self.con.execute("SET enable_external_access=false")
         self.con.execute("SET lock_configuration=true")
-
-    def list_tables(self) -> list[str]:
-        return sorted(self.tables)
-
-    def read_tables(self, names: list[str]) -> list[TableDef]:
-        """Columns only. A spreadsheet has no keys, so it has no relationships to report."""
-        wanted = set(names) & set(self.tables)
-        columns: dict[str, list[Column]] = {}
-        rows = self.con.execute(
-            "SELECT table_name, column_name, data_type, is_nullable = 'YES' "
-            "FROM information_schema.columns WHERE table_schema = 'main' "
-            "ORDER BY table_name, ordinal_position"
-        ).fetchall()
-        for table, name, type_, nullable in rows:
-            if table in wanted:
-                columns.setdefault(table, []).append(
-                    Column(name=name, type=type_, nullable=nullable)
-                )
-        return [TableDef(name=table, columns=columns[table]) for table in sorted(wanted)]
-
-    def table_stats(self, names: list[str]) -> dict[str, dict[str, Any]]:
-        stats: dict[str, dict[str, Any]] = {}
-        for name in names:
-            if name not in self.row_counts:
-                continue
-            rows = self.row_counts[name]
-            stats[name] = {"rows": row_bucket(rows)}
-            if stats[name]["rows"] != "few":
-                stats[name]["rows_approx"] = row_magnitude(rows)
-        return stats
 
     def run_select(self, sql: str, max_rows: int) -> tuple[list[str], list[tuple]]:
         cursor = self.con.execute(sql)

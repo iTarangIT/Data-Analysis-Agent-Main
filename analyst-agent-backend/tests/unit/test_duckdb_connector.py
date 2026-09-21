@@ -9,7 +9,14 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook
 
-from app.connectors.duckdb import TABLE_NAME, DuckDBConnector, FileSource, ingest_upload
+from app.connectors.duckdb import (
+    TABLE_NAME,
+    Dataset,
+    DuckDBConnector,
+    FileSource,
+    Part,
+    ingest_upload,
+)
 from app.services.errors import DomainError
 
 CSV = "region,product,units,revenue_inr\nWest,Cell,10,2500.50\nEast,Pack,4,1800.00\n"
@@ -33,8 +40,25 @@ def _workbook(tmp_path: Path, filename: str, sheets: dict[str, list[list]]):
     return ingest_upload(src, tmp_path / "out", filename, set())
 
 
+def _dataset(sources: list[FileSource], root: Path | None = None) -> Dataset:
+    return Dataset(
+        "t_a",
+        [
+            Part(
+                table=s.table,
+                file=s.file,
+                origin=s.origin,
+                storage_key=Path(s.path).relative_to(root).as_posix() if root else s.path,
+                sha256="",
+                profile=s.profile,
+            )
+            for s in sources
+        ],
+    )
+
+
 def _types(sources: list[FileSource]) -> dict[str, str]:
-    (table,) = DuckDBConnector("t_a", sources).read_tables([sources[0].table])
+    (table,) = _dataset(sources).read_tables([sources[0].table])
     return {c.name: c.type for c in table.columns}
 
 
@@ -46,6 +70,11 @@ def sales(tmp_path) -> list[FileSource]:
 @pytest.fixture
 def connector(sales) -> DuckDBConnector:
     return DuckDBConnector("t_a", sales)
+
+
+@pytest.fixture
+def dataset(sales) -> Dataset:
+    return _dataset(sales)
 
 
 class TestIngest:
@@ -222,35 +251,78 @@ class TestHardening:
 
 
 class TestSchema:
-    def test_it_lists_the_uploaded_tables(self, connector):
-        assert connector.list_tables() == ["q3_sales"]
+    def test_it_lists_the_uploaded_tables(self, dataset):
+        assert dataset.list_tables() == ["q3_sales"]
 
-    def test_it_reads_the_uploaded_columns_in_file_order(self, connector):
-        (table,) = connector.read_tables(["q3_sales"])
+    def test_it_reads_the_uploaded_columns_in_file_order(self, dataset):
+        (table,) = dataset.read_tables(["q3_sales"])
 
         assert table.name == "q3_sales"
         assert [c.name for c in table.columns] == ["region", "product", "units", "revenue_inr"]
 
-    def test_types_are_sniffed_once_at_ingest(self, connector):
-        (table,) = connector.read_tables(["q3_sales"])
+    def test_types_are_sniffed_once_at_ingest(self, dataset):
+        (table,) = dataset.read_tables(["q3_sales"])
         types = {c.name: c.type for c in table.columns}
 
         assert types["units"] == "BIGINT"
         assert types["region"] == "VARCHAR"
 
-    def test_a_table_the_file_does_not_hold_is_not_invented(self, connector):
-        assert [t.name for t in connector.read_tables(["q3_sales", "elsewhere"])] == ["q3_sales"]
+    def test_a_table_the_file_does_not_hold_is_not_invented(self, dataset):
+        assert [t.name for t in dataset.read_tables(["q3_sales", "elsewhere"])] == ["q3_sales"]
 
     def test_stats_are_a_size_for_the_requested_tables_only(self, tmp_path, sales):
         taken = {"q3_sales"}
         big = _csv(tmp_path, "ledger.csv", "units\n" + "1\n" * 1234, taken)
         small = _csv(tmp_path, "stock.csv", "units\n1\n", taken)
-        connector = DuckDBConnector("t_a", sales + big + small)
+        dataset = _dataset(sales + big + small)
 
-        assert connector.table_stats(["ledger", "q3_sales", "elsewhere"]) == {
+        assert dataset.table_stats(["ledger", "q3_sales", "elsewhere"]) == {
             "ledger": {"rows": "thousands", "rows_approx": 1200},
             "q3_sales": {"rows": "few"},
         }
+
+    def test_the_columns_read_are_the_ones_duckdb_materialises(self, tmp_path):
+        parts = [
+            _csv(tmp_path, "july.csv", "units,note,only_july\n1,a,x\n")[0],
+            _csv(tmp_path, "august.csv", "units,note\n2.5,3\n")[0],
+        ]
+        union = [FileSource(**{**vars(p), "table": "sales"}) for p in parts]
+
+        _, materialised = DuckDBConnector("t_a", union).run_select(
+            "select column_name, data_type from information_schema.columns "
+            "where table_name = 'sales' order by ordinal_position",
+            10,
+        )
+        (table,) = _dataset(union).read_tables(["sales"])
+
+        assert [(c.name, c.type) for c in table.columns] == materialised
+        assert dict(materialised) == {"units": "DOUBLE", "note": "VARCHAR", "only_july": "VARCHAR"}
+
+    def test_row_counts_add_up_across_a_tables_parts(self, tmp_path):
+        parts = [_csv(tmp_path, f"m{i}.csv", "units\n1\n2\n3\n")[0] for i in range(2)]
+        union = [FileSource(**{**vars(p), "table": "sales"}) for p in parts]
+
+        _, rows = DuckDBConnector("t_a", union).run_select("select count(*) from sales", 1)
+
+        assert _dataset(union).table_stats(["sales"]) == {"sales": {"rows": "few"}}
+        assert rows == [(6,)]
+
+
+class TestOpening:
+    def test_only_the_chosen_tables_are_materialised(self, tmp_path, monkeypatch):
+        from app.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "file_store_dir", str(tmp_path), raising=False)
+        taken: set[str] = set()
+        sources = [s for i in range(20) for s in _csv(tmp_path, f"table{i}.csv", CSV, taken)]
+        dataset = _dataset(sources, root=tmp_path)
+
+        _, rows = dataset.open({"table3", "table7", "table11"}).run_select(
+            "select table_name from information_schema.tables order by table_name", 50
+        )
+
+        assert rows == [("table11",), ("table3",), ("table7",)]
+        assert len(dataset.list_tables()) == 20
 
 
 class TestQuerying:
@@ -288,6 +360,18 @@ class TestLockdown:
     def test_attaching_another_database_is_refused(self, connector, tmp_path):
         with pytest.raises(Exception, match=r"(?i)permission"):
             connector.run_select(f"attach '{(tmp_path / 'o.db').as_posix()}' as o", 10)
+
+    def test_duckdbs_own_temp_directory_is_closed_too(self, sales, tmp_path, monkeypatch):
+        import duckdb
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".tmp").mkdir()
+        duckdb.sql("copy (select 1 as x) to '.tmp/probe.parquet'")
+
+        with pytest.raises(Exception, match=r"(?i)permission|not allowed|denied"):
+            DuckDBConnector("t_a", sales).run_select(
+                "select * from read_parquet('.tmp/probe.parquet')", 10
+            )
 
     def test_the_lockdown_cannot_be_lifted(self, connector):
         with pytest.raises(Exception, match=r"(?i)lock"):

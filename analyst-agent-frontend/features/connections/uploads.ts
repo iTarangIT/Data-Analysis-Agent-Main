@@ -75,10 +75,11 @@ export type DatasetFile = { file: string; tables: string[] };
 export function filesOf(tables: readonly SourceTable[]): DatasetFile[] {
   const byFile = new Map<string, string[]>();
   for (const table of tables) {
-    if (table.file === null) continue;
-    const names = byFile.get(table.file);
-    if (names) names.push(table.name);
-    else byFile.set(table.file, [table.name]);
+    for (const file of table.files) {
+      const names = byFile.get(file);
+      if (names) names.push(table.name);
+      else byFile.set(file, [table.name]);
+    }
   }
   return [...byFile]
     .map(([file, names]) => ({ file, tables: names }))

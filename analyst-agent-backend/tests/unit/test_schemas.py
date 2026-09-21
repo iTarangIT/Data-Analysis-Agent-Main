@@ -69,14 +69,14 @@ class TestConnectionOut:
 
 
 class TestTableOut:
-    @pytest.mark.parametrize("file", [None, "Q3 sales.csv"])
-    def test_a_table_names_the_file_it_came_from_when_there_is_one(self, file):
-        table = TableOut(name="q3_sales", file=file, selected=False, definition=None, stats=None)
+    @pytest.mark.parametrize("files", [[], ["Q3 sales.csv"], ["July.xlsx", "August.xlsx"]])
+    def test_a_table_names_the_files_behind_it_when_there_are_any(self, files):
+        table = TableOut(name="q3_sales", files=files, selected=False, definition=None, stats=None)
 
-        assert table.file == file
+        assert table.files == files
 
-    def test_the_file_is_never_left_out(self):
-        with pytest.raises(ValidationError, match="file"):
+    def test_the_files_are_never_left_out(self):
+        with pytest.raises(ValidationError, match="files"):
             TableOut(name="q3_sales", selected=False, definition=None, stats=None)
 
 

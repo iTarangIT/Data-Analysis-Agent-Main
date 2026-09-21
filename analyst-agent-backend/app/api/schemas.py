@@ -49,7 +49,7 @@ class ConnectionOut(BaseModel):
 
 class TableOut(BaseModel):
     name: str
-    file: str | None
+    files: list[str]
     selected: bool
     # Both null for a table that is not selected: its structure is not kept.
     definition: TableDef | None

@@ -47,7 +47,7 @@ export function TablePicker({
   const [refreshing, startRefresh] = useTransition();
 
   const names = catalog.tables.map((t) => t.name);
-  const fileOf = new Map(catalog.tables.map((t) => [t.name, t.file]));
+  const fileOf = new Map(catalog.tables.map((t) => [t.name, t.files.join(", ")]));
   const shown = filterTables(names, query);
   const cap = catalog.max_selected;
   const atCap = chosen.size >= cap;

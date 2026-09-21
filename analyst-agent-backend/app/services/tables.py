@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.catalog.relationships import map_relationships
 from app.catalog.types import Catalog, CatalogTable, Relationship, TableDef
 from app.config import get_settings
-from app.connectors.base import SqlConnector
+from app.connectors.base import CatalogReader
 from app.connectors.registry import connector_for
 from app.db.models import Connection, ConnectionTable
 from app.logging import log
@@ -90,7 +90,7 @@ def _reachable(conn: Connection) -> Iterator[None]:
 
 
 def _introspect(
-    connector: SqlConnector, names: list[str]
+    connector: CatalogReader, names: list[str]
 ) -> tuple[list[TableDef], dict[str, dict[str, Any]]]:
     if not names:
         return [], {}
@@ -126,18 +126,19 @@ def ensure_listed(db: Session, conn: Connection) -> None:
 
 
 def view(db: Session, conn: Connection) -> dict[str, Any]:
-    files = (
-        {p["table"]: f.name for f in conn.files if f.status == "ready" for p in f.parts}
-        if conn.kind == "file"
-        else {}
-    )
+    files: dict[str, set[str]] = {}
+    if conn.kind == "file":
+        for f in conn.files:
+            if f.status == "ready":
+                for part in f.parts:
+                    files.setdefault(part["table"], set()).add(f.name)
     return {
         "max_selected": get_settings().max_agent_tables,
         "refreshed_at": conn.catalog_refreshed_at,
         "tables": [
             {
                 "name": r.name,
-                "file": files.get(r.name),
+                "files": sorted(files.get(r.name, ())),
                 "selected": r.selected,
                 "definition": r.definition,
                 "stats": r.stats,
@@ -216,7 +217,7 @@ def forget(db: Session, conn: Connection) -> None:
     conn.catalog_refreshed_at = None
 
 
-async def load_for_run(db: Session, conn: Connection, connector: SqlConnector) -> Catalog:
+async def load_for_run(db: Session, conn: Connection, connector: CatalogReader) -> Catalog:
     """The chosen tables for one run, re-read first when the last reading has gone stale.
 
     A run only ever updates the rows of tables already chosen, or inserts a first listing that

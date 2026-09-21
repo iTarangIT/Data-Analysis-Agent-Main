@@ -28,7 +28,7 @@ from app.api.schemas import RunCreate
 from app.catalog.types import Catalog
 from app.config import get_settings
 from app.connectors.base import SqlConnector
-from app.connectors.registry import connector_for
+from app.connectors.registry import connector_for, open_for_run
 from app.db.models import Connection, Run, Tenant
 from app.db.session import SessionLocal
 from app.logging import log
@@ -44,8 +44,8 @@ Emit = Callable[[dict], None]
 @dataclass(frozen=True)
 class PreparedRun:
     run: Run
-    connector: SqlConnector
     catalog: Catalog
+    connector: SqlConnector | None = None
 
 
 @dataclass
@@ -246,8 +246,12 @@ async def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> Prepa
     check_limits(db, tenant)
 
     conn = conn_svc.get_connection(db, ctx.tenant_id, body.connection_id)
-    connector = connector_for(conn)
-    catalog = await tables_svc.load_for_run(db, conn, connector)
+    reader = connector_for(conn)
+    catalog = await tables_svc.load_for_run(db, conn, reader)
+    queued = get_settings().queue_enabled
+    connector = (
+        None if queued else await asyncio.to_thread(open_for_run, reader, catalog.table_names)
+    )
 
     run = Run(
         tenant_id=ctx.tenant_id,
@@ -260,10 +264,10 @@ async def prepare_run(db: Session, ctx: TenantContext, body: RunCreate) -> Prepa
     db.commit()
     db.refresh(run)
 
-    if get_settings().queue_enabled:
+    if queued:
         await queue.pool().enqueue_job("run_question", run.id, _job_id=run.id)
 
-    return PreparedRun(run=run, connector=connector, catalog=catalog)
+    return PreparedRun(run=run, catalog=catalog, connector=connector)
 
 
 def agent_config(run: Run, callbacks: list, limit: int) -> dict[str, Any]:
@@ -387,7 +391,9 @@ def execute_run(
         emit({"type": "done", "data": {"run_id": run.id, "duration_ms": duration_ms}})
 
 
-async def _stream_inline(prepared: PreparedRun) -> AsyncIterator[dict[str, str]]:
+async def _stream_inline(
+    run: Run, connector: SqlConnector, catalog: Catalog
+) -> AsyncIterator[dict[str, str]]:
     """Run in this process, on a worker thread so the event loop stays free.
 
     Before this the agent ran on the loop itself, which meant a client disconnect could not be
@@ -395,7 +401,6 @@ async def _stream_inline(prepared: PreparedRun) -> AsyncIterator[dict[str, str]]
     """
     frames: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
-    run = prepared.run
 
     def emit(event: dict) -> None:
         loop.call_soon_threadsafe(frames.put_nowait, sse_frame(event))
@@ -403,7 +408,7 @@ async def _stream_inline(prepared: PreparedRun) -> AsyncIterator[dict[str, str]]
     def work() -> None:
         db = SessionLocal()
         try:
-            execute_run(db, run, prepared.connector, prepared.catalog, emit)
+            execute_run(db, run, connector, catalog, emit)
         finally:
             db.close()
             loop.call_soon_threadsafe(frames.put_nowait, None)
@@ -438,8 +443,12 @@ async def stream_run(
     db: Session, ctx: TenantContext, prepared: PreparedRun
 ) -> AsyncIterator[dict[str, str]]:
     run_id = prepared.run.id
-    queued = get_settings().queue_enabled
-    stream = _stream_queued(run_id) if queued else _stream_inline(prepared)
+    queued = prepared.connector is None
+    stream = (
+        _stream_queued(run_id)
+        if prepared.connector is None
+        else _stream_inline(prepared.run, prepared.connector, prepared.catalog)
+    )
     try:
         async for frame in stream:
             yield frame

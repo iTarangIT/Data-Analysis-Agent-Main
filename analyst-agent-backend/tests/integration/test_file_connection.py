@@ -214,10 +214,10 @@ class TestDataset:
         body = r.json()
         assert (body["file_count"], body["selected_tables"], body["total_tables"]) == (3, 3, 3)
         tables = _tables(client, token, body["id"])
-        assert {name: (t["file"], t["selected"]) for name, t in tables.items()} == {
-            "dealers": ("dealers.csv", True),
-            "q3_sales": ("Q3 sales.csv", True),
-            "stock": ("stock.csv", True),
+        assert {name: (t["files"], t["selected"]) for name, t in tables.items()} == {
+            "dealers": (["dealers.csv"], True),
+            "q3_sales": (["Q3 sales.csv"], True),
+            "stock": (["stock.csv"], True),
         }
 
     def test_added_files_arrive_unselected(self, client, token, connection_id):
@@ -230,10 +230,10 @@ class TestDataset:
         )
 
         assert r.status_code == 200, r.text
-        assert {t["name"]: (t["file"], t["selected"]) for t in r.json()["tables"]} == {
-            "dealers": ("dealers.csv", False),
-            "q3_sales": ("Q3 sales.csv", True),
-            "stock": ("stock.csv", False),
+        assert {t["name"]: (t["files"], t["selected"]) for t in r.json()["tables"]} == {
+            "dealers": (["dealers.csv"], False),
+            "q3_sales": (["Q3 sales.csv"], True),
+            "stock": (["stock.csv"], False),
         }
         assert client.get("/connections", headers=_auth(token)).json()[0]["file_count"] == 3
 
@@ -387,6 +387,47 @@ class TestDataset:
 
         assert r.status_code == 204
         assert not connection_dir.exists()
+
+
+class TestLoading:
+    def test_the_picker_never_opens_duckdb(self, client, token, connection_id, monkeypatch):
+        from app.connectors.duckdb import DuckDBConnector
+
+        def refuse(*args, **kwargs):
+            raise AssertionError("listing opened DuckDB")
+
+        monkeypatch.setattr(DuckDBConnector, "__init__", refuse)
+        base = f"/connections/{connection_id}/tables"
+
+        assert client.get(base, headers=_auth(token)).status_code == 200
+        chosen = client.put(base, headers=_auth(token), json={"tables": ["q3_sales"]})
+        assert chosen.status_code == 200, chosen.text
+        assert client.post(f"{base}/refresh", headers=_auth(token)).status_code == 200
+        assert client.get("/connections", headers=_auth(token)).status_code == 200
+
+    def test_a_run_opens_only_the_chosen_tables(
+        self, client, token, clean_app_db, uploads_dir, monkeypatch
+    ):
+        from app.connectors.duckdb import DuckDBConnector
+
+        connection_id = _upload(
+            client, token, "July", ("Q3 sales.csv", CSV.encode()), ("dealers.csv", DEALERS.encode())
+        ).json()["id"]
+        choose = {"tables": ["dealers"]}
+        client.put(f"/connections/{connection_id}/tables", headers=_auth(token), json=choose)
+        opened: list[set[str]] = []
+        original = DuckDBConnector.__init__
+
+        def spy(self, tenant_id, sources):
+            opened.append({s.table for s in sources})
+            original(self, tenant_id, sources)
+
+        monkeypatch.setattr(DuckDBConnector, "__init__", spy)
+
+        events = _ask(client, token, connection_id, "select count(*) as n from dealers", "load-1")
+
+        assert dict(events)["rows"]["rows"] == [[2]]
+        assert opened == [{"dealers"}]
 
 
 class TestSupabaseStorage:
