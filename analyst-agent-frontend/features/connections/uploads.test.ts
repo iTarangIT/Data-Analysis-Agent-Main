@@ -20,12 +20,17 @@ function table(name: string, files: string[]): SourceTable {
 }
 
 describe("uploadProblem", () => {
-  it.each(["sales.csv", "stock.TSV", "July.xlsx", "ledger.parquet"])("accepts %s", (name) => {
-    expect(uploadProblem(sheet(name))).toBeNull();
-  });
+  it.each(["sales.csv", "stock.TSV", "July.xlsx", "ledger.parquet", "statement.PDF"])(
+    "accepts %s",
+    (name) => {
+      expect(uploadProblem(sheet(name))).toBeNull();
+    },
+  );
 
-  it.each(["report.pdf", "old.xls", "archive.csv.zip", "noextension"])("refuses %s by name", (name) => {
-    expect(uploadProblem(sheet(name))).toBe(`${name} is not a CSV, TSV, Excel or Parquet file.`);
+  it.each(["report.docx", "old.xls", "archive.csv.zip", "noextension"])("refuses %s by name", (name) => {
+    expect(uploadProblem(sheet(name))).toBe(
+      `${name} is not a CSV, TSV, Excel, Parquet or PDF file.`,
+    );
   });
 
   it("refuses a file over the size limit, and not one exactly at it", () => {
@@ -43,10 +48,10 @@ describe("pick", () => {
   });
 
   it("keeps the good files and says why the others were left out", () => {
-    const { files, problems } = pick([], [sheet("a.csv"), sheet("notes.pdf"), sheet("b.csv")]);
+    const { files, problems } = pick([], [sheet("a.csv"), sheet("notes.docx"), sheet("b.csv")]);
 
     expect(files.map((f) => f.name)).toEqual(["a.csv", "b.csv"]);
-    expect(problems).toEqual(["notes.pdf is not a CSV, TSV, Excel or Parquet file."]);
+    expect(problems).toEqual(["notes.docx is not a CSV, TSV, Excel, Parquet or PDF file."]);
   });
 
   it("refuses a name already chosen, including twice in one drop", () => {
@@ -90,7 +95,7 @@ describe("UploadedFiles", () => {
     );
     expect(UploadedFiles.safeParse(["a.csv"]).success).toBe(false);
     expect(UploadedFiles.safeParse([file("run.exe")]).error?.issues[0]?.message).toBe(
-      "run.exe is not a CSV, TSV, Excel or Parquet file.",
+      "run.exe is not a CSV, TSV, Excel, Parquet or PDF file.",
     );
   });
 });

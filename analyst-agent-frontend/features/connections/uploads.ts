@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { SourceTable } from "@/lib/api/types";
 
-export const UPLOAD_SUFFIXES = [".csv", ".tsv", ".xlsx", ".parquet"] as const;
+export const UPLOAD_SUFFIXES = [".csv", ".tsv", ".xlsx", ".parquet", ".pdf"] as const;
 export const MAX_UPLOAD_FILES = 20;
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
@@ -20,7 +20,7 @@ export function stemOf(name: string): string {
 
 export function uploadProblem(file: Named): string | null {
   if (!(UPLOAD_SUFFIXES as readonly string[]).includes(suffixOf(file.name))) {
-    return `${file.name} is not a CSV, TSV, Excel or Parquet file.`;
+    return `${file.name} is not a CSV, TSV, Excel, Parquet or PDF file.`;
   }
   if (file.size > MAX_UPLOAD_BYTES) return `${file.name} is over the 25 MB limit.`;
   return null;

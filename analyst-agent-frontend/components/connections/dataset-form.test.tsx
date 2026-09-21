@@ -54,10 +54,10 @@ describe("DatasetForm", () => {
   it("leaves out a file it cannot read, and says so", () => {
     const { container } = render(<DatasetForm />);
 
-    choose(container, "sales.csv", "notes.pdf");
+    choose(container, "sales.csv", "notes.docx");
 
-    expect(screen.queryByText("notes.pdf")).toBeNull();
-    expect(screen.getByRole("alert").textContent).toContain("notes.pdf is not a CSV");
+    expect(screen.queryByText("notes.docx")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("notes.docx is not a CSV");
   });
 
   it("uploads every chosen file with the name, then refreshes and closes", async () => {

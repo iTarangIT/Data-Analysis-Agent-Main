@@ -68,7 +68,7 @@ export function FileDrop({
         </span>
         <span className="text-[0.875rem] font-medium text-ink">Drop files here, or choose them</span>
         <span className="text-[0.75rem] text-ink-muted">
-          CSV, TSV, Excel or Parquet. Up to {MAX_UPLOAD_FILES} files, 25 MB each.
+          CSV, TSV, Excel, Parquet or PDF. Up to {MAX_UPLOAD_FILES} files, 25 MB each.
         </span>
       </label>
 
