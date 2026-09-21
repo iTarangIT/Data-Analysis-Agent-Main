@@ -76,10 +76,23 @@ fastapi==0.141.1
     # via analyst-agent (pyproject.toml)
 filetype==1.2.0
     # via langchain-google-genai
+google-api-core==2.38.0
+    # via google-api-python-client
+google-api-python-client==2.200.0
+    # via analyst-agent (pyproject.toml)
 google-auth[requests]==2.58.0
-    # via google-genai
+    # via
+    #   analyst-agent (pyproject.toml)
+    #   google-api-core
+    #   google-api-python-client
+    #   google-auth-httplib2
+    #   google-genai
+google-auth-httplib2==0.4.2
+    # via google-api-python-client
 google-genai==2.22.0
     # via langchain-google-genai
+googleapis-common-protos==1.75.3
+    # via google-api-core
 greenlet==3.5.5
     # via sqlalchemy
 h11==0.16.0
@@ -93,6 +106,10 @@ httpcore==1.0.9
     # via httpx
 httpcore2==2.12.0
     # via httpx2
+httplib2==0.32.0
+    # via
+    #   google-api-python-client
+    #   google-auth-httplib2
 httptools==0.8.0
     # via uvicorn
 httpx==0.28.1
@@ -179,6 +196,8 @@ numpy==2.5.3
     # via pandas
 openpyxl==3.1.5
     # via analyst-agent (pyproject.toml)
+opentelemetry-api==1.44.0
+    # via google-api-core
 orjson==3.12.0
     # via
     #   langgraph-checkpoint-postgres
@@ -211,6 +230,13 @@ pluggy==1.6.0
     # via
     #   pytest
     #   pytest-cov
+proto-plus==1.28.4
+    # via google-api-core
+protobuf==7.36.2
+    # via
+    #   google-api-core
+    #   googleapis-common-protos
+    #   proto-plus
 psycopg[binary,pool]==3.3.5
     # via
     #   analyst-agent (pyproject.toml)
@@ -255,6 +281,8 @@ pyjwt[crypto]==2.13.0
     #   analyst-agent (pyproject.toml)
     #   mcp
     #   redis
+pyparsing==3.3.3
+    # via httplib2
 pypdfium2==5.13.0
     # via pdfplumber
 pyproject-hooks==1.2.0
@@ -303,6 +331,7 @@ reportlab==5.0.1
     # via analyst-agent (pyproject.toml)
 requests==2.34.2
     # via
+    #   google-api-core
     #   google-auth
     #   google-genai
     #   langsmith
@@ -365,6 +394,7 @@ typing-extensions==4.16.0
     #   langsmith
     #   mcp
     #   mypy
+    #   opentelemetry-api
     #   psycopg
     #   psycopg-pool
     #   pydantic
@@ -384,6 +414,8 @@ tzdata==2026.3
     # via
     #   pandas
     #   psycopg
+uritemplate==4.2.0
+    # via google-api-python-client
 urllib3==2.7.0
     # via requests
 uuid-utils==0.17.1

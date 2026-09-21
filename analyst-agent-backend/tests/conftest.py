@@ -100,6 +100,33 @@ def scanned_pdf(tmp_path):
     return path
 
 
+@pytest.fixture
+def google_credentials(monkeypatch):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from pydantic import SecretStr
+
+    from app.config import get_settings
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    info = {
+        "type": "service_account",
+        "project_id": "analyst-test",
+        "private_key_id": "k1",
+        "private_key": key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode(),
+        "client_email": "reader@analyst-test.iam.gserviceaccount.com",
+        "client_id": "1",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
+    secret = SecretStr(json.dumps(info))
+    monkeypatch.setattr(get_settings(), "google_service_account_json", secret, raising=False)
+    return info
+
+
 class FakeStorage:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}

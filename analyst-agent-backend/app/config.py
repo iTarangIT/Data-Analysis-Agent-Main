@@ -108,6 +108,11 @@ class Settings(BaseSettings):
     ingest_timeout_s: int = 90
     ingest_memory_mb: int = 2048
     max_pdf_pages: int = 150
+    google_service_account_json: SecretStr | None = None
+    google_sync_after_minutes: int = 30
+    drive_max_depth: int = 5
+    drive_max_files: int = 500
+    sync_timeout_s: int = 1800
     # Bounds resident memory per concurrent run, because an upload is materialised in full.
     max_upload_bytes: int = 25 * 1024 * 1024
     max_dataset_bytes: int = 100 * 1024 * 1024
