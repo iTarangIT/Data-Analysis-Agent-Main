@@ -1244,3 +1244,110 @@ and ends with `alembic upgrade head`.
 - **Open:** on the free plan both services sleep after 15 idle minutes, and uploaded files live
   on the backend's disk, so they are lost whenever it sleeps or redeploys. The IoT source is
   unreachable from Render until it has a public address; its saved one is the local SSH tunnel.
+
+## PDF, Google Sheets and Google Drive sources: phase 0, 2026-09-21
+
+Owner's call: PDFs, Google Sheets and Google Drive folders become new ways files enter the
+existing `kind="file"` dataset. Phase 0 lays the ground; phases 1 (PDF) and 2 (Drive and Sheets)
+have not started. The plan is `C:\Users\adity\.claude\plans\breezy-sparking-kurzweil.md`.
+
+### What shipped
+
+| Commit | Item |
+|---|---|
+| `0fcc55c` | 0.2 sources and files as rows, and migration `c41908122766` |
+| `b3addaa` | 0.1 local or Supabase storage, with a content-hash cache |
+| `3d8eb83` | 0.3 the picker reads metadata, a run materialises only chosen tables |
+| `d4e0246` | 0.4 parsing in a spawned process with a timeout and, on Linux, a memory limit |
+| `aa3feff` | `TestParity` given a stall timeout its stand-in worker can meet; it passes now |
+
+0.2 went before 0.1, against the spec's order: a storage key carries a `file_id`, which only exists
+once files are rows, and doing storage first would have made a third secret shape for the
+migration to read.
+
+- **Rows.** `dataset_sources` (one upload source per dataset, by a partial unique index) and
+  `dataset_files` (unique on `source_id, remote_id`; each file's Parquet parts as
+  `{sheet, table, storage_key, sha256, bytes, profile}`). `connections` gained `sync_status` and
+  `synced_at`. A dataset's `secret_enc` is an encrypted `{}`, so the API process decrypts nothing.
+  An upload that names a failed file ("file lost, re-upload it") replaces it.
+- **Storage.** `FILE_STORE_BACKEND=local|supabase`. Keys are
+  `{tenant}/{connection}/{file_id}/{table}-{sha256[:12]}.parquet`. Supabase reads go through
+  `FILE_STORE_DIR/cache/{sha256}.parquet`, downloaded to a temp file, sha256-checked and renamed.
+  The secret key goes in `apikey` only. Deleting a file or a dataset deletes its objects.
+- **Loading.** `Dataset` lists, reads columns and sums rows from part profiles and never opens
+  DuckDB; `Dataset.open` materialises only the chosen tables, a table being every part with its
+  name through `read_parquet([...], union_by_name = true)`. `TableOut.file` became `files`. With
+  the queue on, only the worker opens a dataset, off the event loop.
+- **Sandbox.** One spawned child per upload batch, `INGEST_TIMEOUT_S` (90) per file, killed on
+  timeout or death; `RLIMIT_AS` of `INGEST_MEMORY_MB` (2048) on Linux.
+
+### Found and fixed
+
+**The DuckDB lockdown had a hole.** On duckdb 1.5.5, after `enable_external_access=false`, a query
+could still read any file under DuckDB's own temp directory, `<cwd>/.tmp`. `allowed_directories`
+reads `[]` and setting it to `[]` does not close it. `SET temp_directory=''` before the lockdown
+does; a test pins it. A query past the 512 MB limit now fails rather than spilling to disk.
+
+### Migration `c41908122766`
+
+Stop any arq worker before upgrading. It must run online. For every live dataset it reads both
+secret shapes (the old `{table, path}` and today's), makes one upload source with
+`combine=false`, moves each Parquet on disk to its new key reading its column types and row count
+with duckdb, and marks a file with any part missing `failed`, "file lost, re-upload it". Table
+names do not change; `connection_tables` rows left without a part are dropped. It moves local
+files only and uploads nothing: switching an existing deployment to `supabase` means re-uploading,
+which on Render costs nothing because its disk has already lost every file. The downgrade rebuilds
+the old secret from ready upload parts where they now lie; Google parts, which do not exist yet,
+cannot be expressed in the old shape and would be dropped.
+
+Verified up, down and up on the local `analyst` against its two real datasets plus one seeded with
+the old shape and a missing file, and pinned by `tests/integration/test_dataset_migration.py`.
+
+### Verified
+
+- Backend: 580 passed, 3 skipped, 3 failed. The failures are `test_schema_stats.py`, which still
+  needs `demo` reseeded (unchanged). Coverage 94%; `sql_guard.py` and `app/security/` 100%.
+  `ruff check` and `ruff format --check` clean. mypy went from 59 errors on `main` to 48; none of
+  the remaining ones is in code this work added.
+- `alembic check`: no new operations.
+- Frontend: `npm run lint`, `npm run typecheck`, `npm test` (283) clean.
+
+### Not done
+
+| # | Item | Blocked on |
+|---|---|---|
+| 1 | 0.5, the query tool naming its dialect, is committed on `feat/dialect-in-query-tool` (`40fd3c0`) and not on `main` | the rule 6 eval gate below |
+| 2 | Rule 6 for 0.5: `evals/run_evals.py --cases golden_file.yaml` live, on `main` (before) and on the branch (after) | a Supabase TOKEN for an email-and-password account, and roughly 30 to 45 Gemini requests, which the free tier's 20 per model per day does not cover in one day |
+| 3 | The Linux address-space limit, `RLIMIT_AS`, has never run: its test skips on Windows and this machine has no Linux | a Linux run, or the first deploy to Render |
+| 4 | A live check against a real Supabase bucket; the tests use an in-memory Storage API behind the real client | a private `datasets` bucket and `SUPABASE_SECRET_KEY` |
+| 5 | `test_schema_stats.py` | reseeding `demo`, unchanged |
+
+### What Render will need
+
+- `FILE_STORE_BACKEND=supabase`, `SUPABASE_SECRET_KEY` (an `sb_secret_` key), `STORAGE_BUCKET`
+  (default `datasets`), and a **private** bucket of that name. The Free plan caps any one object at
+  50 MB; `MAX_DATASET_BYTES` is 100 MB, so one oversized part is refused in a sentence.
+- `INGEST_TIMEOUT_S` and `INGEST_MEMORY_MB` if the defaults are wrong for the instance. If uploads
+  fail on Linux with import errors, raise `INGEST_MEMORY_MB`: `RLIMIT_AS` counts virtual memory,
+  which numpy and duckdb reserve generously.
+
+### Documentation read
+
+- DuckDB: https://duckdb.org/docs/current/operations_manual/securing_duckdb/overview.html,
+  https://duckdb.org/docs/current/data/multiple_files/combining_schemas.html,
+  https://duckdb.org/docs/current/data/parquet/overview.html
+- Supabase Storage: https://supabase.com/docs/guides/storage,
+  https://supabase.com/docs/guides/storage/uploads/standard-uploads,
+  https://supabase.com/docs/guides/storage/uploads/file-limits,
+  https://supabase.com/docs/guides/storage/management/delete-objects,
+  https://supabase.com/docs/guides/api/api-keys,
+  https://supabase.com/docs/guides/getting-started/migrating-to-new-api-keys, and the route
+  sources in https://github.com/supabase/storage
+- httpx: https://www.python-httpx.org/advanced/timeouts/, https://www.python-httpx.org/quickstart/
+- Python: https://docs.python.org/3.12/library/multiprocessing.html,
+  https://docs.python.org/3.12/library/concurrent.futures.html,
+  https://docs.python.org/3.12/library/resource.html
+- Alembic: https://alembic.sqlalchemy.org/en/latest/ops.html
+- arq 0.28.0 and FastAPI 0.141.1 / Starlette 1.6.0 were read from the installed source, for phase 2.
+- Google Drive v3, Sheets v4, google-auth and google-api-python-client were read for phase 2 and
+  are listed with it.
