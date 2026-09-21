@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.connectors import storage
 from app.connectors.duckdb import FileSource, ingest_upload
+from app.connectors.sandbox import Sandbox
 from app.db.models import Connection, DatasetFile, DatasetSource, Tenant
 from app.logging import log
 from app.security import vault
@@ -164,11 +165,13 @@ def _ingest_batch(
     dirs: list[Path] = []
     stored: list[dict] = []
     try:
-        for src, filename in uploads:
-            file_id = str(uuid.uuid4())
-            dirs.append(root / file_id)
-            sources = ingest_upload(src, root / file_id, filename, taken)
-            staged.append((file_id, filename, src.stat().st_size, sources))
+        with Sandbox() as sandbox:
+            for src, filename in uploads:
+                file_id = str(uuid.uuid4())
+                dirs.append(root / file_id)
+                sources = sandbox.run(filename, ingest_upload, src, root / file_id, filename, taken)
+                taken |= {s.table for s in sources}
+                staged.append((file_id, filename, src.stat().st_size, sources))
         held_bytes = sum(part["bytes"] for f in held for part in f.parts)
         added = sum(Path(s.path).stat().st_size for *_, sources in staged for s in sources)
         if held_bytes + added > settings.max_dataset_bytes:
