@@ -101,11 +101,13 @@ class TestParity:
     ):
         """A real worker is not needed to prove the transport: the same `execute_run` publishes
         the same frames, which is the property the shared encoder guarantees."""
+        from app.config import get_settings
         from app.connectors.registry import connector_for, open_for_run
         from app.db.models import Connection
         from app.db.session import SessionLocal
         from app.services import runs as svc
 
+        monkeypatch.setattr(get_settings(), "run_stall_timeout_s", 30, raising=False)
         enqueued: list[str] = []
 
         async def fake_enqueue(name, run_id, **kwargs):
