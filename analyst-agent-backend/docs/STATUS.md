@@ -1249,7 +1249,7 @@ and ends with `alembic upgrade head`.
 
 Owner's call: PDFs, Google Sheets and Google Drive folders become new ways files enter the
 existing `kind="file"` dataset. Phase 0 lays the ground; phases 1 (PDF) and 2 (Drive and Sheets)
-have not started. The plan is `C:\Users\adity\.claude\plans\breezy-sparking-kurzweil.md`.
+have not started.
 
 ### What shipped
 
@@ -1351,3 +1351,141 @@ the old shape and a missing file, and pinned by `tests/integration/test_dataset_
 - arq 0.28.0 and FastAPI 0.141.1 / Starlette 1.6.0 were read from the installed source, for phase 2.
 - Google Drive v3, Sheets v4, google-auth and google-api-python-client were read for phase 2 and
   are listed with it.
+
+## PDF, Google Sheets and Google Drive sources: phases 1 and 2, 2026-09-21
+
+Built on the owner's go-ahead while the 0.5 eval gate still waits, so the "never start the next
+phase on red" rule was set aside for this work. 0.5 stays on its branch until the gate runs.
+
+### What shipped
+
+| Commit | Item |
+|---|---|
+| `57b93f4` | 1.1 Indian and western amounts, currency prefixes, `(1,234)` and Dr/Cr coerced to numbers |
+| `b2548d6` | 1.2 PDFs: tables stitched across pages, text-only PDFs as chunks, scans refused |
+| `17819db` | `.gitattributes` keeps PDFs byte for byte |
+| `64f5b96` | 1.3 the web app accepts PDFs |
+| `1bd7e4f` | 2.1 the service-account Drive/Sheets client and link parsing |
+| `709210b` | 2.2 an empty dataset, and resolving a link with tenant binding |
+| `5bf4b0a` | 2.3 browsing a shared folder one level at a time |
+| `4325740` | 2.4 choosing what a source includes, with a dry run; listing and removing sources |
+| `ce23ec2` | 2.5 and 2.6 the sync, and combining files with the same columns into one table |
+| `94cdf0f` | the optional live test against a real shared folder |
+| `580e49a` | 2.7 the web app's Google flow |
+| `c1e636a` | 2.8 per-file sync status, "Synced N min ago" and Refresh |
+
+- **PDF.** pdfplumber (MIT), up to `MAX_PDF_PAGES` (150), with each page's cache flushed as it
+  goes. A table carries on onto the next page when the first table there has the same number of
+  columns and repeats the header or has none. A table's comment says where it came from, "From
+  statement.pdf, pages 1–3". Text without tables becomes `{stem}__text(page, chunk, text)`.
+- **Endpoints.** `POST /connections/dataset`, `POST /{id}/google/resolve`,
+  `GET /{id}/google/tree`, `POST` and `GET /{id}/sources`, `DELETE /{id}/sources/{source_id}`,
+  `POST /{id}/sync` (202). The upload and file-removal routes are unchanged.
+- **Sync.** An arq job named `sync_dataset` when `QUEUE_ENABLED`, otherwise a FastAPI background
+  task. One at a time per connection, through a Postgres session advisory lock. It diffs on
+  `md5Checksum` or `modifiedTime`, so a second sync of unchanged files downloads nothing. A run
+  on a dataset synced more than `GOOGLE_SYNC_AFTER_MINUTES` ago queues a sync and answers from
+  what is there.
+
+### Where the docs changed the spec
+
+1. **`quotaUser` gives no per-tenant quota.** Google's system-parameters page says it is ignored
+   without an API key, and the Drive and Sheets limits pages count a service account as one
+   user. It is passed as specified. All tenants share one project quota, including about 60
+   Sheets reads a minute.
+2. **Parameters differ per method.** `includeItemsFromAllDrives` exists only on `files.list`,
+   and `files.export` takes neither shared-drive flag; the client raises `TypeError` on an
+   unknown one. The bundled discovery documents confirm both, and the tests run against them.
+3. **`sharingUser` is "if applicable".** It is absent for shared-drive items unless the service
+   account holds a direct permission, and its email can be hidden. Binding is checked on the
+   root item alone, so a shared-drive link will usually need an owner to confirm it.
+4. **An unshared item is a 404.** Only 404 and permission-reason 403s become `needs_share`; any
+   other failure is a 503. A trashed root is refused in its own words.
+5. **The export limit error is undocumented.** `exportSizeLimitExceeded` is branched on by reason
+   and falls back to one `values.batchGet` over all grid tabs.
+6. **One listing can cover several folders,** OR'd in one query, but this is undocumented and
+   Drive has a known bug where such a query sometimes returns nothing. A folder that comes back
+   empty from a multi-folder query is listed again on its own. Downloads and exports cannot be
+   batched.
+7. **Child shortcuts are listed as unsupported,** because a listing gives no version for a
+   shortcut's target, so a change to it could never be seen.
+
+### Other decisions
+
+- 2.5 and 2.6 are one commit: placing a synced part is where the union happens.
+- `dataset_files.status` has no `syncing`; syncing is shown per source from `sync_status`.
+- The dry run's size is Drive's raw bytes, against a cap that counts Parquet: an estimate.
+- A file over `MAX_UPLOAD_BYTES`, or one that would take the dataset past `MAX_DATASET_BYTES`,
+  is `skipped` with its reason; a file that fails to parse is `failed` with the parser's reason.
+  A failed file is tried again on the next sync; a skipped one only when it changes.
+- Cancelling the web flow after the dataset or a pending source was created leaves them in
+  place, to be removed by hand.
+
+### Verified
+
+- Backend: 657 passed, 4 skipped, 3 failed (`test_schema_stats.py`, which still needs `demo`
+  reseeded). The Google tests run the whole pipeline through the API against a fake Drive: link,
+  binding, tree, rules, dry run, sync, the export-limit fallback, the union, stable table names,
+  the lock, and a stale run queuing a sync. The Drive client's own tests run the real discovery
+  documents through a recording transport. ruff clean; mypy 48, from 59 on `main`.
+- Frontend: lint, typecheck, and 328 tests in 38 files.
+
+### Not done
+
+| # | Item | Blocked on |
+|---|---|---|
+| 1 | Rule 6 for 0.5 and scoring `golden_pdf.yaml` | a Supabase TOKEN and Gemini quota |
+| 2 | Any call against real Google: the live test skips | `GOOGLE_SERVICE_ACCOUNT_JSON` and a shared `GOOGLE_TEST_FOLDER_ID` |
+| 3 | The Linux `RLIMIT_AS` limit | a Linux run |
+| 4 | A real Supabase bucket | `SUPABASE_SECRET_KEY` and a private `datasets` bucket |
+| 5 | A browser run of the PDF upload and the Google flow | the items above, for Google |
+
+### What Render needs
+
+- **Env:**
+  - `FILE_STORE_BACKEND=supabase`, `SUPABASE_SECRET_KEY`, `STORAGE_BUCKET`, and a private bucket
+    of that name.
+  - `GOOGLE_SERVICE_ACCOUNT_JSON`: the service account's JSON key on one line. Enable the Drive
+    and Sheets APIs on its project.
+  - Optional, with their defaults: `GOOGLE_SYNC_AFTER_MINUTES` (30), `DRIVE_MAX_DEPTH` (5),
+    `DRIVE_MAX_FILES` (500), `SYNC_TIMEOUT_S` (1800), `INGEST_TIMEOUT_S` (90),
+    `INGEST_MEMORY_MB` (2048), `MAX_PDF_PAGES` (150).
+- **Migration:** `alembic upgrade head`, with any arq worker stopped first.
+- **Worker:** with `QUEUE_ENABLED=true`, a background worker service running
+  `arq app.workers.runs.WorkerSettings`, since syncs and queued runs both execute there. With it
+  off, syncs run as background tasks inside the web service and are lost if it restarts mid-sync;
+  the next stale run or Refresh starts another.
+
+### Documentation read (phases 1 and 2)
+
+- pdfplumber: https://github.com/jsvine/pdfplumber (README and `pdfplumber/page.py`, `pdf.py` as
+  installed, 0.11.10)
+- reportlab: https://docs.reportlab.com/reportlab/userguide/ch7_tables/,
+  https://docs.reportlab.com/reportlab/userguide/ch2_graphics/,
+  https://docs.reportlab.com/reportlab/userguide/ch5_platypus/
+- Drive API v3:
+  - Reference: https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list,
+    https://developers.google.com/workspace/drive/api/reference/rest/v3/files/get,
+    https://developers.google.com/workspace/drive/api/reference/rest/v3/files/export,
+    https://developers.google.com/workspace/drive/api/reference/rest/v3/files
+  - Guides: https://developers.google.com/workspace/drive/api/guides/search-files,
+    https://developers.google.com/workspace/drive/api/guides/ref-search-terms,
+    https://developers.google.com/workspace/drive/api/guides/manage-downloads,
+    https://developers.google.com/workspace/drive/api/guides/resource-keys,
+    https://developers.google.com/workspace/drive/api/guides/enable-shareddrives,
+    https://developers.google.com/workspace/drive/api/guides/shared-drives-diffs,
+    https://developers.google.com/workspace/drive/api/guides/handle-errors,
+    https://developers.google.com/workspace/drive/api/guides/performance,
+    https://developers.google.com/workspace/drive/api/guides/limits
+- Standard parameters: https://docs.cloud.google.com/apis/docs/system-parameters
+- Sheets API v4:
+  https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets.values/batchGet,
+  https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/get,
+  https://developers.google.com/workspace/sheets/api/limits
+- google-auth 2.58.0 (`google/oauth2/service_account.py`) and google-api-python-client 2.200.0
+  (`discovery.py`, `http.py`, `errors.py`, and the bundled `drive.v3.json` and `sheets.v4.json`),
+  read from the installed source.
+- FastAPI 0.141.1: https://fastapi.tiangolo.com/tutorial/background-tasks/ and `fastapi/routing.py`,
+  which attaches injected background tasks to a returned response.
+- Next.js 16.3.4: `node_modules/next/dist/docs` (route handlers, `params` as a Promise, server
+  actions running one at a time).
