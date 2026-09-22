@@ -59,8 +59,13 @@ class Series:
 
 
 def label(period: pd.Period) -> str:
-    # A week prints as its whole range; its Monday is what the SQL grouped on.
-    return period.start_time.date().isoformat() if period.freqstr.startswith("W") else str(period)
+    freq = period.freqstr
+    if freq.startswith("W"):
+        # A week prints as its whole range; its Monday is what the SQL grouped on.
+        return period.start_time.date().isoformat()
+    if freq == "h":
+        return period.start_time.isoformat(timespec="minutes")
+    return str(period)
 
 
 def _timestamp(value: Any) -> date | datetime:

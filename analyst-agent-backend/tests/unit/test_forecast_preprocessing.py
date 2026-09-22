@@ -3,9 +3,11 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+import pandas as pd
 import pytest
 
 from app.forecasting.preprocessing import (
+    FREQ,
     MIN_HISTORY,
     ForecastInputError,
     label,
@@ -120,6 +122,22 @@ class TestWeeks:
 
         assert label(series.periods[0]) == "2026-06-01"
         assert series.merged == 1
+
+
+class TestLabels:
+    @pytest.mark.parametrize(
+        ("grain", "start", "expected"),
+        [
+            ("hour", "2026-01-01 05:00", "2026-01-01T05:00"),
+            ("day", "2026-07-01", "2026-07-01"),
+            ("week", "2026-07-06", "2026-07-06"),
+            ("month", "2026-07-01", "2026-07"),
+            ("quarter", "2026-07-01", "2026Q3"),
+            ("year", "2026-07-01", "2026"),
+        ],
+    )
+    def test_each_grain_gets_its_iso_label(self, grain, start, expected):
+        assert label(pd.Period(start, freq=FREQ[grain])) == expected
 
 
 class TestRefusals:
