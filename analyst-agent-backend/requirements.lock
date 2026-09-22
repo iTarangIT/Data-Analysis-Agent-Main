@@ -122,7 +122,9 @@ httpx==0.28.1
 httpx-sse==0.4.3
     # via mcp
 httpx2==2.12.0
-    # via langsmith
+    # via
+    #   langchain-typesafe
+    #   langsmith
 idna==3.19
     # via
     #   anyio
@@ -147,6 +149,7 @@ langchain-core==1.6.2
     #   langchain
     #   langchain-google-genai
     #   langchain-mcp-adapters
+    #   langchain-typesafe
     #   langgraph
     #   langgraph-checkpoint
     #   langgraph-prebuilt
@@ -159,6 +162,8 @@ langchain-protocol==0.0.19
     # via
     #   langchain-core
     #   langgraph-sdk
+langchain-typesafe==0.0.1a3
+    # via analyst-agent (pyproject.toml)
 langgraph==1.2.11
     # via
     #   analyst-agent (pyproject.toml)

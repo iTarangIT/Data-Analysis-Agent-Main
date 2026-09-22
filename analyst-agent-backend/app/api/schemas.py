@@ -199,9 +199,23 @@ class TraceAttempt(BaseModel):
     ms: int | None = None
 
 
+class TraceRoute(BaseModel):
+    """Which Gemini tier the Jev router asked for, and which one answered."""
+
+    mode: Literal["shadow", "on"]
+    wanted: Literal["fast", "deep"]
+    used: Literal["fast", "deep"]
+    # None when the router failed and the run fell back to the fast tier.
+    p_deep: float | None
+    ms: int
+    reason: Literal["classified", "router_error"]
+
+
 class RunTrace(BaseModel):
     stages: list[Literal["router", "sql_gen", "sql_guard", "db_exec", "answer"]]
     attempts: list[TraceAttempt]
+    # None for every run made while ROUTER_MODE was off.
+    route: TraceRoute | None = None
 
 
 class RunCreate(BaseModel):

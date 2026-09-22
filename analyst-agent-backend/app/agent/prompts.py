@@ -207,3 +207,17 @@ next month is 1, the next six months is 6."""
 FORECAST_KIND_ARG = """total when the measure adds up over a period (sales, revenue, units,
 visits); level when it is a reading at a point in time (price, balance, stock on hand,
 temperature)."""
+
+# Asked of TypeSafe's Jev classifier about the question alone, before any model call. It returns
+# the probability of yes, which `ROUTER_DEEP_THRESHOLD` turns into a tier.
+ROUTE_DEEP = """This is a business question a customer asked a data analyst who answers it by
+writing SQL against the customer's own database. Does answering it well need the slower, more
+capable model rather than the fast one?"""
+
+ROUTE_DEEP_WHEN = """Answering takes several dependent steps: joining several tables, deriving a
+ratio, share or period-over-period change, comparing cohorts or segments, explaining why a figure
+moved, or settling what an ambiguous business term means before it can be counted."""
+
+ROUTE_FAST_WHEN = """One direct query answers it: a lookup, a count, a total or average, a simple
+filter or grouping, a top or bottom few. Also greetings, thanks, and short follow-ups that only
+reword or narrow the previous answer."""

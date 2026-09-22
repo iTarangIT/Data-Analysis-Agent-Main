@@ -46,6 +46,8 @@ dependencies = [
     # Google Drive and Sheets through a service account.
     "google-api-python-client>=2.150",
     "google-auth>=2.30",
+    # TypeSafe's Jev classifier, which picks the Gemini tier for a run. Pinned exactly: an alpha.
+    "langchain-typesafe==0.0.1a3",
 ]
 
 [project.optional-dependencies]

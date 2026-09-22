@@ -1577,3 +1577,35 @@ No suite may drop, and `golden_forecast` must reach 80%.
 - In one rare sequence, a live run and its saved copy can name different tools: a forecast
   refused with `at: forecast`, then a successful query.
 - A forecast refusal is counted as "rejected" in the run summary.
+
+### Jev model routing, 2026-09-22 (branch `feat/jev-model-routing`)
+
+TypeSafe's Jev classifier reads each new question and returns the probability it needs a deeper
+Gemini model. `app/agent/router.py` is middleware: a `before_agent` hook asks Jev (one node per
+run, which `recursion_limit()` counts), and a `wrap_model_call` swaps the agent's model. The
+summariser keeps its own model and stays on the fast tier. It is built on `TypeSafeClassifier`
+from `langchain-typesafe==0.0.1a3`, not on the package's own `ModelRouterMiddleware`, which has no
+shadow mode, no threshold, no timeout, and fails the run when Jev fails.
+
+- **Off by default.** `ROUTER_MODE=off` attaches nothing, and the agent runs exactly as before.
+  `shadow` asks Jev and saves its answer as `runs.trace.route` (`mode`, `wanted`, `used`,
+  `p_deep`, `ms`, `reason`), but every run still uses `GEMINI_MODEL`. `on` sends a question to
+  `GEMINI_MODEL_DEEP` when `p_deep >= ROUTER_DEEP_THRESHOLD`.
+- **A failing Jev never fails a run.** An error, or no answer within `ROUTER_TIMEOUT_S` (2 s),
+  falls back to the fast tier with `reason: router_error`.
+- **Only the question's text goes to TypeSafe**, never the thread, whose tool results hold rows.
+- **Any mode other than off refuses to boot without `TYPESAFE_API_KEY`.**
+- `runs.model` is now the model with the most tokens in the run, since a routed run can use two.
+  The Jev call is not a chat-model call, so it never counts toward the token budget.
+- The agent's prompts are unchanged, so `prompt_sha()` has not moved and the cassettes still
+  match. The Jev question (`ROUTE_DEEP` in `prompts.py`) is judged on the shadow data, not the
+  golden suites.
+
+**Verified:** `tests/unit/test_router.py`, 12 cases, no network: Jev is the real classifier over
+`httpx2.MockTransport`. Quick suite: all pass. `requirements.lock` gained only
+`langchain-typesafe` and `# via` lines.
+
+**Not done:** deploying, setting the key on Render (API service, and the worker when the queue is
+on), the shadow period, and the SQL review of `trace->'route'`. Before `on`: confirm
+`gemini-3.6-flash` is served for this key, run the golden suites with it as `GEMINI_MODEL`, and
+change the daily budget from tokens to cost, because the deep tier's tokens cost more.

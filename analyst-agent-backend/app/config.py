@@ -1,8 +1,16 @@
 import json
 from functools import lru_cache
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import AnyHttpUrl, Field, PostgresDsn, RedisDsn, SecretStr, field_validator
+from pydantic import (
+    AnyHttpUrl,
+    Field,
+    PostgresDsn,
+    RedisDsn,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -14,6 +22,23 @@ class Settings(BaseSettings):
 
     gemini_api_key: SecretStr
     gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_model_deep: str = "gemini-3.6-flash"
+
+    # TypeSafe's Jev classifier picks the tier for each run. "shadow" asks it and records the
+    # answer in the run's trace but always uses the fast tier; "on" follows it; "off" never asks.
+    router_mode: Literal["off", "shadow", "on"] = "off"
+    typesafe_api_key: SecretStr | None = None
+    router_deep_threshold: float = 0.7
+    # Jev answers before the first model call, so this is added to every run's latency.
+    router_timeout_s: float = 2.0
+
+    @model_validator(mode="after")
+    def _router_needs_a_key(self) -> Self:
+        """Without a key every routed run falls back to the fast tier, and a shadow period would
+        record nothing but failures."""
+        if self.router_mode != "off" and not self.typesafe_api_key:
+            raise ValueError("ROUTER_MODE is on or shadow but TYPESAFE_API_KEY is not set")
+        return self
 
     app_db_url: PostgresDsn
     checkpoint_db_url: PostgresDsn

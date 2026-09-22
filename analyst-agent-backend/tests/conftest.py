@@ -24,6 +24,9 @@ os.environ.setdefault("LANGSMITH_TRACING", "false")
 # the unit tests hand `build_agent` an `InMemoryStore`, and `test_memory_store.py` asks for
 # Postgres.
 os.environ.setdefault("MEMORY_BACKEND", "off")
+# A local .env left on shadow would otherwise call TypeSafe from the suite and add a node to
+# every recursion limit the tests assert. test_router.py turns routing on where it wants it.
+os.environ.setdefault("ROUTER_MODE", "off")
 
 
 @pytest.fixture(autouse=True)

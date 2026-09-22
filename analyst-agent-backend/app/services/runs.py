@@ -62,6 +62,8 @@ class RunOutcome:
     # the stream, so a saved run shows the same steps a live one did. Row counts, never rows.
     stages: list[str] = field(default_factory=list)
     attempts: list[dict] = field(default_factory=list)
+    # Which tier Jev asked for and which one ran. None while ROUTER_MODE is off.
+    route: dict | None = None
 
 
 class EventTranslator:
@@ -355,7 +357,9 @@ def execute_run(
                 stream_mode="updates",
             ):
                 for node, update_ in chunk.items():
-                    for message in (update_ or {}).get("messages", []):
+                    update_ = update_ or {}
+                    outcome.route = update_.get("route", outcome.route)
+                    for message in update_.get("messages", []):
                         for event in translator.for_message(node, message):
                             emit(event)
     except GraphRecursionError as e:
@@ -380,6 +384,11 @@ def execute_run(
     # name. Keying on that name recorded zero tokens whenever the two differed, and the daily
     # budget is enforced from exactly this number.
     totals = list(usage.usage_metadata.values())
+    trace: dict[str, Any] = {"stages": outcome.stages, "attempts": outcome.attempts}
+    # Absent rather than null when routing is off, so `trace->'route' is not null` finds only
+    # the runs that were routed.
+    if outcome.route:
+        trace["route"] = outcome.route
     finish_run(
         db,
         run.id,
@@ -393,8 +402,14 @@ def execute_run(
         answer=outcome.answer or None,
         rows_returned=len(outcome.rows),
         chart=outcome.chart,
-        trace={"stages": outcome.stages, "attempts": outcome.attempts},
-        model=next(iter(usage.usage_metadata), None),
+        trace=trace,
+        # A routed run can use two models, the agent's tier and the summariser's. The one that
+        # did most of the work is the one the run is recorded against.
+        model=max(
+            usage.usage_metadata,
+            key=lambda m: usage.usage_metadata[m]["total_tokens"],
+            default=None,
+        ),
         prompt_tokens=sum(t.get("input_tokens", 0) for t in totals),
         completion_tokens=sum(t.get("output_tokens", 0) for t in totals),
     )

@@ -24,6 +24,7 @@ from langgraph.runtime import Runtime
 from app.agent import memory
 from app.agent.context import RunContext
 from app.agent.prompts import THREAD_SUMMARY
+from app.agent.router import JevRouter
 from app.config import get_settings
 from app.llm import get_llm
 from app.logging import log
@@ -154,7 +155,9 @@ def context_middleware() -> list[AgentMiddleware]:
 
 
 def build_middleware(store_attached: bool) -> list[AgentMiddleware]:
-    middleware = context_middleware()
+    mode = get_settings().router_mode
+    middleware: list[AgentMiddleware] = [] if mode == "off" else [JevRouter(mode)]
+    middleware += context_middleware()
     if store_attached:
         middleware.append(MemoryMiddleware())
     return middleware
