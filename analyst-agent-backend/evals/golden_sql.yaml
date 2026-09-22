@@ -46,3 +46,9 @@
 
 - q: What was the average GPS latitude in August 2026?
   expect_contains: july
+
+# Added with forecasting: a history question worded like a trend, which has to stay with the
+# query tool whether or not a forecasting model is loaded. No `expect_chart`: Postgres dates
+# reach the chart rule as strings through MCP, so it draws a bar here.
+- q: How has battery revenue moved month by month?
+  expect_type: rows

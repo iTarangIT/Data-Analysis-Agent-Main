@@ -1,0 +1,33 @@
+# Forecasting questions, run live only, with FORECAST_ENGINE=timesfm, against
+# evals/fixtures/monthly_revenue.csv (36 months, 2023-09 to 2026-08).
+#
+#   curl -X POST localhost:8000/connections/file -H "Authorization: Bearer $env:TOKEN" `
+#        -F name="monthly revenue" -F files=@evals/fixtures/monthly_revenue.csv
+#   $env:CONN="<that connection id>"; python evals/run_evals.py --cases golden_forecast.yaml
+#
+# Not replayable: the forecast's numbers go back to the model, so they are part of every later
+# request the cassette would have to match, and they come from a model the replay never loads.
+#
+# Every forecast case carries `expect_type: rows` because run_evals needs one primary
+# expectation; the history rows are what satisfies it. `expect_chart: forecast` is the
+# assertion that matters: it is only emitted when the forecast tool ran and succeeded.
+
+- q: Forecast revenue for the next six months.
+  expect_type: rows
+  expect_chart: forecast
+
+- q: Predict next month's revenue.
+  expect_type: rows
+  expect_chart: forecast
+
+- q: Estimate how many units we will sell next quarter.
+  expect_type: rows
+  expect_chart: forecast
+
+# History must stay with the query tool. 168000 is March 2026's revenue and no other month's.
+- q: What was the revenue in March 2026?
+  expect_value: 168000
+
+- q: Show revenue by month.
+  expect_type: rows
+  expect_chart: line
