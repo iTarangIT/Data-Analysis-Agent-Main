@@ -200,15 +200,15 @@ class TraceAttempt(BaseModel):
 
 
 class TraceRoute(BaseModel):
-    """Which Gemini tier the Jev router asked for, and which one answered."""
+    """Which tool the Jev router picked for the run, and whether the model was held to it."""
 
     mode: Literal["shadow", "on"]
-    wanted: Literal["fast", "deep"]
-    used: Literal["fast", "deep"]
-    # None when the router failed and the run fell back to the fast tier.
-    p_deep: float | None
+    # Both None when the router failed and the run kept every tool.
+    picked: Literal["sql", "forecast", "clarify"] | None
+    p: float | None
     ms: int
-    reason: Literal["classified", "router_error"]
+    reason: Literal["classified", "unsure", "router_error"]
+    restricted: bool
 
 
 class RunTrace(BaseModel):

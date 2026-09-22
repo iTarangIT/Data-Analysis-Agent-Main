@@ -22,19 +22,20 @@ class Settings(BaseSettings):
 
     gemini_api_key: SecretStr
     gemini_model: str = "gemini-3.5-flash-lite"
-    gemini_model_deep: str = "gemini-3.6-flash"
 
-    # TypeSafe's Jev classifier picks the tier for each run. "shadow" asks it and records the
-    # answer in the run's trace but always uses the fast tier; "on" follows it; "off" never asks.
+    # TypeSafe's Jev classifier picks the tool a run needs before the model is called. "shadow"
+    # records its pick in the run's trace and changes nothing; "on" offers the model only the
+    # picked tool; "off" never asks.
     router_mode: Literal["off", "shadow", "on"] = "off"
     typesafe_api_key: SecretStr | None = None
-    router_deep_threshold: float = 0.7
+    # Below this probability for its pick, Jev is ignored and the model keeps every tool.
+    router_threshold: float = 0.7
     # Jev answers before the first model call, so this is added to every run's latency.
     router_timeout_s: float = 2.0
 
     @model_validator(mode="after")
     def _router_needs_a_key(self) -> Self:
-        """Without a key every routed run falls back to the fast tier, and a shadow period would
+        """Without a key every routed run falls back to every tool, and a shadow period would
         record nothing but failures."""
         if self.router_mode != "off" and not self.typesafe_api_key:
             raise ValueError("ROUTER_MODE is on or shadow but TYPESAFE_API_KEY is not set")

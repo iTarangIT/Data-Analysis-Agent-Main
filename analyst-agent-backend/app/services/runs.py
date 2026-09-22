@@ -62,7 +62,8 @@ class RunOutcome:
     # the stream, so a saved run shows the same steps a live one did. Row counts, never rows.
     stages: list[str] = field(default_factory=list)
     attempts: list[dict] = field(default_factory=list)
-    # Which tier Jev asked for and which one ran. None while ROUTER_MODE is off.
+    # Which tool Jev picked for the run, and whether the model was held to it. None while
+    # ROUTER_MODE is off.
     route: dict | None = None
 
 
@@ -403,13 +404,7 @@ def execute_run(
         rows_returned=len(outcome.rows),
         chart=outcome.chart,
         trace=trace,
-        # A routed run can use two models, the agent's tier and the summariser's. The one that
-        # did most of the work is the one the run is recorded against.
-        model=max(
-            usage.usage_metadata,
-            key=lambda m: usage.usage_metadata[m]["total_tokens"],
-            default=None,
-        ),
+        model=next(iter(usage.usage_metadata), None),
         prompt_tokens=sum(t.get("input_tokens", 0) for t in totals),
         completion_tokens=sum(t.get("output_tokens", 0) for t in totals),
     )

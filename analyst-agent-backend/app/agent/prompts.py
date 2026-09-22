@@ -208,16 +208,17 @@ FORECAST_KIND_ARG = """total when the measure adds up over a period (sales, reve
 visits); level when it is a reading at a point in time (price, balance, stock on hand,
 temperature)."""
 
-# Asked of TypeSafe's Jev classifier about the question alone, before any model call. It returns
-# the probability of yes, which `ROUTER_DEEP_THRESHOLD` turns into a tier.
-ROUTE_DEEP = """This is a business question a customer asked a data analyst who answers it by
-writing SQL against the customer's own database. Does answering it well need the slower, more
-capable model rather than the fast one?"""
+# Asked of TypeSafe's Jev classifier about the question alone, before any model call. Each label
+# is one of the answers it may choose; `forecast` is offered only when a forecasting model is
+# loaded.
+ROUTE_TOOL = """This is a message a customer sent to a data analyst who answers from the
+customer's own database. What does answering it need?"""
 
-ROUTE_DEEP_WHEN = """Answering takes several dependent steps: joining several tables, deriving a
-ratio, share or period-over-period change, comparing cohorts or segments, explaining why a figure
-moved, or settling what an ambiguous business term means before it can be counted."""
+ROUTE_SQL = """Looking up what the data already holds: figures, lists, totals, comparisons or
+trends for any period up to today."""
 
-ROUTE_FAST_WHEN = """One direct query answers it: a lookup, a count, a total or average, a simple
-filter or grouping, a top or bottom few. Also greetings, thanks, and short follow-ups that only
-reword or narrow the previous answer."""
+ROUTE_FORECAST = """Predicting a figure for a period that has not happened yet: forecast,
+predict, project, expect, next week, next month, next quarter, next year."""
+
+ROUTE_CLARIFY = """No lookup at all: a greeting, thanks, a question about what the analyst can
+do, something unrelated to the customer's data, or a request to reword the previous answer."""

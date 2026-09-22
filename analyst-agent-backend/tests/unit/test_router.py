@@ -1,4 +1,4 @@
-"""The Jev router: which Gemini tier answers a run, and what the run keeps about that choice.
+"""The Jev router: which tool a run is given, and what the run keeps about that choice.
 
 Jev is the real `TypeSafeClassifier` over a mock transport, so the package's own request and
 response handling runs and nothing reaches the network.
@@ -11,30 +11,58 @@ import httpx2
 import pytest
 from langchain_core.messages import AIMessage
 from langchain_typesafe import TypeSafeClassifier
-from pydantic import SecretStr, ValidationError
+from langgraph.store.memory import InMemoryStore
+from pydantic import Field, SecretStr, ValidationError
 
 from app.agent.graph import build_agent, recursion_limit
 from app.agent.middleware import build_middleware
 from app.agent.router import classifier
 from app.config import Settings, get_settings
-from app.llm import get_llm
-from tests.unit.test_middleware import CATALOG, CONTEXT, FakeConnector, FakeToolModel
+from app.forecasting.service import ForecastService
+from tests.unit.test_middleware import (
+    CATALOG,
+    CONTEXT,
+    FakeConnector,
+    FakeToolModel,
+    FlatEngine,
+    _tool_call,
+)
 
-QUESTION = "how many vehicles went offline last week"
+QUESTION = "what will revenue be next quarter"
+EVERY_TOOL = ["forecast_series", "query_database"]
 
 
-def answering(p_deep, seen=None):
+class OfferedTools(FakeToolModel):
+    """Keeps the names of the tools each model call was given."""
+
+    offered: list = Field(default_factory=list)
+
+    def bind_tools(self, tools, **kwargs):
+        self.offered.append(sorted(t.name for t in tools))
+        return self
+
+
+def picking(label, p, seen=None):
     def handle(request):
         body = json.loads(request.content)
         if seen is not None:
             seen.append(body)
-        (question_id,) = body["questions"]
+        ((question_id, question),) = body["questions"].items()
+        labels = list(question["criteria"])
+        rest = (1 - p) / (len(labels) - 1)
         return httpx2.Response(
             200,
             json={
                 "model": "jev-1",
-                "answers": {question_id: {"type": "noul", "noul": p_deep}},
-                "usage": {"input_tokens": 40, "output_tokens": 1},
+                "answers": {
+                    question_id: {
+                        "type": "choice",
+                        "choice": label,
+                        "probabilities": {x: p if x == label else rest for x in labels},
+                        "confidence": p,
+                    }
+                },
+                "usage": {"input_tokens": 60, "output_tokens": 1},
             },
         )
 
@@ -53,30 +81,28 @@ def timing_out(request):
 def routing(monkeypatch):
     def set_mode(mode):
         monkeypatch.setattr(get_settings(), "router_mode", mode, raising=False)
-        monkeypatch.setattr(get_settings(), "router_deep_threshold", 0.7, raising=False)
+        monkeypatch.setattr(get_settings(), "router_threshold", 0.7, raising=False)
 
     return set_mode
 
 
-def ask(handler):
-    """One run through the real agent, returning the route it recorded and who answered."""
-    fast = FakeToolModel(responses=[AIMessage(content="Answered by the fast model.")])
-    deep = FakeToolModel(responses=[AIMessage(content="Answered by the deep model.")])
-
-    def tiers(tier="fast"):
-        return {"fast": fast, "deep": deep}[tier]
-
+def ask(handler, *, forecasting=True, store=None, responses=None):
+    """One run through the real agent. Returns the route it recorded and the tools each model
+    call was offered."""
+    model = OfferedTools(responses=responses or [AIMessage(content="Done.")])
+    forecaster = ForecastService(FlatEngine()) if forecasting else None
     jev = TypeSafeClassifier(
         api_key="test", client=httpx2.Client(transport=httpx2.MockTransport(handler))
     )
     with (
-        patch("app.agent.graph.get_llm", side_effect=tiers),
-        patch("app.agent.middleware.get_llm", side_effect=tiers),
-        patch("app.agent.router.get_llm", side_effect=tiers),
+        patch("app.agent.graph.get_llm", return_value=model),
+        patch("app.agent.middleware.get_llm", return_value=model),
+        patch("app.agent.graph.get_forecaster", return_value=forecaster),
+        patch("app.agent.middleware.get_forecaster", return_value=forecaster),
         patch("app.agent.router.classifier", return_value=jev),
     ):
-        middleware = build_middleware(False)
-        agent = build_agent(FakeConnector(), CATALOG, middleware=middleware)
+        middleware = build_middleware(store is not None)
+        agent = build_agent(FakeConnector(), CATALOG, store=store, middleware=middleware)
         updates = [
             (node, update)
             for chunk in agent.stream(
@@ -91,86 +117,121 @@ def ask(handler):
     # `execute_run` reads the route from exactly this update, so asserting on it here covers
     # what reaches `runs.trace`.
     route = next((u["route"] for n, u in updates if n == "JevRouter.before_agent"), None)
-    answer = next(m.text for n, u in updates if n == "model" for m in u["messages"])
-    return route, answer
+    return route, model.offered
 
 
 class TestOff:
-    def test_off_never_asks_jev_and_records_no_route(self, routing):
+    def test_off_never_asks_jev_and_offers_every_tool(self, routing):
         routing("off")
         seen = []
 
-        route, answer = ask(answering(0.9, seen))
+        route, offered = ask(picking("sql", 0.9, seen))
 
         assert seen == []
         assert route is None
-        assert answer == "Answered by the fast model."
+        assert offered == [EVERY_TOOL]
 
 
 class TestShadow:
-    def test_a_hard_question_is_recorded_as_deep_but_answered_by_fast(self, routing):
+    def test_the_pick_is_recorded_and_every_tool_is_still_offered(self, routing):
         routing("shadow")
 
-        route, answer = ask(answering(0.9))
+        route, offered = ask(picking("forecast", 0.9))
 
-        assert answer == "Answered by the fast model."
-        assert route["mode"] == "shadow"
-        assert route["wanted"] == "deep"
-        assert route["used"] == "fast"
-        assert route["p_deep"] == 0.9
-        assert route["reason"] == "classified"
-        assert isinstance(route["ms"], int) and route["ms"] >= 0
+        assert offered == [EVERY_TOOL]
+        assert isinstance(route.pop("ms"), int)
+        assert route == {
+            "mode": "shadow",
+            "picked": "forecast",
+            "p": 0.9,
+            "reason": "classified",
+            "restricted": False,
+        }
 
     def test_only_the_question_is_sent_to_typesafe(self, routing):
         """Jev is a third party. Thread history holds result rows, which must never leave."""
         routing("shadow")
         seen = []
 
-        ask(answering(0.1, seen))
+        ask(picking("sql", 0.9, seen))
 
         assert [body["state"] for body in seen] == [QUESTION]
 
 
 class TestOn:
-    def test_a_hard_question_is_answered_by_the_deep_model(self, routing):
+    def test_a_forecast_question_is_offered_only_the_forecast_tool(self, routing):
         routing("on")
 
-        route, answer = ask(answering(0.9))
+        route, offered = ask(picking("forecast", 0.9))
 
-        assert answer == "Answered by the deep model."
-        assert route["wanted"] == "deep" and route["used"] == "deep"
+        assert offered == [["forecast_series"]]
+        assert route["restricted"] is True
 
-    def test_an_easy_question_stays_on_the_fast_model(self, routing):
+    def test_a_data_question_is_held_to_the_query_tool_on_every_call(self, routing):
         routing("on")
 
-        route, answer = ask(answering(0.2))
+        _, offered = ask(
+            picking("sql", 0.9),
+            responses=[_tool_call("select vehicleno from vehicles"), AIMessage(content="One.")],
+        )
 
-        assert answer == "Answered by the fast model."
-        assert route["wanted"] == "fast" and route["used"] == "fast"
+        assert offered == [["query_database"], ["query_database"]]
 
-    def test_a_probability_exactly_at_the_threshold_goes_deep(self, routing):
+    def test_remember_is_never_taken_away(self, routing):
         routing("on")
 
-        route, answer = ask(answering(0.7))
+        _, offered = ask(picking("sql", 0.9), store=InMemoryStore())
 
-        assert answer == "Answered by the deep model."
-        assert route["used"] == "deep"
+        assert offered == [["query_database", "remember"]]
+
+    def test_a_clarify_pick_leaves_every_tool(self, routing):
+        """A data question misjudged as small talk must still be able to reach the data."""
+        routing("on")
+
+        route, offered = ask(picking("clarify", 0.95))
+
+        assert offered == [EVERY_TOOL]
+        assert route["picked"] == "clarify" and route["restricted"] is False
+
+    @pytest.mark.parametrize(
+        ("p", "reason", "want"),
+        [(0.69, "unsure", EVERY_TOOL), (0.7, "classified", ["forecast_series"])],
+        ids=["below the threshold", "at the threshold"],
+    )
+    def test_jev_is_followed_only_when_sure_enough(self, routing, p, reason, want):
+        routing("on")
+
+        route, offered = ask(picking("forecast", p))
+
+        assert offered == [want]
+        assert route["reason"] == reason
+
+
+class TestWithoutForecasting:
+    def test_jev_is_not_offered_a_forecast_when_no_model_is_loaded(self, routing):
+        """Picking it would hold the model to a tool it does not have, leaving it none."""
+        routing("on")
+        seen = []
+
+        ask(picking("sql", 0.9, seen), forecasting=False)
+
+        assert sorted(seen[0]["questions"]["tool"]["criteria"]) == ["clarify", "sql"]
 
 
 class TestAFailingRouterDoesNotFailTheRun:
     """Jev is an early-access service in front of every question. When it fails the run carries
-    on with the model it would have used anyway, and says why."""
+    on as it would without routing, and says why."""
 
     @pytest.mark.parametrize("handler", [failing, timing_out], ids=["error", "timeout"])
-    def test_the_fast_model_answers(self, routing, handler):
+    def test_every_tool_is_offered(self, routing, handler):
         routing("on")
 
-        route, answer = ask(handler)
+        route, offered = ask(handler)
 
-        assert answer == "Answered by the fast model."
+        assert offered == [EVERY_TOOL]
         assert route["reason"] == "router_error"
-        assert route["p_deep"] is None
-        assert route["wanted"] == "fast" and route["used"] == "fast"
+        assert route["picked"] is None and route["p"] is None
+        assert route["restricted"] is False
 
 
 class TestConfiguration:
@@ -191,10 +252,3 @@ class TestConfiguration:
             assert classifier().client.timeout == httpx2.Timeout(1.5)
         finally:
             classifier.cache_clear()
-
-    def test_the_deep_tier_is_its_own_gemini_model(self, monkeypatch):
-        monkeypatch.setattr(get_settings(), "gemini_model", "gemini-fast-x", raising=False)
-        monkeypatch.setattr(get_settings(), "gemini_model_deep", "gemini-deep-x", raising=False)
-
-        assert get_llm().model == "gemini-fast-x"
-        assert get_llm(tier="deep").model == "gemini-deep-x"

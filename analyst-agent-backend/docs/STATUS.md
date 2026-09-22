@@ -1578,34 +1578,54 @@ No suite may drop, and `golden_forecast` must reach 80%.
   refused with `at: forecast`, then a successful query.
 - A forecast refusal is counted as "rejected" in the run summary.
 
-### Jev model routing, 2026-09-22 (branch `feat/jev-model-routing`)
+### Jev tool routing, 2026-09-22 (branch `feat/jev-tool-routing`)
 
-TypeSafe's Jev classifier reads each new question and returns the probability it needs a deeper
-Gemini model. `app/agent/router.py` is middleware: a `before_agent` hook asks Jev (one node per
-run, which `recursion_limit()` counts), and a `wrap_model_call` swaps the agent's model. The
-summariser keeps its own model and stays on the fast tier. It is built on `TypeSafeClassifier`
-from `langchain-typesafe==0.0.1a3`, not on the package's own `ModelRouterMiddleware`, which has no
-shadow mode, no threshold, no timeout, and fails the run when Jev fails.
+TypeSafe's Jev classifier reads each new question and picks what answering it needs: `sql`,
+`forecast` (offered only when a forecasting model is loaded) or `clarify`. The labels match
+`runs.tool`, so a pick can be compared with what the model did. `app/agent/router.py` is
+middleware: a `before_agent` hook asks Jev (one node per run, which `recursion_limit()` counts),
+and a `wrap_model_call` takes the other data tool away on every model call of the run. It is built
+on `TypeSafeClassifier` from `langchain-typesafe==0.0.1a3`. The same day's model routing (fast or
+deep Gemini), merged as `76f5223`, is replaced by this and no longer exists.
 
 - **Off by default.** `ROUTER_MODE=off` attaches nothing, and the agent runs exactly as before.
-  `shadow` asks Jev and saves its answer as `runs.trace.route` (`mode`, `wanted`, `used`,
-  `p_deep`, `ms`, `reason`), but every run still uses `GEMINI_MODEL`. `on` sends a question to
-  `GEMINI_MODEL_DEEP` when `p_deep >= ROUTER_DEEP_THRESHOLD`.
+  `shadow` asks Jev and saves its pick as `runs.trace.route` (`mode`, `picked`, `p`, `ms`,
+  `reason`, `restricted`), and the model keeps every tool. `on` offers the model only the picked
+  tool.
+- **When Jev is followed:** only in `on` mode, only when its probability for the pick is at least
+  `ROUTER_THRESHOLD` (0.7), and only for `sql` or `forecast`. Below the threshold the trace says
+  `unsure` and nothing is taken away. A `clarify` pick never takes a tool away, because a data
+  question misjudged as small talk would have no way to reach the data. `remember` is always kept.
 - **A failing Jev never fails a run.** An error, or no answer within `ROUTER_TIMEOUT_S` (2 s),
-  falls back to the fast tier with `reason: router_error`.
+  leaves every tool with `reason: router_error`.
 - **Only the question's text goes to TypeSafe**, never the thread, whose tool results hold rows.
 - **Any mode other than off refuses to boot without `TYPESAFE_API_KEY`.**
-- `runs.model` is now the model with the most tokens in the run, since a routed run can use two.
-  The Jev call is not a chat-model call, so it never counts toward the token budget.
+- **In production today it can only tell `sql` from `clarify`.** `FORECAST_ENGINE` is off on
+  Render, so `forecast` is not offered, and an `sql` pick takes nothing away. Holding the model
+  to one tool starts to matter once forecasting is on.
+- This changes the architecture invariant that the model alone decides whether a question needs a
+  tool (`docs/CLAUDE.md`), for `on` mode only.
 - The agent's prompts are unchanged, so `prompt_sha()` has not moved and the cassettes still
-  match. The Jev question (`ROUTE_DEEP` in `prompts.py`) is judged on the shadow data, not the
-  golden suites.
+  match. Jev's question (`ROUTE_TOOL` and its labels in `prompts.py`) is judged on the shadow
+  data, not the golden suites.
 
-**Verified:** `tests/unit/test_router.py`, 12 cases, no network: Jev is the real classifier over
-`httpx2.MockTransport`. Quick suite: all pass. `requirements.lock` gained only
-`langchain-typesafe` and `# via` lines.
+**Verified:** `tests/unit/test_router.py`, 15 cases, no network: Jev is the real classifier over
+`httpx2.MockTransport`, and the model under test records the tools each call was offered. Quick
+suite: all pass.
 
-**Not done:** deploying, setting the key on Render (API service, and the worker when the queue is
-on), the shadow period, and the SQL review of `trace->'route'`. Before `on`: confirm
-`gemini-3.6-flash` is served for this key, run the golden suites with it as `GEMINI_MODEL`, and
-change the daily budget from tokens to cost, because the deep tier's tokens cost more.
+**Reading the shadow data** (Supabase SQL, schema `analyst`):
+
+```sql
+-- How often Jev agrees with the tool the model chose
+select trace->'route'->>'picked' as jev, tool as model, count(*)
+from runs
+where trace->'route' is not null and created_at > now() - interval '14 days'
+group by 1, 2 order by 3 desc;
+
+-- Router failures and unsure picks
+select trace->'route'->>'reason' as reason, count(*)
+from runs where trace->'route' is not null group by 1;
+```
+
+**Not done:** setting the key on Render (API service, and the worker when the queue is on) and
+the shadow period.

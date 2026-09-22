@@ -26,6 +26,7 @@ from app.agent.context import RunContext
 from app.agent.prompts import THREAD_SUMMARY
 from app.agent.router import JevRouter
 from app.config import get_settings
+from app.forecasting.service import get_forecaster
 from app.llm import get_llm
 from app.logging import log
 
@@ -156,7 +157,9 @@ def context_middleware() -> list[AgentMiddleware]:
 
 def build_middleware(store_attached: bool) -> list[AgentMiddleware]:
     mode = get_settings().router_mode
-    middleware: list[AgentMiddleware] = [] if mode == "off" else [JevRouter(mode)]
+    middleware: list[AgentMiddleware] = (
+        [] if mode == "off" else [JevRouter(mode, forecasting=get_forecaster() is not None)]
+    )
     middleware += context_middleware()
     if store_attached:
         middleware.append(MemoryMiddleware())
