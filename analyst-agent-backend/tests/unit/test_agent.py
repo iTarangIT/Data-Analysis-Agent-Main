@@ -1,5 +1,6 @@
 """The agent end to end with a scripted model, and the mapping onto the SSE contract."""
 
+from datetime import date, timedelta
 from unittest.mock import patch
 
 import numpy as np
@@ -409,7 +410,9 @@ class ScriptedConnector:
         return columns, rows[:max_rows]
 
 
-TWELVE_DAYS = [(f"2026-09-{d:02d}", 10 + d) for d in range(12, 0, -1)]
+# The twelve days before today, newest first, so the forecast is anchored the same way
+# whenever the suite runs.
+TWELVE_DAYS = [((date.today() - timedelta(days=d)).isoformat(), 10 + d) for d in range(1, 13)]
 
 
 def _forecast_call(call_id="f1"):
@@ -442,7 +445,8 @@ class TestAForecastRun:
         types = [e["type"] for e in events]
         assert types.index("chart") == types.index("rows") + 1
         chart = next(e for e in events if e["type"] == "chart")["data"]
-        assert chart["type"] == "forecast" and len(chart["forecast"]["points"]) == 3
+        # Today is the lead-in, then the three days asked for.
+        assert chart["type"] == "forecast" and len(chart["forecast"]["points"]) == 4
         assert outcome.tool == "forecast"
 
     def test_a_later_query_clears_the_saved_chart_as_the_client_does(self):

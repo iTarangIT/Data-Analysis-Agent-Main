@@ -79,7 +79,7 @@ analyst-agent (PowerShell):
 uvicorn app.main:app --reload --port 8000
 uvicorn app.database_mcp:app --port 8001         # the database MCP server; the API will not boot without it
 alembic revision --autogenerate -m "msg"; alembic upgrade head
-pytest -m "not integration"                      # fast, no DB
+pytest -m "not integration and not forecast"                      # fast, no DB
 pytest -m integration                            # needs the three local databases
 pytest tests/unit/test_sql_guard.py::test_name   # single test
 ruff check app tests; ruff format app tests

@@ -361,6 +361,46 @@ describe("runReducer", () => {
       expect(s.chart).toEqual({ type: "bar", x: "month", y: ["units"] });
       expect(s.result).not.toBeNull();
     });
+
+    it("keeps a forecast with its series, beside the history it was made from", () => {
+      const forecast = {
+        type: "forecast" as const,
+        x: "month",
+        y: ["revenue"],
+        forecast: {
+          grain: "month" as const,
+          interval: 0.8,
+          history: [["2026-08", 110]] as [string, number][],
+          points: [["2026-09", 115, 105, 125]] as [string, number, number, number][],
+        },
+      };
+
+      const s = drive([
+        ...HAPPY.slice(0, -1),
+        { type: "chart", data: forecast },
+        { type: "done", data: { run_id: "r1", duration_ms: 10 } },
+      ]);
+
+      expect(s.chart).toEqual(forecast);
+      expect(s.result?.rows).toEqual([[3]]);
+    });
+  });
+
+  describe("a forecast the data could not support", () => {
+    it("is kept as a refused attempt that says where it stopped", () => {
+      const s = drive([
+        submit,
+        stage("router"),
+        stage("sql_gen"),
+        stage("sql_guard"),
+        {
+          type: "rejected",
+          data: { sql: "SELECT month, revenue FROM sales", reason: "only 5 months", at: "forecast" },
+        },
+      ]);
+
+      expect(s.attempts[0]).toMatchObject({ rejected: true, at: "forecast", reason: "only 5 months" });
+    });
   });
 
   describe("re-running in the same state", () => {

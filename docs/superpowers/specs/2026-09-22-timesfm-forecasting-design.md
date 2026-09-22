@@ -128,11 +128,11 @@ Supporting types:
   - `what` and `why`, defaulted `""`.
 - **History cap is `max_rows` (500)**, the same as the query tool. The MCP server re-caps every Postgres query at its own `max_rows` (`database_mcp.py:97, 201`), and that cap is deliberately the server's own. Five hundred periods is plenty: 41 years of months, 16 months of days.
   - The SQL argument asks for **newest first**, with the period cast to a date (`date_trunc(...)::date` / `CAST(... AS DATE)`).
-  - If more than `max_rows` rows come back newest first, the forecast uses the latest 500 and notes `history_capped`.
+  - If more than `max_rows` rows come back newest first, the forecast uses the latest 500 and notes `capped`.
   - If they come back oldest first, the tool returns a fixable `wrong_order` error.
 - **`today`** is passed in from `build_agent`, the same `graph.date` the tests freeze.
 - **On success** it returns `content_and_artifact`:
-  - **Content** is JSON: `{"forecast": {grain, kind, horizon, interval: "80%", history: {periods, from, to, last_value, filled_gaps, dropped_partial, history_capped}, points: [{period, forecast, low, high}], model}}`.
+  - **Content** is JSON: `{"forecast": {grain, kind, horizon, interval: "80%", history: {periods, from, to, last_value, filled_gaps, dropped_partial, capped}, lead_in: [{period, forecast, low, high}] (periods between the end of the history and the horizon, the one in progress included), points: [{period, forecast, low, high}], model}}`.
   - **Artifact** holds everything `EventTranslator` requires (`sql`, `columns`, `rows`, `truncated`, `ms`, `what`, `why`), plus a `forecast` key: the chart payload with `time_column`/`value_column`.
 - **On `ForecastInputError` / `ForecastEngineError`:** content is `{"error": {code, message, fixable}}`, and the artifact is `{"error", "at": "forecast", "sql", "what", "why"}`.
 - **Registration:** `make_tools(connector, catalog, with_memory, *, forecaster=None, today=None)` adds the forecast tool only when `forecaster` is set. The keyword default keeps `test_tools.py:243-246` working.

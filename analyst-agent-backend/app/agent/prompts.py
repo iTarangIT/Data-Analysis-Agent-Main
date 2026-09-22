@@ -158,8 +158,10 @@ FORECAST_CAPABILITY = """Forecasting:
   no rows out rather than inventing it; the tool fills the gap.
 - kind is total for sums and counts (sales, revenue, units, visits, consumption) and level for
   readings (price, balance, stock on hand, temperature).
-- horizon counts periods of that grain: the next six months is 6 at month grain, tomorrow is 1
-  at day grain, the next quarter is 3 at month grain.
+- horizon counts periods of that grain after the one in progress: the next six months is 6 at
+  month grain, tomorrow is 1 at day grain, the next quarter is 3 at month grain. The tool
+  forecasts on from where the history ends, so anything between that and the periods asked for,
+  the one in progress included, comes back separately as lead_in.
 - The forecast's points are figures a tool returned, so state them, always as a forecast: the
   next period's figure, the total or end point over the horizon, and the range, and how much
   history it rests on and when that history ends. Do not list every period; the forecast
@@ -199,7 +201,8 @@ FORECAST_VALUE_ARG = "The result column holding the measure to forecast."
 FORECAST_GRAIN_ARG = """The period each row covers, matching how the SQL groups: hour, day,
 week, month, quarter or year."""
 
-FORECAST_HORIZON_ARG = "How many periods of that grain to forecast ahead."
+FORECAST_HORIZON_ARG = """How many periods of that grain to forecast after the one in progress:
+next month is 1, the next six months is 6."""
 
 FORECAST_KIND_ARG = """total when the measure adds up over a period (sales, revenue, units,
 visits); level when it is a reading at a point in time (price, balance, stock on hand,

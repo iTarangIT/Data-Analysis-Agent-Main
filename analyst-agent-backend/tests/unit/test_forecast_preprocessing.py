@@ -181,6 +181,14 @@ class TestRefusals:
 
         assert (e.code, e.fixable) == ("wrong_order", True)
 
+    def test_a_capped_result_that_was_not_grouped_is_fixable(self):
+        # Cut off mid-period, the oldest month holds only part of its rows.
+        rows = [[r[0].replace(day=d), 1] for r in months(12)[::-1] for d in (20, 10)]
+
+        e = error(rows, capped=True)
+
+        assert (e.code, e.fixable) == ("not_grouped", True)
+
     def test_a_capped_result_newest_first_is_used(self):
         series = prepare(months(12)[::-1], capped=True)
 

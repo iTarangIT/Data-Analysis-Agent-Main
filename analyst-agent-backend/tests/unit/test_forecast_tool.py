@@ -9,7 +9,7 @@ import pytest
 from langchain.tools import ToolRuntime
 
 from app.agent.context import RunContext
-from app.agent.tools import FORECAST_TOOL_NAME, make_forecast_tool, make_tools
+from app.agent.tools import FORECAST_TOOL_NAME, make_forecast_tool, make_query_tool, make_tools
 from app.catalog.types import Catalog, CatalogTable, Column, TableDef
 from app.config import get_settings
 from app.forecasting.engine import EngineForecast
@@ -114,10 +114,13 @@ class TestAForecast:
     def test_the_model_is_told_the_forecast(self):
         content, _ = call(months(12))
 
+        # Today is in September and the history ends in August, so September is the lead-in and
+        # the three months asked for are the three after it.
         forecast = content["forecast"]
-        assert [p["period"] for p in forecast["points"]] == ["2026-09", "2026-10", "2026-11"]
+        assert [p["period"] for p in forecast["lead_in"]] == ["2026-09"]
+        assert [p["period"] for p in forecast["points"]] == ["2026-10", "2026-11", "2026-12"]
         assert forecast["points"][0] == {
-            "period": "2026-09", "forecast": 111.0, "low": 110.0, "high": 112.0,
+            "period": "2026-10", "forecast": 111.0, "low": 110.0, "high": 112.0,
         }  # fmt: skip
         assert forecast["history"]["to"] == "2026-08" and forecast["history"]["periods"] == 12
 
@@ -138,8 +141,25 @@ class TestRefusals:
     def test_the_guard_refuses_exactly_as_it_does_for_the_query_tool(self):
         content, artifact = call(months(12), sql="delete from sales")
 
-        assert content.startswith("Query rejected:")
-        assert artifact["at"] == "guard"
+        query = make_query_tool(FakeConnector([]), CATALOG)
+        runtime = ToolRuntime(
+            state={}, context=CONTEXT, config={}, stream_writer=lambda _: None,
+            tool_call_id="c1", store=None,
+        )  # fmt: skip
+        refused = query.invoke(
+            {
+                "name": query.name,
+                "args": {
+                    "sql": "delete from sales",
+                    "what": "Totalled revenue by month.",
+                    "why": "You asked for a forecast.",
+                    "runtime": runtime,
+                },
+                "id": "c1",
+                "type": "tool_call",
+            }
+        )
+        assert (content, artifact) == (refused.content, refused.artifact)
 
     def test_history_the_data_cannot_support_is_explained_not_retried(self):
         content, artifact = call(months(5))

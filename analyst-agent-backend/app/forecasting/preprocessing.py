@@ -132,6 +132,13 @@ def prepare_series(
 
     series = pd.Series(values.to_numpy(dtype=np.float64), index=stamps.to_period(FREQ[grain]))
     merged = len(series) - series.index.nunique()
+    if capped and merged:
+        raise ForecastInputError(
+            "not_grouped",
+            f"More than one row came back per {grain} and the result was cut off, so the oldest "
+            f"{grain} is incomplete. Group by {grain} in the SQL.",
+            fixable=True,
+        )
     by_period = series.groupby(level=0)
     series = by_period.sum() if kind == "total" else by_period.mean()
 

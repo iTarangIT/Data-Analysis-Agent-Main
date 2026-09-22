@@ -110,8 +110,7 @@ async def _startup(ctx: dict) -> None:
     configure_tracing()
     if get_settings().mcp_startup_probe:
         await probe_mcp()
-    if get_settings().forecast_engine != "off":
-        await asyncio.to_thread(load_forecaster)
+    await asyncio.to_thread(load_forecaster)
     log.info("worker.startup", max_jobs=get_settings().worker_max_jobs)
 
 

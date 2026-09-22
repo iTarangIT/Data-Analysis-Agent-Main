@@ -70,7 +70,7 @@ psql -U analyst_ro -d demo -c "delete from dealers"      # MUST fail: read-only 
 uvicorn app.main:app --reload --port 8000
 uvicorn app.database_mcp:app --port 8001         # the database MCP server; the API will not boot without it
 alembic revision --autogenerate -m "msg"; alembic upgrade head
-pytest -m "not integration"                           # fast, no DB
+pytest -m "not integration and not forecast"          # fast, no DB, no model
 pytest -m integration                                 # needs the three local databases above
 ruff check app tests; ruff format app tests
 $env:TOKEN="..."; $env:CONN="..."; python evals/run_evals.py   # live gate, >= 80% or not done

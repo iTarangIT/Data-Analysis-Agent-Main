@@ -196,7 +196,7 @@ def make_forecast_tool(
             series = prepare_series(
                 got.columns, rows, time_column, value_column, grain, kind, today, capped
             )
-            forecast = forecaster.forecast(series, horizon)
+            forecast = forecaster.forecast(series, horizon, today)
         except ForecastInputError as e:
             return _cannot_forecast(e.code, e.message, e.fixable, got.sql, explained)
         except ForecastEngineError as e:

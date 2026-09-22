@@ -152,6 +152,10 @@ function Bar({
 
 function Line({ chart }: { chart: PlottableChart }) {
   const step = chart.categories.length > 1 ? LINE_WIDTH / (chart.categories.length - 1) : 0;
+  // Where the forecast takes over, as a share of the width. Near either edge its label would sit
+  // on top of the first or last one, which is the common case for a one-period forecast.
+  const splitAt = chart.split === undefined ? null : ((chart.split * step) / LINE_WIDTH) * 100;
+  const labelSplit = splitAt !== null && splitAt > 15 && splitAt < 85;
 
   function x(index: number): number {
     return chart.categories.length > 1 ? index * step : LINE_WIDTH / 2;
@@ -229,11 +233,8 @@ function Line({ chart }: { chart: PlottableChart }) {
 
       <div className="relative mt-1 flex justify-between font-mono text-[0.75rem] text-ink-muted">
         <span>{chart.categories[0]}</span>
-        {chart.split !== undefined ? (
-          <span
-            className="absolute -translate-x-1/2 text-ink"
-            style={{ left: `${(x(chart.split) / LINE_WIDTH) * 100}%` }}
-          >
+        {labelSplit && chart.split !== undefined ? (
+          <span className="absolute -translate-x-1/2 text-ink" style={{ left: `${splitAt}%` }}>
             {chart.categories[chart.split]}
           </span>
         ) : null}

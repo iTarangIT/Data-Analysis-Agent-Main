@@ -2,9 +2,11 @@
 
 import threading
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from app.config import get_settings
 from app.forecasting.engine import ForecastEngine, TimesFMEngine
@@ -20,7 +22,9 @@ class ForecastEngineError(Exception):
 
 def _floats(values: np.ndarray) -> list[float]:
     # Plain floats: numpy scalars break json.dumps, and the chart is saved to a JSON column.
-    return [round(float(v), 4) for v in values]
+    # Significant figures rather than decimal places, so revenue loses its noise and a small
+    # reading keeps its digits.
+    return [float(f"{v:.6g}") for v in values]
 
 
 @dataclass(frozen=True)
@@ -31,30 +35,33 @@ class Forecast:
     lower: list[float]
     upper: list[float]
     model: str
+    # How many forecast periods come before the ones asked for: the period still in progress,
+    # and any the history stops short of.
+    lead: int
 
     def summary(self) -> dict[str, Any]:
         """What the model is told: enough to explain the forecast, not the whole history."""
         h = self.history
+        points = [
+            {"period": p, "forecast": m, "low": lo, "high": hi}
+            for p, m, lo, hi in zip(self.periods, self.mean, self.lower, self.upper, strict=True)
+        ]
         return {
             "grain": h.grain,
             "kind": h.kind,
-            "horizon": len(self.periods),
+            "horizon": len(self.periods) - self.lead,
             "interval": f"{INTERVAL:.0%}",
             "history": {
                 "periods": len(h),
                 "from": label(h.periods[0]),
                 "to": label(h.periods[-1]),
-                "last_value": round(float(h.values[-1]), 4),
+                "last_value": _floats(h.values[-1:])[0],
                 "filled_gaps": h.filled,
                 "dropped_partial": h.dropped_partial,
                 "capped": h.capped,
             },
-            "points": [
-                {"period": p, "forecast": m, "low": lo, "high": hi}
-                for p, m, lo, hi in zip(
-                    self.periods, self.mean, self.lower, self.upper, strict=True
-                )
-            ],
+            "lead_in": points[: self.lead],
+            "points": points[self.lead :],
             "model": self.model,
         }
 
@@ -82,32 +89,43 @@ class ForecastService:
         # cores. One short series takes well under a second, so a queue beats contention.
         self._lock = threading.Lock()
 
-    def forecast(self, series: Series, horizon: int) -> Forecast:
+    def forecast(self, series: Series, horizon: int, today: date) -> Forecast:
+        """`horizon` counts periods after the one `today` falls in, the way a person means "next
+        month". The model forecasts on from where the history ends, so the periods in between
+        are forecast too and come back as the lead-in."""
+        last = series.periods[-1]
+        lead = max((pd.Period(today, freq=series.periods.freq) - last).n, 0)
+        steps = lead + horizon
         longest = min(self._engine.max_horizon, len(series))
-        if horizon > longest:
+        if steps > longest:
+            limit = (
+                "the model reaches"
+                if longest == self._engine.max_horizon
+                else f"{len(series)} {series.grain}s of history support"
+            )
             raise ForecastInputError(
                 "horizon_too_long",
-                f"{horizon} {series.grain}s ahead is further than {len(series)} {series.grain}s "
-                f"of history can support; the most is {longest}.",
+                f"That needs a forecast {steps} {series.grain}s past the end of the history "
+                f"({label(last)}), and {limit} at most {longest}.",
                 fixable=False,
             )
 
         try:
             with self._lock:
-                out = self._engine.predict(series.values[-self._engine.max_context :], horizon)
+                out = self._engine.predict(series.values[-self._engine.max_context :], steps)
         except Exception as e:
             raise ForecastEngineError(str(e)) from e
         if not all(np.isfinite(a).all() for a in (out.mean, out.lower, out.upper)):
             raise ForecastEngineError("the model returned a value that is not a number")
 
-        last = series.periods[-1]
         return Forecast(
             history=series,
-            periods=[label(last + step) for step in range(1, horizon + 1)],
+            periods=[label(last + step) for step in range(1, steps + 1)],
             mean=_floats(out.mean),
             lower=_floats(out.lower),
             upper=_floats(out.upper),
             model=self._engine.name,
+            lead=lead,
         )
 
 
