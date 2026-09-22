@@ -78,7 +78,11 @@ def prompt_sha() -> str:
     """
     from app.agent import prompts
 
-    composed = prompts.AGENT_SYSTEM.format(today="{today}", capability=prompts.SQL_CAPABILITY)
+    # Replay never loads a forecasting model, so it records and replays the prompt production
+    # runs today. golden_forecast is live-only: its numbers feed later request hashes.
+    composed = prompts.AGENT_SYSTEM.format(
+        today="{today}", capability=prompts.capability(forecasting=False)
+    )
     text = (
         composed
         + prompts.QUERY_TOOL_DESC

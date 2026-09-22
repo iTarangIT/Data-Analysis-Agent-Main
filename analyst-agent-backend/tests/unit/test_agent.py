@@ -2,6 +2,7 @@
 
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 from langchain_core.language_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage
@@ -11,8 +12,11 @@ from langgraph.store.memory import InMemoryStore
 from app.agent.context import RunContext
 from app.agent.graph import build_agent, recursion_limit
 from app.agent.middleware import build_middleware
+from app.agent.prompts import FORECAST_CAPABILITY, FORECAST_OFF
 from app.catalog.types import Catalog, CatalogTable, Column, TableDef
 from app.config import get_settings
+from app.forecasting.engine import EngineForecast
+from app.forecasting.service import ForecastService
 from app.services.runs import EventTranslator, RunOutcome
 
 CONTEXT = RunContext(tenant_id="t_test", connection_id="c1", run_id="r1", thread_id="th1")
@@ -354,3 +358,38 @@ class TestTheWholeToolBudgetIsSpendable:
                 store=InMemoryStore(),
                 limit=old_bound,
             )
+
+
+class FlatEngine:
+    name = "flat"
+    max_context = 1024
+    max_horizon = 256
+
+    def predict(self, values, horizon):
+        mean = np.full(horizon, values[-1])
+        return EngineForecast(mean=mean, lower=mean - 1, upper=mean + 1)
+
+
+def _built_with(forecaster):
+    with (
+        patch("app.agent.graph.get_forecaster", return_value=forecaster),
+        patch("app.agent.graph.create_agent") as create,
+        patch("app.agent.graph.get_llm"),
+    ):
+        build_agent(FakeConnector(), CATALOG, middleware=[])
+    kwargs = create.call_args.kwargs
+    return kwargs["system_prompt"], [t.name for t in kwargs["tools"]]
+
+
+class TestForecastingIsOfferedOnlyWhenLoaded:
+    def test_off_the_prompt_says_so_and_no_tool_is_offered(self):
+        prompt, tools = _built_with(None)
+
+        assert FORECAST_OFF in prompt
+        assert tools == ["query_database"]
+
+    def test_on_the_prompt_explains_the_tool_that_is_offered(self):
+        prompt, tools = _built_with(ForecastService(FlatEngine()))
+
+        assert FORECAST_CAPABILITY in prompt
+        assert "forecast_series" in tools

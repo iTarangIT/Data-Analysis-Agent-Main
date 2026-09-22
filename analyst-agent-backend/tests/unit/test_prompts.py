@@ -2,7 +2,13 @@
 
 from datetime import date
 
-from app.agent.prompts import AGENT_SYSTEM, SQL_CAPABILITY
+from app.agent.prompts import (
+    AGENT_SYSTEM,
+    FORECAST_CAPABILITY,
+    FORECAST_OFF,
+    SQL_CAPABILITY,
+    capability,
+)
 
 
 def _compose() -> str:
@@ -47,3 +53,22 @@ class TestMissingData:
 
     def test_the_sql_prompt_points_at_the_table_annotations(self):
         assert "Querying one\n  marked EMPTY wastes a turn" in SQL_CAPABILITY
+
+
+class TestForecastingBlock:
+    def test_the_sql_rules_come_first_either_way(self):
+        assert capability(True).startswith(SQL_CAPABILITY)
+        assert capability(False).startswith(SQL_CAPABILITY)
+
+    def test_with_a_model_loaded_the_forecast_tool_is_explained(self):
+        assert FORECAST_CAPABILITY in capability(True)
+        assert FORECAST_OFF not in capability(True)
+
+    def test_without_one_forecasting_is_declared_unavailable(self):
+        assert FORECAST_OFF in capability(False)
+        assert "do not work out a projection yourself" in FORECAST_OFF
+
+    def test_forecast_figures_are_tool_output_but_never_hand_extrapolated(self):
+        # AGENT_SYSTEM allows only figures a tool returned; a forecast's points are exactly that.
+        assert "figures a tool returned" in FORECAST_CAPABILITY
+        assert "Never extrapolate a figure yourself" in FORECAST_CAPABILITY

@@ -6,11 +6,12 @@ from langgraph.store.base import BaseStore
 
 from app.agent.context import RunContext
 from app.agent.middleware import build_middleware, node_hooks
-from app.agent.prompts import AGENT_SYSTEM, SQL_CAPABILITY
+from app.agent.prompts import AGENT_SYSTEM, capability
 from app.agent.tools import make_tools
 from app.catalog.types import Catalog
 from app.config import get_settings
 from app.connectors.base import SqlConnector
+from app.forecasting.service import get_forecaster
 from app.llm import get_llm
 
 
@@ -39,11 +40,13 @@ def build_agent(
     store: BaseStore | None = None,
     middleware: list[AgentMiddleware] | None = None,
 ):
+    forecaster = get_forecaster()
+    today = date.today()
     return create_agent(
         model=get_llm(),
-        tools=make_tools(connector, catalog, store is not None),
+        tools=make_tools(connector, catalog, store is not None, forecaster=forecaster, today=today),
         system_prompt=AGENT_SYSTEM.format(
-            today=date.today().isoformat(), capability=SQL_CAPABILITY
+            today=today.isoformat(), capability=capability(forecaster is not None)
         ),
         middleware=build_middleware(store is not None) if middleware is None else middleware,
         context_schema=RunContext,

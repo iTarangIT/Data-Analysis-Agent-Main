@@ -146,3 +146,61 @@ REMEMBER_TERM_ARG = "The word or phrase as the customer says it."
 REMEMBER_DEFINITION_ARG = (
     "What it means against these tables, concretely enough to write SQL from later."
 )
+
+
+FORECAST_CAPABILITY = """Forecasting:
+- A question about the future - forecast, predict, estimate, project, expect, next week, next
+  month, next quarter, next year, tomorrow - goes to the forecast tool, never the query tool.
+  Anything the data already holds stays with the query tool.
+- Call the forecast tool on its own, never alongside another tool call in the same turn.
+- Its SQL returns one row per period: the period's start, cast to a date, and the measure,
+  grouped to the grain the question asks about and ordered newest first. Leave a period with
+  no rows out rather than inventing it; the tool fills the gap.
+- kind is total for sums and counts (sales, revenue, units, visits, consumption) and level for
+  readings (price, balance, stock on hand, temperature).
+- horizon counts periods of that grain: the next six months is 6 at month grain, tomorrow is 1
+  at day grain, the next quarter is 3 at month grain.
+- The forecast's points are figures a tool returned, so state them, always as a forecast: the
+  next period's figure, the total or end point over the horizon, and the range, and how much
+  history it rests on and when that history ends. Do not list every period; the forecast
+  table shows them. Never extrapolate a figure yourself.
+- If the forecast tool says it cannot forecast and that is not fixable, tell the person why in
+  plain words and do not try again."""
+
+FORECAST_OFF = """Forecasting:
+- Forecasting is not available on this service. When asked to predict a future figure, say so
+  in one sentence, do not work out a projection yourself, and offer the history that bears on
+  it."""
+
+
+def capability(forecasting: bool) -> str:
+    """The capability block: SQL always, and forecasting only when a model is loaded. The one
+    place it is composed, so the agent and the eval cassette hash cannot disagree."""
+    return f"{SQL_CAPABILITY}\n\n{FORECAST_CAPABILITY if forecasting else FORECAST_OFF}"
+
+
+FORECAST_TOOL_DESC = """Forecast a measure forward in time from its history in the customer's
+database. Give one read-only SQL SELECT returning that history, one row per period, and say
+which column is the period, which is the measure, the grain, how many periods ahead, and
+whether the measure is a total or a level. The tool cleans the series, fills gaps and returns
+a forecast for each future period with an 80% range.
+
+Use only the tables and columns described for the query tool. Use this only for questions
+about the future; historic questions belong to the query tool."""
+
+FORECAST_SQL_ARG = """One {dialect} SELECT returning the history: the period's start cast to a
+date, and the measure, one row per period, ordered by the period newest first. No prose, no
+code fences."""
+
+FORECAST_TIME_ARG = "The result column holding the period's start."
+
+FORECAST_VALUE_ARG = "The result column holding the measure to forecast."
+
+FORECAST_GRAIN_ARG = """The period each row covers, matching how the SQL groups: hour, day,
+week, month, quarter or year."""
+
+FORECAST_HORIZON_ARG = "How many periods of that grain to forecast ahead."
+
+FORECAST_KIND_ARG = """total when the measure adds up over a period (sales, revenue, units,
+visits); level when it is a reading at a point in time (price, balance, stock on hand,
+temperature)."""
