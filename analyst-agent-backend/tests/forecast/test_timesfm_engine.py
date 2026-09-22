@@ -1,4 +1,4 @@
-"""The real checkpoint. Slow and about a gigabyte, so it runs only under `-m forecast`."""
+"""The real checkpoint: ~0.9 GB on disk and 1.1 GB loaded, so it runs only under `-m forecast`."""
 
 import numpy as np
 import pytest

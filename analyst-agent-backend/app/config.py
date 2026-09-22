@@ -87,8 +87,9 @@ class Settings(BaseSettings):
     # legitimately query more than once to answer, without any of them having been rejected.
     max_tool_calls: int = 6
 
-    # Forecasting runs a ~200M-parameter model in this process, about a gigabyte resident, which
-    # Render's free plan cannot hold. Off, the forecast tool is not offered and nothing loads.
+    # Forecasting runs a ~200M-parameter model in this process: measured at 1.1 GB resident, and
+    # 2 GB while it loads, which Render's free plan cannot hold. Off, the forecast tool is not
+    # offered and nothing loads.
     forecast_engine: Literal["off", "timesfm"] = "off"
     forecast_checkpoint: str = "google/timesfm-2.5-200m-pytorch"
     forecast_threads: int = 2

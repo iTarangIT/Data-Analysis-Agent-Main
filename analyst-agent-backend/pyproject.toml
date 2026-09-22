@@ -63,8 +63,8 @@ dev = [
     # Builds the PDF fixtures the tests read.
     "reportlab>=4",
 ]
-# Off by default and never installed on Render's free plan: torch and the checkpoint need about
-# 1.5 GB. TimesFM 2.5 because its weights are Apache-2.0; 3.x weights are non-commercial only.
+# Off by default and never installed on Render's free plan: the loaded model holds 1.1 GB and
+# peaks at 2 GB. TimesFM 2.5 because its weights are Apache-2.0; 3.x weights are non-commercial only.
 forecast = ["timesfm[torch]==2.0.2"]
 
 [tool.setuptools.packages.find]

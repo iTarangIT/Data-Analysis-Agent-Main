@@ -94,7 +94,7 @@ $env:FORECAST_ENGINE = "timesfm"; $env:OPENBLAS_NUM_THREADS = "1"; uvicorn app.m
 ```
 
 Check free commit memory first (`(Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory`,
-in KB): loading the model needs roughly 3 GB free. The quick suite is
+in KB): loading the model peaks at about 3.3 GB of commit, so check for that much free. The quick suite is
 `pytest -m "not integration and not forecast"`. TimesFM 2.5 is used because its weights are
 Apache-2.0; TimesFM 3.x weights are licensed for non-commercial, non-production use only.
 

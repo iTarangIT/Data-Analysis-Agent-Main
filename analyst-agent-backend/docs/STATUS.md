@@ -1506,3 +1506,74 @@ case, and for the same reason: "How many orders came from the West region?" was 
 the dialect line, and it is the case to look at if the suite's wording is revisited.
 `golden_pdf` was scored on `main` with 0.5 in place, against `evals/fixtures/statement.pdf`
 uploaded through the API.
+
+### Forecasting with TimesFM, 2026-09-22 (branch `feat/timesfm-forecasting`)
+
+Design: `docs/superpowers/specs/2026-09-22-timesfm-forecasting-design.md` at the repo root; the
+task plan beside it in `docs/superpowers/plans/`. The agent gains a second tool,
+`forecast_series`. The model writes one period-grouped SELECT, which goes through the same guard
+and connector as `query_database`; `app/forecasting/` cleans the rows into an evenly spaced series
+and forecasts it with Google's TimesFM 2.5 inside the API process. The result streams as the
+existing `chart` event with `type: "forecast"`, drawn as history, a dashed forecast and an 80%
+range, with the forecast listed as a table. No new event, no new stage.
+
+- **Off by default.** `FORECAST_ENGINE=off` offers no tool, imports neither `timesfm` nor `torch`,
+  and puts one line in the prompt: forecasting is not available. That is what production runs.
+- **TimesFM 2.5, not 3.** 3.x weights are licensed for non-commercial, non-production use only;
+  2.5 is Apache-2.0. Installed as the optional extra `.[forecast]` (`timesfm==2.0.2`,
+  `torch==2.14.0`), which stays out of `requirements.lock`.
+- **The horizon counts from today.** "Next month" on 22 September is October. The model
+  forecasts on from where the history ends, and the periods before the one asked for, September
+  included, come back separately as `lead_in`.
+- **What the data cannot support is refused, with the reason and whether the call can be
+  fixed:** too little history (fewer than 8 periods), too sparse (more than 30% of periods
+  empty), too far ahead (more periods than the history has, or 256), wrong order or ungrouped
+  rows when the 500-row cap cut the result. These stream as `rejected` with `at: forecast` and
+  are never filed as a query correction.
+
+**Measured on the development machine** (Windows, CPU, `forecast_threads=2`), `timesfm==2.0.2`,
+checkpoint `google/timesfm-2.5-200m-pytorch` (882 MB on disk):
+
+| | |
+|---|---|
+| Load, from the local cache | 7–10 s |
+| Resident once loaded | 1.14 GB |
+| Peak while loading | 2.0 GB working set, 3.3 GB commit |
+| One forecast | ~1.1 s, whether 1 or 30 periods ahead, 36 or 500 of history |
+
+`pytest -m forecast` (the real checkpoint): 2 passed. It checks the range is ordered and that the
+forecast beats repeating last year on a trended seasonal series. Quick suite: 532 backend and 342
+frontend tests pass.
+
+**Not yet run: the rule 6 eval gate.** The prompts changed (a forecasting block when the model is
+loaded, `FORECAST_OFF` when it is not), so this is not mergeable until it has run. It needs a
+Supabase token, which prompts for a password, and live Gemini calls.
+
+1. Before: `golden_file` 6/7 and `golden_pdf` 4/4 are the 0.5 gate's numbers above, on identical
+   prompts. `golden_sql` has no baseline yet; run it from a worktree at `4dbcd7c`, the last
+   commit before the prompts changed.
+2. After, forecasting off (the production prompt): `golden_file`, `golden_pdf`, `golden_sql`.
+3. After, `FORECAST_ENGINE=timesfm`: the same three plus `golden_forecast`, against an upload
+   of `evals/fixtures/monthly_revenue.csv`.
+4. Re-record the `golden_sql` and `golden_file` cassettes; the prompt hash moved, so the
+   `de39cc3c` ones no longer match.
+
+No suite may drop, and `golden_forecast` must reach 80%.
+
+**Turning it on in production (not done):**
+
+- A 2 GB instance is not enough. The model alone peaks at 2 GB while loading, beside the API and
+  the MCP server. Plan on 4 GB (Render Pro), or cut the load peak first.
+- Install torch from `https://download.pytorch.org/whl/cpu` so the Linux build does not pull
+  CUDA wheels.
+- Download the checkpoint in the build command into a directory inside the project, with
+  `HF_HOME` pointing at it, so it is not fetched on every start. On this machine the download ran
+  at tens of KB/s for part of the time.
+- With the queue on, only the worker loads the model, so the worker needs the memory, not the
+  API.
+
+**Open, minor:**
+
+- In one rare sequence, a live run and its saved copy can name different tools: a forecast
+  refused with `at: forecast`, then a successful query.
+- A forecast refusal is counted as "rejected" in the run summary.
