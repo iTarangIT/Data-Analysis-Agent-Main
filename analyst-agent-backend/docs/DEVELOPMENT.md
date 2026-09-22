@@ -80,6 +80,24 @@ $env:MAX_RUNS_PER_MINUTE="100"                  # a suite trips the per-tenant r
 pip-compile --extra dev -o requirements.lock pyproject.toml     # after any dependency change
 ```
 
+### Forecasting (TimesFM)
+
+Off unless `FORECAST_ENGINE=timesfm`. With it off the `forecast_series` tool is not offered, the
+prompt tells the model forecasting is unavailable, and neither `timesfm` nor `torch` is imported.
+To run it locally:
+
+```powershell
+$env:HF_HOME = "D:\hf-cache"        # the checkpoint is ~0.9 GB; C: has no room
+pip install -e ".[forecast]"         # timesfm 2.0.2 + CPU torch; never in requirements.lock
+pytest -m forecast                   # the real-model tests
+$env:FORECAST_ENGINE = "timesfm"; $env:OPENBLAS_NUM_THREADS = "1"; uvicorn app.main:app --port 8000
+```
+
+Check free commit memory first (`(Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory`,
+in KB): loading the model needs roughly 3 GB free. The quick suite is
+`pytest -m "not integration and not forecast"`. TimesFM 2.5 is used because its weights are
+Apache-2.0; TimesFM 3.x weights are licensed for non-commercial, non-production use only.
+
 
 ### The queue (phase 4)
 
@@ -124,9 +142,12 @@ pnpm playwright test  # needs agent + local Postgres + pnpm dev running
 create_agent:  model  <-->  tools        (loop until the model stops calling tools)
                               |
                               +-- query_database  -> sql_guard -> connector (read-only)
-                                    described from, and allowed only, the connection's chosen tables
-                                       Postgres -> MCP server -> customer DB
-                                       file     -> DuckDB, in process
+                              |     described from, and allowed only, the connection's chosen tables
+                              |        Postgres -> MCP server -> customer DB
+                              |        file     -> DuckDB, in process
+                              +-- forecast_series -> sql_guard -> connector -> app/forecasting
+                                    only when FORECAST_ENGINE is on: the history's SQL is guarded
+                                    exactly as above, then cleaned and forecast in process
 ```
 
 The model chooses whether to call a tool, which replaces the hand-written router. The guard
@@ -149,7 +170,7 @@ bounded by `recursion_limit()`, derived from `max_sql_retries`.
 | `status` | `{"stage": router\|sql_gen\|sql_guard\|db_exec\|answer}` |
 | `sql` | `{"sql": "..."}` |
 | `rows` | `{"columns": [...], "rows": [[...]], "truncated": bool}` |
-| `chart` | `{"type": bar\|line, "x": "col", "y": ["col"]}` — optional, always straight after a `rows` |
+| `chart` | `{"type": bar\|line\|forecast, "x": "col", "y": ["col"], "forecast"?: {...}}` — optional, always straight after a `rows` |
 | `token` | `{"text": "..."}` |
 | `done` | `{"run_id": "...", "duration_ms": n}` |
 | `error` | `{"message": "..."}` |

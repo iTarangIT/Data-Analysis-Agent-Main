@@ -117,7 +117,7 @@ pnpm playwright test  # needs agent + local Postgres + pnpm dev running
 
 ## Architecture invariants
 
-**analyst-agent** — `app/api/` (HTTP only) · `app/services/` (business rules, domain errors) · `app/agent/` (`graph.py` builds the `create_agent` harness, `prompts.py`, `tools.py`, `nodes/sql_guard.py`, `context.py` what a run is, `middleware.py` what wraps the loop, `memory.py` what it remembers, `store.py` where that lives) · `app/connectors/` (customer sources: `base.py` protocols, `mcp.py` which reaches Postgres through the MCP server, `pg_catalog.py` and `pg_stats.py` which read the catalog, `duckdb.py`, `registry.py`) · `app/database_mcp.py` (the MCP server itself, its own process), `app/mcp_client.py`, `app/mcp_auth.py` · `app/catalog/` (`types.py` a table's structure, `relationships.py` how tables join; imports nothing from `app`) · `app/security/` (`supabase.py` token verification, `auth.py` `TenantContext`, `vault.py` Fernet) · `app/db/` (App DB session + models: Tenant, Connection, ConnectionTable, Run; `Run` is the usage ledger, there is no separate `Usage` table) · `app/workers/` (`runs.py` the arq worker) · `app/queue.py` · plus `evals/`, `scripts/`, `tests/{unit,integration}`. Nothing imports upward. `HTTPException` is raised only inside `app/api/`; everything else raises from `app/services/errors.py`.
+**analyst-agent** — `app/api/` (HTTP only) · `app/services/` (business rules, domain errors) · `app/agent/` (`graph.py` builds the `create_agent` harness, `prompts.py`, `tools.py`, `nodes/sql_guard.py`, `context.py` what a run is, `middleware.py` what wraps the loop, `memory.py` what it remembers, `store.py` where that lives) · `app/connectors/` (customer sources: `base.py` protocols, `mcp.py` which reaches Postgres through the MCP server, `pg_catalog.py` and `pg_stats.py` which read the catalog, `duckdb.py`, `registry.py`) · `app/database_mcp.py` (the MCP server itself, its own process), `app/mcp_client.py`, `app/mcp_auth.py` · `app/catalog/` (`types.py` a table's structure, `relationships.py` how tables join; imports nothing from `app`) · `app/forecasting/` (`preprocessing.py` rows to a clean series, `engine.py` the `ForecastEngine` protocol and `TimesFMEngine` — the only code importing `timesfm` or `torch`, lazily — `service.py` one model per process; imports nothing from `app.agent`) · `app/security/` (`supabase.py` token verification, `auth.py` `TenantContext`, `vault.py` Fernet) · `app/db/` (App DB session + models: Tenant, Connection, ConnectionTable, Run; `Run` is the usage ledger, there is no separate `Usage` table) · `app/workers/` (`runs.py` the arq worker) · `app/queue.py` · plus `evals/`, `scripts/`, `tests/{unit,integration}`. Nothing imports upward. `HTTPException` is raised only inside `app/api/`; everything else raises from `app/services/errors.py`.
 
 - The agent is built with `langchain.agents.create_agent`, whose graph is a `model` node and a `tools` node looping until the model stops calling tools. There is no hand-written router: the model decides whether a question needs a tool. The loop is bounded by `recursion_limit()`, derived from `max_tool_calls` and the middleware attached.
 - Middleware is where anything wrapping the loop goes. Only `before_agent`, `before_model`, `after_model` and `after_agent` become graph nodes; `wrap_model_call` and `wrap_tool_call` compose around the model and tool nodes and cost nothing. `recursion_limit()` counts supersteps, so it takes the middleware list and must grow with it — left at the bare `2 * max_tool_calls + 1` a summarising agent gives up after four queries and reports that the model did.
@@ -147,9 +147,9 @@ Changing it requires updating both repos in the same PR.
 |---|---|
 | `status` | `{"stage": router\|sql_gen\|sql_guard\|db_exec\|answer}` |
 | `sql` | `{"sql": "...", "what": "...", "why": "..."}` — `what`/`why` may be empty strings |
-| `rejected` | `{"sql": "...", "reason": "...", "at": guard\|database}` — always straight after `status: sql_guard` |
+| `rejected` | `{"sql": "...", "reason": "...", "at": guard\|database\|forecast}` — always straight after `status: sql_guard` |
 | `rows` | `{"columns": [...], "rows": [[...]], "truncated": bool, "ms": n}` |
-| `chart` | `{"type": bar\|line, "x": "col", "y": ["col"]}` — optional, always straight after a `rows` |
+| `chart` | `{"type": bar\|line\|forecast, "x": "col", "y": ["col"], "forecast"?: {"grain", "interval", "history": [[period, value]], "points": [[period, forecast, low, high]]}}` — optional, always straight after a `rows` |
 | `token` | `{"text": "..."}` |
 | `done` | `{"run_id": "...", "duration_ms": n}` |
 | `error` | `{"message": "..."}` |
@@ -160,6 +160,13 @@ update in the same PR. It is additive: no existing event changed shape, it alway
 because a chart is a payload rather than a step. A client that ignores unknown event names is
 unaffected. Note that `pnpm gen:agent` will not surface it: SSE events do not appear in
 `/openapi.json`.
+
+`forecast` and `at: forecast` were added on 2026-09-22 the same way: additive, no new stage,
+both clients in one change. A forecast run goes through the same four stages, because the
+forecast tool writes SQL, guards it and runs it before it forecasts. Its `rows` are the history
+the SQL returned; the chart carries the cleaned series and the forecast, which the web client
+also lists as a table. `at: forecast` means the SQL ran but the data could not support a
+forecast (too little history, too sparse, too far ahead), and it is never filed as a correction.
 
 `rejected`, and the `what`/`why`/`ms` fields, were added on 2026-09-18 the same way: additive, no
 new stage, both clients updated in one change. `what` and `why` are the model's own plain-English
