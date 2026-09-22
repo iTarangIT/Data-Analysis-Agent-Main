@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     # legitimately query more than once to answer, without any of them having been rejected.
     max_tool_calls: int = 6
 
+    # Forecasting runs a ~200M-parameter model in this process, about a gigabyte resident, which
+    # Render's free plan cannot hold. Off, the forecast tool is not offered and nothing loads.
+    forecast_engine: Literal["off", "timesfm"] = "off"
+    forecast_checkpoint: str = "google/timesfm-2.5-200m-pytorch"
+    forecast_threads: int = 2
+
     # Long-term memory. "postgres" keeps it in the App DB beside the account it belongs to;
     # "memory" keeps it for the life of one process, which is enough for local work and the test
     # suite; "off" attaches no store and runs the agent exactly as it ran before.

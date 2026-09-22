@@ -30,6 +30,8 @@ dependencies = [
     "structlog>=24",
     "duckdb>=1.1",
     "pandas>=2.2",
+    # Imported directly by app/forecasting, not only through pandas.
+    "numpy>=2",
     "openpyxl>=3.1",
     "python-multipart>=0.0.9",
     "arq>=0.26",
