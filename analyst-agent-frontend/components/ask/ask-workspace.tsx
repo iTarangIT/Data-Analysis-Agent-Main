@@ -21,7 +21,7 @@ import { RunErrorPanel } from "@/components/ask/run-error";
 import { RunProcess } from "@/components/ask/run-process";
 import { RunStatus } from "@/components/ask/run-status";
 import { SidebarTrigger } from "@/components/app-shell/sidebar-context";
-import { buildChart } from "@/features/ask/chart";
+import { buildChart, forecastTable } from "@/features/ask/chart";
 import type { RunState } from "@/features/ask/run-types";
 import { isRunning } from "@/features/ask/run-types";
 import { THREADS_KEY, withAskedThread } from "@/features/ask/threads";
@@ -257,6 +257,7 @@ function Turn({
     turn.chart !== null &&
     turn.result !== null &&
     buildChart(turn.chart, turn.result).kind !== "none";
+  const forecast = turn.chart ? forecastTable(turn.chart) : null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -277,6 +278,7 @@ function Turn({
         {plottable && turn.chart && turn.result ? (
           <ResultChart spec={turn.chart} result={turn.result} />
         ) : null}
+        {forecast ? <ResultTable result={forecast} /> : null}
         {turn.result ? <ResultTable result={turn.result} /> : null}
 
         {turn.error ? <RunErrorPanel error={turn.error} /> : null}

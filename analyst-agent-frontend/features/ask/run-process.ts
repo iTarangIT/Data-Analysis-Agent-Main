@@ -1,4 +1,4 @@
-import type { Attempt, Stage } from "./run-types";
+import type { Attempt, RunState, Stage } from "./run-types";
 
 export const STAGE_LABEL: Record<Stage, string> = {
   router: "Reading your question",
@@ -7,6 +7,30 @@ export const STAGE_LABEL: Record<Stage, string> = {
   db_exec: "Running it on IoT database",
   answer: "Writing the answer",
 };
+
+/** Why an attempt went no further, by where it stopped. */
+export const REFUSAL_LABEL: Record<NonNullable<Attempt["at"]>, string> = {
+  guard: "Rejected",
+  database: "Failed in the database",
+  forecast: "Couldn't forecast",
+};
+
+/** A saved run's tool, named the way the agent names it. */
+export function toolLabel(tool: string | null): string | null {
+  if (tool === "sql") return "query_database";
+  if (tool === "forecast") return "forecast_series";
+  return tool;
+}
+
+/**
+ * A live run has no `tool` field until it is saved. A forecast shows itself by its chart, or
+ * by its refusal when the data could not support one; anything else that reached the guard
+ * was a query.
+ */
+export function liveTool(state: Pick<RunState, "stageLog" | "chart" | "attempts">): "forecast" | "sql" | null {
+  if (state.chart?.type === "forecast" || state.attempts.some((a) => a.at === "forecast")) return "forecast";
+  return state.stageLog.includes("sql_guard") ? "sql" : null;
+}
 
 /**
  * The last attempt is optimistically rejected while its check is still pending. The agent's
@@ -49,7 +73,7 @@ export function buildProcessSteps(stageLog: Stage[], attempts: Attempt[], phase:
     const mark = rejected || interrupted || unchecked ? "hollow" as const : "done" as const;
     const notes = [
       writing && attempt > 1 ? `attempt ${attempt}` : null,
-      rejected ? (query.at === "database" ? "failed in the database" : "rejected")
+      rejected ? REFUSAL_LABEL[query.at ?? "guard"].toLowerCase()
         : mark === "hollow" ? "not completed" : outcome(stage, query, attempts),
     ];
     return { stage, label: STAGE_LABEL[stage], attempt, rejected, mark, note: notes.filter(Boolean).join(" · ") || null };

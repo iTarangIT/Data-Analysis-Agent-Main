@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { runReducer } from "./run-machine";
-import { buildProcessSteps, confirmedRejections, plainSummary, processSummary } from "./run-process";
+import {
+  buildProcessSteps, confirmedRejections, liveTool, plainSummary, processSummary, toolLabel,
+} from "./run-process";
 import { type Attempt, IDLE_RUN, type RunAction, type RunState, type Stage } from "./run-types";
 
 const status = (stage: Stage): RunAction => ({ type: "status", data: { stage } });
@@ -108,5 +110,40 @@ describe("plain summary", () => {
 
   it.each(["error", "cancelled"])("says nothing for a run that ended %s", (phase) => {
     expect(plainSummary(answered({}), phase)).toBeNull();
+  });
+});
+
+describe("which tool answered", () => {
+  it("names a saved run's tool the way the agent does", () => {
+    expect(toolLabel("sql")).toBe("query_database");
+    expect(toolLabel("forecast")).toBe("forecast_series");
+    expect(toolLabel(null)).toBeNull();
+  });
+
+  it("knows a live forecast by its chart", () => {
+    const chart = { type: "forecast" as const, x: "month", y: ["revenue"] };
+
+    expect(liveTool({ stageLog: ["router", "sql_gen", "sql_guard"], attempts: [], chart })).toBe("forecast");
+  });
+
+  it("knows a forecast that could not be made by its refusal", () => {
+    const attempts: Attempt[] = [{ sql: "SELECT 1", rejected: true, reason: "only 5 months", at: "forecast" }];
+
+    expect(liveTool({ stageLog: ["router", "sql_gen", "sql_guard"], attempts, chart: null })).toBe("forecast");
+  });
+
+  it("calls any other checked query a query", () => {
+    expect(liveTool({ stageLog: ["router", "sql_gen", "sql_guard"], attempts: [], chart: null })).toBe("sql");
+    expect(liveTool({ stageLog: ["router", "answer"], attempts: [], chart: null })).toBeNull();
+  });
+});
+
+describe("a forecast the data could not support", () => {
+  it("says it couldn't forecast, not that the query was rejected", () => {
+    const attempts: Attempt[] = [{ sql: "SELECT 1", rejected: true, reason: "only 5 months", at: "forecast" }];
+
+    const steps = buildProcessSteps(["router", "sql_gen", "sql_guard", "answer"], attempts, "done");
+
+    expect(steps[2].note).toBe("couldn't forecast");
   });
 });

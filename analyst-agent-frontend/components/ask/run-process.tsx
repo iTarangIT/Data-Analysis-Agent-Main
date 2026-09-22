@@ -5,7 +5,8 @@ import { Fragment, useId, useState } from "react";
 import { RunTimeline } from "@/components/ask/run-timeline";
 import { SqlBlock } from "@/components/ask/sql-block";
 import {
-  answeringAttempt, buildProcessSteps, confirmedRejections, plainSummary, processSummary, rowCount,
+  answeringAttempt, buildProcessSteps, confirmedRejections, liveTool, plainSummary, processSummary,
+  REFUSAL_LABEL, rowCount, toolLabel,
   type PlainSummary,
 } from "@/features/ask/run-process";
 import type { Attempt, RunState } from "@/features/ask/run-types";
@@ -26,9 +27,7 @@ export function RunProcess({ state, detail }: Props) {
   const summary = processSummary(phase, duration, trace ? attempts.length : undefined, confirmedRejections(attempts));
   const steps = trace ? buildProcessSteps(trace.stages, attempts, phase) : [];
   const simple = trace ? plainSummary(attempts, phase) : null;
-  const tool = state
-    ? state.stageLog.includes("sql_guard") ? "query_database" : null
-    : detail!.tool === "sql" ? "query_database" : detail!.tool;
+  const tool = toolLabel(state ? liveTool(state) : detail!.tool);
   const rows = state ? state.result?.rows.length : detail!.rows_returned;
   const truncated = state ? state.result?.truncated : answeringAttempt(attempts)?.truncated;
   const accepted = attempts.filter((attempt) => attempt.sql && !attempt.rejected);
@@ -90,7 +89,7 @@ function RefusedQueries({ attempts }: { attempts: Attempt[] }) {
       <div className="mt-3 flex flex-col gap-3">
         {attempts.map((attempt, index) => (
           <div key={index} className="flex flex-col gap-1.5">
-            <SqlBlock sql={attempt.sql!} label={attempt.at === "database" ? "Failed in the database" : "Rejected"} />
+            <SqlBlock sql={attempt.sql!} label={REFUSAL_LABEL[attempt.at ?? "guard"]} />
             {attempt.reason ? <p className="text-xs break-words text-ink-muted">Reason: {attempt.reason}</p> : null}
           </div>
         ))}

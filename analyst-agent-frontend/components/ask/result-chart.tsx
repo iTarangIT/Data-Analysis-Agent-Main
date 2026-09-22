@@ -36,7 +36,9 @@ export function ResultChart({ spec, result }: { spec: ChartSpec; result: ResultT
     <figure className="m-0 flex min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-card">
       <figcaption className="flex items-baseline justify-between gap-3 border-b border-line px-4 py-2.5">
         <span className="min-w-0 truncate text-xs font-medium text-ink-muted">
-          {chart.series.map((s) => s.column).join(", ")} by {chart.xColumn}
+          {chart.type === "forecast"
+            ? `${chart.series[0].column} by ${chart.xColumn}, with a forecast`
+            : `${chart.series.map((s) => s.column).join(", ")} by ${chart.xColumn}`}
         </span>
         <span className="shrink-0 font-mono text-[0.6875rem] text-ink-faint">{chart.type}</span>
       </figcaption>
@@ -57,6 +59,14 @@ function Legend({ chart }: { chart: PlottableChart }) {
           <span className="font-mono text-[0.75rem] text-ink-muted">{series.column}</span>
         </li>
       ))}
+      {chart.band && chart.interval !== undefined ? (
+        <li className="flex items-center gap-2">
+          <span aria-hidden className="h-2.5 w-2.5 rounded-xs bg-series-3 opacity-60" />
+          <span className="font-mono text-[0.75rem] text-ink-muted">
+            {Math.round(chart.interval * 100)}% range
+          </span>
+        </li>
+      ) : null}
     </ul>
   );
 }
@@ -168,6 +178,22 @@ function Line({ chart }: { chart: PlottableChart }) {
           strokeWidth={1}
         />
 
+        {chart.band ? (
+          <polygon className="fill-series-3 opacity-60" points={bandPoints(chart.band, x, y)} />
+        ) : null}
+
+        {chart.split !== undefined ? (
+          <line
+            x1={x(chart.split)}
+            y1={0}
+            x2={x(chart.split)}
+            y2={LINE_HEIGHT}
+            className="stroke-line-strong"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+          />
+        ) : null}
+
         {chart.series.map((series, i) =>
           // A gap breaks the line rather than being drawn through.
           runs(series.points).map((run, r) => (
@@ -178,6 +204,7 @@ function Line({ chart }: { chart: PlottableChart }) {
               strokeLinejoin="round"
               strokeLinecap="round"
               className={STROKE[i]}
+              strokeDasharray={chart.type === "forecast" && i === 1 ? "6 5" : undefined}
               points={run.map(({ index, point }) => `${x(index)},${y(point.value)}`).join(" ")}
             />
           )),
@@ -200,8 +227,16 @@ function Line({ chart }: { chart: PlottableChart }) {
         })}
       </svg>
 
-      <div className="mt-1 flex justify-between font-mono text-[0.75rem] text-ink-muted">
+      <div className="relative mt-1 flex justify-between font-mono text-[0.75rem] text-ink-muted">
         <span>{chart.categories[0]}</span>
+        {chart.split !== undefined ? (
+          <span
+            className="absolute -translate-x-1/2 text-ink"
+            style={{ left: `${(x(chart.split) / LINE_WIDTH) * 100}%` }}
+          >
+            {chart.categories[chart.split]}
+          </span>
+        ) : null}
         <span>{chart.categories[chart.categories.length - 1]}</span>
       </div>
     </div>
@@ -236,7 +271,23 @@ function lastPoint(points: (ChartPoint | null)[]): Indexed | null {
   return null;
 }
 
+/** The band as one closed shape: along the top edge left to right, back along the bottom. */
+function bandPoints(
+  band: ({ lo: number; hi: number } | null)[],
+  x: (index: number) => number,
+  y: (value: number) => number,
+): string {
+  const edge = band.flatMap((b, index) => (b ? [{ index, ...b }] : []));
+  const top = edge.map((p) => `${x(p.index)},${y(p.hi)}`);
+  const bottom = [...edge].reverse().map((p) => `${x(p.index)},${y(p.lo)}`);
+  return [...top, ...bottom].join(" ");
+}
+
 function summarise(chart: PlottableChart): string {
+  if (chart.type === "forecast" && chart.split !== undefined) {
+    const ahead = chart.categories.length - chart.split - 1;
+    return `${chart.series[0].column} by ${chart.xColumn}, ${chart.split + 1} actual points then a ${ahead}-point forecast, from ${chart.min} to ${chart.max}.`;
+  }
   const names = chart.series.map((s) => s.column).join(", ");
   return `${names} by ${chart.xColumn}, ${chart.categories.length} points, from ${chart.min} to ${chart.max}.`;
 }
