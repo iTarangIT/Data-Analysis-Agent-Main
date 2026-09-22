@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -15,6 +16,7 @@ from app.api import (
 )
 from app.config import get_settings
 from app.db.session import SessionLocal
+from app.forecasting.service import load_forecaster
 from app.llm import configure_tracing
 from app.logging import configure_logging, log
 from app.mcp_client import probe_mcp
@@ -33,6 +35,11 @@ async def lifespan(app: FastAPI):
     if s.mcp_startup_probe:
         # Same reasoning: without the MCP server no Postgres connection can answer anything.
         await probe_mcp()
+    if s.forecast_engine != "off" and not s.queue_enabled:
+        # Off the event loop: loading the checkpoint takes seconds. A model that will not load
+        # fails the boot, for the same reason a missing MCP server does. In queue mode the
+        # worker runs every tool, so the API would hold a gigabyte it never uses.
+        await asyncio.to_thread(load_forecaster)
     # Idempotent, and not per run: it issues CREATE INDEX CONCURRENTLY.
     setup_store()
     db = SessionLocal()

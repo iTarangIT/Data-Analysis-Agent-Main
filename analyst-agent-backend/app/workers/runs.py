@@ -17,6 +17,7 @@ from app.config import get_settings
 from app.connectors.registry import connector_for, open_for_run
 from app.db.models import Connection, Run
 from app.db.session import SessionLocal
+from app.forecasting.service import load_forecaster
 from app.llm import configure_tracing
 from app.logging import configure_logging, log
 from app.mcp_client import probe_mcp
@@ -109,6 +110,8 @@ async def _startup(ctx: dict) -> None:
     configure_tracing()
     if get_settings().mcp_startup_probe:
         await probe_mcp()
+    if get_settings().forecast_engine != "off":
+        await asyncio.to_thread(load_forecaster)
     log.info("worker.startup", max_jobs=get_settings().worker_max_jobs)
 
 
