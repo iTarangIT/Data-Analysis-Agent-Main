@@ -13,6 +13,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from app.forecasting.preprocessing import MIN_HISTORY
+
 # Beyond this a bar chart is noise and a line chart is a smear.
 MAX_POINTS = 200
 
@@ -61,4 +63,26 @@ def infer_chart(columns: list[str], rows: list[list[Any]], truncated: bool) -> d
         "type": "line" if temporal else "bar",
         "x": x,
         "y": [name for _, name in numeric],
+    }
+
+
+def forecast_chart(payload: dict[str, Any]) -> dict[str, Any]:
+    """The history a forecast was made from and the forecast itself, as one chart.
+
+    Drawn from the cleaned series rather than the raw rows, because that is what the model was
+    given: gaps filled, duplicates merged, an unfinished period dropped. The oldest history is
+    trimmed so the whole picture stays within MAX_POINTS, but never below MIN_HISTORY.
+    """
+    points = payload["points"]
+    keep = max(MAX_POINTS - len(points), MIN_HISTORY)
+    return {
+        "type": "forecast",
+        "x": payload["time_column"],
+        "y": [payload["value_column"]],
+        "forecast": {
+            "grain": payload["grain"],
+            "interval": payload["interval"],
+            "history": payload["history"][-keep:],
+            "points": points,
+        },
     }

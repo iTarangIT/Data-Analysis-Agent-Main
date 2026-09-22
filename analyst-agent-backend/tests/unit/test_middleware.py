@@ -4,6 +4,7 @@ already knows, and what it keeps afterwards."""
 from typing import ClassVar
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 from langchain.agents.middleware import AgentMiddleware, SummarizationMiddleware
 from langchain_core.language_models import FakeMessagesListChatModel
@@ -17,6 +18,8 @@ from app.agent.graph import build_agent, recursion_limit
 from app.agent.middleware import MemoryMiddleware, build_middleware, node_hooks
 from app.catalog.types import Catalog, CatalogTable, Column, TableDef
 from app.config import get_settings
+from app.forecasting.engine import EngineForecast
+from app.forecasting.service import ForecastService
 from app.services.runs import EventTranslator, RunOutcome
 
 CONTEXT = RunContext(tenant_id="t_one", connection_id="c1", run_id="r1", thread_id="th1")
@@ -413,3 +416,45 @@ class TestSummarisationActuallyFiring:
         assert "A summary of the thread." not in [
             e["data"].get("text") for e in events if e["type"] == "token"
         ]
+
+
+class FlatEngine:
+    name = "flat"
+    max_context = 1024
+    max_horizon = 256
+
+    def predict(self, values, horizon):
+        mean = np.full(horizon, values[-1])
+        return EngineForecast(mean=mean, lower=mean - 1, upper=mean + 1)
+
+
+class TestAForecastRefusalIsNotACorrection:
+    def test_sound_sql_the_forecaster_could_not_use_is_not_filed_as_refused(self):
+        # FakeConnector returns only `vehicleno`, so the forecaster refuses for a missing
+        # column. The query that follows is the same SQL, and was never wrong.
+        store = InMemoryStore()
+        forecast = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "forecast_series",
+                    "args": {
+                        "sql": "select vehicleno from vehicles", "time_column": "day",
+                        "value_column": "n", "grain": "day", "horizon": 3, "kind": "total",
+                    },
+                    "id": "f1",
+                }
+            ],
+        )  # fmt: skip
+        model = FakeToolModel(
+            responses=[
+                forecast,
+                _tool_call("select vehicleno from vehicles", "c2"),
+                AIMessage(content="One."),
+            ]
+        )
+
+        with patch("app.agent.graph.get_forecaster", return_value=ForecastService(FlatEngine())):
+            run(model, store=store)
+
+        assert store.search(("t_one", "c1", memory.CORRECTIONS)) == []

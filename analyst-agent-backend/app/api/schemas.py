@@ -4,6 +4,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from app.catalog.types import Relationship, TableDef
+from app.forecasting.preprocessing import Grain
 
 # A file connection is never created from a client-supplied body: `kind="file"` there would
 # let any tenant register a path of their choosing, which no SQL guard could catch, because
@@ -162,14 +163,24 @@ class SyncOut(BaseModel):
     status: Literal["queued"]
 
 
+class ForecastChart(BaseModel):
+    grain: Grain
+    interval: float
+    # [period, value] and [period, forecast, low, high]. Lists rather than objects, so a
+    # 200-point chart does not repeat four key names two hundred times on every run.
+    history: list[tuple[str, float]]
+    points: list[tuple[str, float, float, float]]
+
+
 class ChartSpec(BaseModel):
     """A suggestion rendered beside the table, never instead of it."""
 
-    type: Literal["bar", "line"]
+    type: Literal["bar", "line", "forecast"]
     x: str
     # A list, because one month column beside two numeric ones is the commonest shape a
     # spreadsheet produces, and a list costs nothing.
     y: list[str]
+    forecast: ForecastChart | None = None
 
 
 class TraceAttempt(BaseModel):
@@ -180,7 +191,7 @@ class TraceAttempt(BaseModel):
     what: str = ""
     why: str = ""
     reason: str | None = None
-    at: Literal["guard", "database"] | None = None
+    at: Literal["guard", "database", "forecast"] | None = None
     rows: int | None = None
     truncated: bool | None = None
     ms: int | None = None

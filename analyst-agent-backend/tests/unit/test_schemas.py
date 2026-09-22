@@ -169,3 +169,35 @@ class TestRunTrace:
     def test_an_unknown_stage_is_refused(self):
         with pytest.raises(ValidationError):
             RunOut.model_validate({**SAVED_RUN, "trace": {"stages": ["guess"], "attempts": []}})
+
+
+class TestForecastShapes:
+    def test_a_forecast_chart_is_a_valid_saved_chart(self):
+        from app.api.schemas import ChartSpec
+
+        spec = ChartSpec.model_validate(
+            {
+                "type": "forecast", "x": "month", "y": ["revenue"],
+                "forecast": {
+                    "grain": "month", "interval": 0.8,
+                    "history": [["2026-08", 110.0]],
+                    "points": [["2026-09", 115.0, 105.0, 125.0]],
+                },
+            }
+        )  # fmt: skip
+
+        assert spec.forecast is not None and spec.forecast.points[0][3] == 125.0
+
+    def test_a_bar_chart_still_needs_no_forecast(self):
+        from app.api.schemas import ChartSpec
+
+        assert ChartSpec.model_validate({"type": "bar", "x": "r", "y": ["u"]}).forecast is None
+
+    def test_an_attempt_can_have_been_refused_by_the_forecaster(self):
+        from app.api.schemas import TraceAttempt
+
+        attempt = TraceAttempt.model_validate(
+            {"sql": "SELECT 1", "rejected": True, "at": "forecast"}
+        )
+
+        assert attempt.at == "forecast"

@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.services.charts import MAX_POINTS, infer_chart
+from app.services.charts import MAX_POINTS, forecast_chart, infer_chart
 
 
 class TestWhenAChartHelps:
@@ -105,3 +105,32 @@ class TestNulls:
     @pytest.mark.parametrize("rows", [[], [[]]])
     def test_an_empty_result_is_not_a_chart(self, rows):
         assert infer_chart(["region", "units"], rows, truncated=False) is None
+
+
+class TestForecastChart:
+    def _payload(self, history: int, horizon: int) -> dict:
+        return {
+            "grain": "day",
+            "interval": 0.8,
+            "history": [[f"h{i}", float(i)] for i in range(history)],
+            "points": [[f"p{i}", 1.0, 0.0, 2.0] for i in range(horizon)],
+            "time_column": "day",
+            "value_column": "units",
+        }
+
+    def test_it_names_the_axes_the_rows_used(self):
+        chart = forecast_chart(self._payload(10, 3))
+
+        assert (chart["type"], chart["x"], chart["y"]) == ("forecast", "day", ["units"])
+        assert chart["forecast"]["points"] == self._payload(10, 3)["points"]
+
+    def test_old_history_is_trimmed_so_the_picture_stays_readable(self):
+        chart = forecast_chart(self._payload(250, 12))
+
+        assert len(chart["forecast"]["history"]) == MAX_POINTS - 12
+        assert chart["forecast"]["history"][-1] == ["h249", 249.0]
+
+    def test_a_long_horizon_still_keeps_enough_history_to_read_it_against(self):
+        chart = forecast_chart(self._payload(250, 199))
+
+        assert len(chart["forecast"]["history"]) == 8

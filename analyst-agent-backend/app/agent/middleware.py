@@ -80,7 +80,11 @@ def _harvest(messages: list) -> tuple[str, str | None, str, list[tuple[str, str,
             continue
         artifact = message.artifact
         if artifact.get("error"):
-            pending = (artifact.get("sql", ""), artifact["error"])
+            # Only a refused or failed query is a mistake a later query corrects. A forecast the
+            # data could not support ran sound SQL, and filing it would later tell the model
+            # that SQL had been refused.
+            if artifact["at"] in ("guard", "database"):
+                pending = (artifact.get("sql", ""), artifact["error"])
         else:
             sql = artifact["sql"]
             if pending and pending[0]:

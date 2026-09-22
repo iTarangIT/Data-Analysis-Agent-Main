@@ -393,3 +393,68 @@ class TestForecastingIsOfferedOnlyWhenLoaded:
 
         assert FORECAST_CAPABILITY in prompt
         assert "forecast_series" in tools
+
+
+class ScriptedConnector:
+    """Answers each query in turn with its own columns and rows."""
+
+    kind = "postgres"
+    dialect = "postgres"
+
+    def __init__(self, *results):
+        self.results = list(results)
+
+    def run_select(self, sql, max_rows):
+        columns, rows = self.results.pop(0)
+        return columns, rows[:max_rows]
+
+
+TWELVE_DAYS = [(f"2026-09-{d:02d}", 10 + d) for d in range(12, 0, -1)]
+
+
+def _forecast_call(call_id="f1"):
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "forecast_series",
+                "args": {
+                    "sql": "select day, n from vehicles order by day desc",
+                    "time_column": "day", "value_column": "n",
+                    "grain": "day", "horizon": 3, "kind": "total",
+                },
+                "id": call_id,
+            }
+        ],
+    )  # fmt: skip
+
+
+class TestAForecastRun:
+    def _run(self, *responses, connector=None):
+        connector = connector or ScriptedConnector((["day", "n"], TWELVE_DAYS))
+        with patch("app.agent.graph.get_forecaster", return_value=ForecastService(FlatEngine())):
+            return _run(FakeToolModel(responses=list(responses)), connector)
+
+    def test_it_streams_the_same_stages_and_a_forecast_chart(self):
+        events, outcome = self._run(_forecast_call(), AIMessage(content="About 22 a day."))
+
+        assert _stages(events) == ["router", "sql_gen", "sql_guard", "db_exec", "answer"]
+        types = [e["type"] for e in events]
+        assert types.index("chart") == types.index("rows") + 1
+        chart = next(e for e in events if e["type"] == "chart")["data"]
+        assert chart["type"] == "forecast" and len(chart["forecast"]["points"]) == 3
+        assert outcome.tool == "forecast"
+
+    def test_a_later_query_clears_the_saved_chart_as_the_client_does(self):
+        connector = ScriptedConnector(
+            (["day", "n"], TWELVE_DAYS), (["vehicleno"], [("KA01",), ("KA02",)])
+        )
+
+        _, outcome = self._run(
+            _forecast_call(),
+            _tool_call("select vehicleno from vehicles"),
+            AIMessage(content="Two."),
+            connector=connector,
+        )
+
+        assert outcome.chart is None

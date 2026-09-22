@@ -24,6 +24,7 @@ from app.agent.context import RunContext
 from app.agent.graph import build_agent, recursion_limit
 from app.agent.middleware import build_middleware
 from app.agent.store import memory_enabled, open_store
+from app.agent.tools import FORECAST_TOOL_NAME
 from app.api.schemas import RunCreate
 from app.catalog.types import Catalog
 from app.config import get_settings
@@ -35,7 +36,7 @@ from app.logging import log
 from app.security.auth import TenantContext
 from app.services import connections as conn_svc
 from app.services import tables as tables_svc
-from app.services.charts import infer_chart
+from app.services.charts import forecast_chart, infer_chart
 from app.services.errors import BudgetExceeded, DomainError, NotFound, RateLimited
 
 Emit = Callable[[dict], None]
@@ -91,7 +92,8 @@ class EventTranslator:
             yield self._status("router")
 
         if message.tool_calls:
-            self.outcome.tool = "sql"
+            forecasting = any(c["name"] == FORECAST_TOOL_NAME for c in message.tool_calls)
+            self.outcome.tool = "forecast" if forecasting else "sql"
             self.outcome.attempts.append({"sql": None, "rejected": False})
             yield self._status("sql_gen")
             return
@@ -146,9 +148,16 @@ class EventTranslator:
         # Emitted per tool call, so a second query supersedes the first exactly as `sql` and
         # `rows` already do. `chart` is a payload rather than a stage, so the frozen stage list
         # is unchanged.
-        chart = infer_chart(result["columns"], result["rows"], result["truncated"])
+        forecast = result.get("forecast")
+        chart = (
+            forecast_chart(forecast)
+            if forecast
+            else infer_chart(result["columns"], result["rows"], result["truncated"])
+        )
+        # Assigned even when there is none: the client drops its chart on every new query, and
+        # a saved run must show what the live one ended on.
+        self.outcome.chart = chart
         if chart:
-            self.outcome.chart = chart
             yield {"type": "chart", "data": chart}
 
 
