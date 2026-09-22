@@ -149,10 +149,22 @@ export type User = {
   created_at: string;
 };
 
+/** A forecast's own series: the cleaned history it was made from, then what it predicts. */
+export type ForecastSeries = {
+  grain: "hour" | "day" | "week" | "month" | "quarter" | "year";
+  /** How much of the outcome the low-to-high band is meant to hold, e.g. 0.8. */
+  interval: number;
+  /** [period, value], oldest first. */
+  history: [string, number][];
+  /** [period, forecast, low, high]. */
+  points: [string, number, number, number][];
+};
+
 export type ChartSpec = {
-  type: "bar" | "line";
+  type: "bar" | "line" | "forecast";
   x: string;
   y: string[];
+  forecast?: ForecastSeries | null;
 };
 
 /**
@@ -177,7 +189,7 @@ export type Attempt = {
   what?: string;
   why?: string;
   reason?: string | null;
-  at?: "guard" | "database" | null;
+  at?: "guard" | "database" | "forecast" | null;
   rows?: number | null;
   truncated?: boolean | null;
   ms?: number | null;

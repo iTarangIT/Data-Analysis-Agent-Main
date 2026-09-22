@@ -27,7 +27,7 @@ export type ResultTable = {
 export type RunEvent =
   | { type: "status"; data: { stage: Stage } }
   | { type: "sql"; data: { sql: string; what?: string; why?: string } }
-  | { type: "rejected"; data: { sql: string; reason: string; at: "guard" | "database" } }
+  | { type: "rejected"; data: { sql: string; reason: string; at: "guard" | "database" | "forecast" } }
   | { type: "rows"; data: ResultTable & { ms?: number } }
   | { type: "chart"; data: ChartSpec }
   | { type: "token"; data: { text: string } }

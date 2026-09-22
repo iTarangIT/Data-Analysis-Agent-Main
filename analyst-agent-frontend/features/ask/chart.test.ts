@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { buildChart } from "./chart";
+import type { ChartSpec } from "@/lib/api/types";
+
+import { buildChart, forecastTable } from "./chart";
 import type { ResultTable } from "./run-types";
 
 function table(columns: string[], rows: ResultTable["rows"]): ResultTable {
@@ -167,5 +169,89 @@ describe("buildChart", () => {
 
     if (chart.kind !== "chart") throw new Error("expected a chart");
     expect(chart.categories).toEqual(["null", "true"]);
+  });
+});
+
+const FORECAST: ChartSpec = {
+  type: "forecast",
+  x: "month",
+  y: ["revenue"],
+  forecast: {
+    grain: "month",
+    interval: 0.8,
+    history: [
+      ["2026-06", 100],
+      ["2026-07", 120],
+      ["2026-08", 110],
+    ],
+    points: [
+      ["2026-09", 115, 105, 125],
+      ["2026-10", 118, 100, 136],
+    ],
+  },
+};
+
+// The table shows the raw rows; a forecast draws from the cleaned series in its spec.
+const NO_ROWS: ResultTable = { columns: [], rows: [], truncated: false };
+
+function drawn(spec: ChartSpec) {
+  const chart = buildChart(spec, NO_ROWS);
+  if (chart.kind !== "chart") throw new Error(`expected a chart, got: ${chart.reason}`);
+  return chart;
+}
+
+describe("buildChart for a forecast", () => {
+  it("runs the forecast periods on after the history", () => {
+    const chart = drawn(FORECAST);
+
+    expect(chart.categories).toEqual(["2026-06", "2026-07", "2026-08", "2026-09", "2026-10"]);
+    expect(chart.split).toBe(2);
+  });
+
+  it("draws actuals only across the history", () => {
+    expect(drawn(FORECAST).series[0].points.map((p) => p?.value ?? null)).toEqual([
+      100, 120, 110, null, null,
+    ]);
+  });
+
+  it("starts the forecast on the last actual point so the two lines meet", () => {
+    const forecast = drawn(FORECAST).series[1];
+
+    expect(forecast.column).toBe("forecast");
+    expect(forecast.points.map((p) => p?.value ?? null)).toEqual([null, null, 110, 115, 118]);
+  });
+
+  it("fans the range out from the last actual point", () => {
+    expect(drawn(FORECAST).band).toEqual([
+      null,
+      null,
+      { lo: 110, hi: 110 },
+      { lo: 105, hi: 125 },
+      { lo: 100, hi: 136 },
+    ]);
+  });
+
+  it("scales to the top of the range, not just the forecast line", () => {
+    const chart = drawn(FORECAST);
+
+    expect(chart.max).toBe(136);
+    expect(chart.min).toBe(0);
+  });
+});
+
+describe("forecastTable", () => {
+  it("lists each forecast period with its range", () => {
+    expect(forecastTable(FORECAST)).toEqual({
+      columns: ["month", "revenue forecast", "low (80%)", "high (80%)"],
+      rows: [
+        ["2026-09", 115, 105, 125],
+        ["2026-10", 118, 100, 136],
+      ],
+      truncated: false,
+    });
+  });
+
+  it("is nothing for any other chart", () => {
+    expect(forecastTable({ type: "line", x: "month", y: ["revenue"] })).toBeNull();
   });
 });

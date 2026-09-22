@@ -1,4 +1,4 @@
-import type { ChartSpec } from "@/lib/api/types";
+import type { ChartSpec, ForecastSeries } from "@/lib/api/types";
 
 import { isNumericCell, renderCell } from "./cells";
 import type { Cell, ResultTable } from "./run-types";
@@ -47,6 +47,12 @@ export type PlottableChart = {
   /** The domain to scale against. Always includes zero so bar lengths stay proportional. */
   min: number;
   max: number;
+  /** Forecast only: the low-to-high range at each category, null where there is none. */
+  band?: ({ lo: number; hi: number } | null)[];
+  /** Forecast only: the index of the last actual point, where the forecast takes over. */
+  split?: number;
+  /** Forecast only: how much of the outcome the band is meant to hold. */
+  interval?: number;
 };
 
 export type NoChart = { kind: "none"; reason: string };
@@ -63,6 +69,9 @@ function point(value: Cell): ChartPoint | null {
 }
 
 export function buildChart(spec: ChartSpec, result: ResultTable): PlottableChart | NoChart {
+  // Drawn from the spec alone: it carries the cleaned series the forecast was made from,
+  // which is not the raw rows the table below shows.
+  if (spec.type === "forecast" && spec.forecast) return forecastChart(spec, spec.forecast);
   if (result.rows.length === 0) return { kind: "none", reason: "The query matched nothing." };
 
   const xIndex = result.columns.indexOf(spec.x);
@@ -104,5 +113,57 @@ export function buildChart(spec: ChartSpec, result: ResultTable): PlottableChart
     series,
     min: Math.min(0, ...values),
     max: Math.max(0, ...values),
+  };
+}
+
+function forecastChart(spec: ChartSpec, forecast: ForecastSeries): PlottableChart | NoChart {
+  const { history, points, interval } = forecast;
+  if (history.length === 0 || points.length === 0) {
+    return { kind: "none", reason: "The forecast has nothing to draw." };
+  }
+
+  const split = history.length - 1;
+  const [, last] = history[split];
+  const actual = [...history.map(([, value]) => point(value)), ...points.map(() => null)];
+  // Starts on the last actual point, so the dashed line leaves from where the solid one ends
+  // and the band fans out from a single point rather than appearing from nowhere.
+  const predicted = [
+    ...history.map((_, i) => (i === split ? point(last) : null)),
+    ...points.map(([, mean]) => point(mean)),
+  ];
+  const band = [
+    ...history.map((_, i) => (i === split ? { lo: last, hi: last } : null)),
+    ...points.map(([, , lo, hi]) => ({ lo, hi })),
+  ];
+  const values = [
+    ...history.map(([, value]) => value),
+    ...points.flatMap(([, mean, lo, hi]) => [mean, lo, hi]),
+  ];
+
+  return {
+    kind: "chart",
+    type: "forecast",
+    xColumn: spec.x,
+    categories: [...history.map(([period]) => period), ...points.map(([period]) => period)],
+    series: [
+      { column: spec.y[0], points: actual },
+      { column: "forecast", points: predicted },
+    ],
+    band,
+    split,
+    interval,
+    min: Math.min(0, ...values),
+    max: Math.max(0, ...values),
+  };
+}
+
+/** The forecast as rows, for the table under the chart. */
+export function forecastTable(spec: ChartSpec): ResultTable | null {
+  if (spec.type !== "forecast" || !spec.forecast) return null;
+  const percent = `${Math.round(spec.forecast.interval * 100)}%`;
+  return {
+    columns: [spec.x, `${spec.y[0]} forecast`, `low (${percent})`, `high (${percent})`],
+    rows: spec.forecast.points.map(([period, mean, lo, hi]) => [period, mean, lo, hi]),
+    truncated: false,
   };
 }
