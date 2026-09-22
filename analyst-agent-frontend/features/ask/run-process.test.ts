@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { runReducer } from "./run-machine";
 import {
-  buildProcessSteps, confirmedRejections, liveTool, plainSummary, processSummary, toolLabel,
+  buildProcessSteps, confirmedRejections, liveTool, plainSummary, processSummary, stageLabel,
+  toolLabel,
 } from "./run-process";
 import { type Attempt, IDLE_RUN, type RunAction, type RunState, type Stage } from "./run-types";
 
@@ -120,21 +121,44 @@ describe("which tool answered", () => {
     expect(toolLabel(null)).toBeNull();
   });
 
-  it("knows a live forecast by its chart", () => {
-    const chart = { type: "forecast" as const, x: "month", y: ["revenue"] };
+  it("takes a live run's tool from the last attempt, as the saved run does", () => {
+    const attempts: Attempt[] = [
+      { sql: "SELECT 1", rejected: true, reason: "only 5 months", at: "forecast", tool: "forecast" },
+      { sql: "SELECT 2", rejected: false, tool: "sql" },
+    ];
 
-    expect(liveTool({ stageLog: ["router", "sql_gen", "sql_guard"], attempts: [], chart })).toBe("forecast");
+    expect(liveTool({ attempts, stageLog: [] })).toBe("sql");
+    expect(liveTool({ attempts: attempts.slice(0, 1), stageLog: [] })).toBe("forecast");
   });
 
-  it("knows a forecast that could not be made by its refusal", () => {
-    const attempts: Attempt[] = [{ sql: "SELECT 1", rejected: true, reason: "only 5 months", at: "forecast" }];
+  it("calls a guarded run a query when the backend named no tool", () => {
+    const attempts: Attempt[] = [{ sql: "SELECT 1", rejected: false }];
 
-    expect(liveTool({ stageLog: ["router", "sql_gen", "sql_guard"], attempts, chart: null })).toBe("forecast");
+    expect(liveTool({ attempts, stageLog: ["router", "sql_gen", "sql_guard"] })).toBe("sql");
+    expect(liveTool({ attempts: [], stageLog: ["router", "answer"] })).toBeNull();
+  });
+});
+
+describe("step labels", () => {
+  it("says what a forecast is doing, and never names a database it may not be", () => {
+    expect(stageLabel("db_exec")).toBe("Running it on your data");
+    expect(stageLabel("sql_gen", "forecast")).toBe("Writing the query for the history");
+    expect(stageLabel("db_exec", "forecast")).toBe("Fetching the history and forecasting");
+    expect(stageLabel("sql_guard", "forecast")).toBe("Checking the query is read-only");
   });
 
-  it("calls any other checked query a query", () => {
-    expect(liveTool({ stageLog: ["router", "sql_gen", "sql_guard"], attempts: [], chart: null })).toBe("sql");
-    expect(liveTool({ stageLog: ["router", "answer"], attempts: [], chart: null })).toBeNull();
+  it("labels each step by the tool of its own attempt", () => {
+    const attempts: Attempt[] = [{ sql: "SELECT 1", rejected: false, rows: 36, tool: "forecast" }];
+
+    const steps = buildProcessSteps(["router", "sql_gen", "sql_guard", "db_exec", "answer"], attempts, "done");
+
+    expect(steps.map((s) => s.label)).toEqual([
+      "Reading your question",
+      "Writing the query for the history",
+      "Checking the query is read-only",
+      "Fetching the history and forecasting",
+      "Writing the answer",
+    ]);
   });
 });
 

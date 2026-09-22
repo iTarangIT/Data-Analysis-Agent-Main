@@ -145,7 +145,7 @@ Changing it requires updating both repos in the same PR.
 
 | event | data |
 |---|---|
-| `status` | `{"stage": router\|sql_gen\|sql_guard\|db_exec\|answer}` |
+| `status` | `{"stage": router\|sql_gen\|sql_guard\|db_exec\|answer, "tool"?: sql\|forecast}` — `tool` only on `sql_gen` |
 | `sql` | `{"sql": "...", "what": "...", "why": "..."}` — `what`/`why` may be empty strings |
 | `rejected` | `{"sql": "...", "reason": "...", "at": guard\|database\|forecast}` — always straight after `status: sql_guard` |
 | `rows` | `{"columns": [...], "rows": [[...]], "truncated": bool, "ms": n}` |
@@ -167,6 +167,9 @@ forecast tool writes SQL, guards it and runs it before it forecasts. Its `rows` 
 the SQL returned; the chart carries the cleaned series and the forecast, which the web client
 also lists as a table. `at: forecast` means the SQL ran but the data could not support a
 forecast (too little history, too sparse, too far ahead), and it is never filed as a correction.
+`status: sql_gen` names the tool the model chose (`sql` or `forecast`), and the saved trace
+records it on each attempt, so the client labels a forecast's steps while they run rather than
+once its chart arrives.
 
 `rejected`, and the `what`/`why`/`ms` fields, were added on 2026-09-18 the same way: additive, no
 new stage, both clients updated in one change. `what` and `why` are the model's own plain-English

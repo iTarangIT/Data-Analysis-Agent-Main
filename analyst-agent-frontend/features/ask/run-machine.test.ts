@@ -386,6 +386,18 @@ describe("runReducer", () => {
     });
   });
 
+  describe("the tool the agent chose", () => {
+    it("is kept on the attempt it starts", () => {
+      const s = drive([
+        submit,
+        stage("router"),
+        { type: "status", data: { stage: "sql_gen", tool: "forecast" } },
+      ]);
+
+      expect(s.attempts).toEqual([{ sql: null, rejected: false, tool: "forecast" }]);
+    });
+  });
+
   describe("a forecast the data could not support", () => {
     it("is kept as a refused attempt that says where it stopped", () => {
       const s = drive([

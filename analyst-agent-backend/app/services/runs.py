@@ -82,9 +82,9 @@ class EventTranslator:
         elif node == "tools" and isinstance(message, ToolMessage):
             yield from self._for_tool(message)
 
-    def _status(self, stage: str) -> dict:
+    def _status(self, stage: str, **extra: str) -> dict:
         self.outcome.stages.append(stage)
-        return {"type": "status", "data": {"stage": stage}}
+        return {"type": "status", "data": {"stage": stage, **extra}}
 
     def _for_model(self, message: AIMessage) -> Iterator[dict]:
         if not self._routed:
@@ -94,8 +94,12 @@ class EventTranslator:
         if message.tool_calls:
             forecasting = any(c["name"] == FORECAST_TOOL_NAME for c in message.tool_calls)
             self.outcome.tool = "forecast" if forecasting else "sql"
-            self.outcome.attempts.append({"sql": None, "rejected": False})
-            yield self._status("sql_gen")
+            # Named now, before the tool runs, so the client can say what is happening while it
+            # happens. Otherwise a forecast only shows itself when its chart arrives at the end.
+            self.outcome.attempts.append(
+                {"sql": None, "rejected": False, "tool": self.outcome.tool}
+            )
+            yield self._status("sql_gen", tool=self.outcome.tool)
             return
 
         # Gemini 3 returns a list of content blocks rather than a string, so read `.text`,

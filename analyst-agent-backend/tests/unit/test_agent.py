@@ -449,6 +449,28 @@ class TestAForecastRun:
         assert chart["type"] == "forecast" and len(chart["forecast"]["points"]) == 4
         assert outcome.tool == "forecast"
 
+    def test_the_tool_is_named_before_it_runs_so_the_client_can_say_so(self):
+        events, outcome = self._run(_forecast_call(), AIMessage(content="About 22 a day."))
+
+        writing = next(
+            e for e in events if e["type"] == "status" and e["data"]["stage"] == "sql_gen"
+        )
+        assert writing["data"] == {"stage": "sql_gen", "tool": "forecast"}
+        assert outcome.attempts[0]["tool"] == "forecast"
+
+    def test_a_query_names_itself_too(self):
+        model = FakeToolModel(
+            responses=[_tool_call("select vehicleno from vehicles"), AIMessage(content="Two.")]
+        )
+
+        events, outcome = _run(model, FakeConnector())
+
+        writing = next(
+            e for e in events if e["type"] == "status" and e["data"]["stage"] == "sql_gen"
+        )
+        assert writing["data"] == {"stage": "sql_gen", "tool": "sql"}
+        assert outcome.attempts[0]["tool"] == "sql"
+
     def test_a_later_query_clears_the_saved_chart_as_the_client_does(self):
         connector = ScriptedConnector(
             (["day", "n"], TWELVE_DAYS), (["vehicleno"], [("KA01",), ("KA02",)])

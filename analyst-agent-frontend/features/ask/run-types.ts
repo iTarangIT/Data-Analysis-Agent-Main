@@ -25,7 +25,7 @@ export type ResultTable = {
 
 /** Exactly the frozen SSE contract, one variant per `event:` name. */
 export type RunEvent =
-  | { type: "status"; data: { stage: Stage } }
+  | { type: "status"; data: { stage: Stage; tool?: "sql" | "forecast" } }
   | { type: "sql"; data: { sql: string; what?: string; why?: string } }
   | { type: "rejected"; data: { sql: string; reason: string; at: "guard" | "database" | "forecast" } }
   | { type: "rows"; data: ResultTable & { ms?: number } }

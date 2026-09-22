@@ -188,6 +188,8 @@ class TraceAttempt(BaseModel):
 
     sql: str | None
     rejected: bool
+    # None on a run saved before attempts named their tool.
+    tool: Literal["sql", "forecast"] | None = None
     what: str = ""
     why: str = ""
     reason: str | None = None

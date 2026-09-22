@@ -193,6 +193,16 @@ class TestForecastShapes:
 
         assert ChartSpec.model_validate({"type": "bar", "x": "r", "y": ["u"]}).forecast is None
 
+    def test_an_attempt_names_its_tool_and_one_saved_before_that_has_none(self):
+        from app.api.schemas import TraceAttempt
+
+        named = TraceAttempt.model_validate(
+            {"sql": "SELECT 1", "rejected": False, "tool": "forecast"}
+        )
+        older = TraceAttempt.model_validate({"sql": "SELECT 1", "rejected": False})
+
+        assert (named.tool, older.tool) == ("forecast", None)
+
     def test_an_attempt_can_have_been_refused_by_the_forecaster(self):
         from app.api.schemas import TraceAttempt
 

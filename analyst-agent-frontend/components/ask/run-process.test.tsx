@@ -31,7 +31,7 @@ describe("RunProcess", () => {
     expect(screen.getByRole("region").id).toBe(button.getAttribute("aria-controls"));
     const steps = within(screen.getByRole("list", { name: "Run steps" })).getAllByRole("listitem");
     expect(steps).toHaveLength(5);
-    expect(steps[3].textContent).toBe("Running it on IoT database · cut off at 1 row · 40 ms");
+    expect(steps[3].textContent).toBe("Running it on your data · cut off at 1 row · 40 ms");
     expect(screen.getByText("query_database")).toBeTruthy();
     expect(screen.getByText("SELECT 1")).toBeTruthy();
     expect(screen.getByText("1 row · cut off")).toBeTruthy();

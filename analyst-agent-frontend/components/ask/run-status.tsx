@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { ShimmeringText } from "@/components/ui/shimmering-text";
-import { confirmedRejections, STAGE_LABEL } from "@/features/ask/run-process";
+import { confirmedRejections, stageLabel } from "@/features/ask/run-process";
 import { isRunning, type RunState } from "@/features/ask/run-types";
 import { usePrefersReducedMotion } from "@/lib/use-reduced-motion";
 
@@ -11,7 +11,8 @@ import { usePrefersReducedMotion } from "@/lib/use-reduced-motion";
  * What the agent is doing right now, while it does it.
  *
  * The label is the real stage from the stream, never a rotating line of filler: a stall on
- * "Running it on IoT database" tells you something a cheerful "Almost there..." would hide.
+ * "Running it on your data" tells you something a cheerful "Almost there..." would hide. The
+ * agent names its tool as it starts each attempt, so a forecast says so while it runs.
  * Keyed on the text, so a new stage fades in rather than swapping under the shimmer.
  *
  * Stopping lives on the composer's button, not here, so there is one place to do it.
@@ -28,7 +29,7 @@ export function RunStatus({ state }: { state: RunState }) {
   if (!live) return null;
 
   const seconds = Math.max(0, Math.floor((now - (state.startedAt ?? now)) / 1000));
-  const label = STAGE_LABEL[state.stage ?? "router"];
+  const label = stageLabel(state.stage ?? "router", state.attempts.at(-1)?.tool);
   const text = `${label}…${confirmedRejections(state.attempts) > 0 ? ` · attempt ${state.attempts.length}` : ""}`;
 
   return (

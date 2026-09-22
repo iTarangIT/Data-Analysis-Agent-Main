@@ -14,10 +14,18 @@ describe("RunStatus", () => {
   it.each<[Stage | null, string]>([
     [null, "Reading your question"], ["router", "Reading your question"],
     ["sql_gen", "Writing the query"], ["sql_guard", "Checking the query is read-only"],
-    ["db_exec", "Running it on IoT database"], ["answer", "Writing the answer"],
+    ["db_exec", "Running it on your data"], ["answer", "Writing the answer"],
   ])("labels %s", (stage, label) => {
     render(<RunStatus state={{ ...state, stage }} />);
     expect(screen.getByRole("status").textContent).toBe(`${label}…`);
+  });
+
+  it("says it is forecasting when the agent chose the forecast tool", () => {
+    const attempts: RunState["attempts"] = [{ sql: "SELECT 1", rejected: false, tool: "forecast" }];
+
+    render(<RunStatus state={{ ...state, stage: "db_exec", attempts }} />);
+
+    expect(screen.getByRole("status").textContent).toBe("Fetching the history and forecasting…");
   });
 
   it("counts total seconds and cleans up on completion", () => {

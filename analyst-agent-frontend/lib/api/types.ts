@@ -185,6 +185,8 @@ export type Stage = "router" | "sql_gen" | "sql_guard" | "db_exec" | "answer";
 export type Attempt = {
   sql: string | null;
   rejected: boolean;
+  /** The tool the agent chose for this attempt. Absent on a run saved before it was recorded. */
+  tool?: "sql" | "forecast" | null;
   /** The model's own plain-English account of the query. Empty when it gave none. */
   what?: string;
   why?: string;

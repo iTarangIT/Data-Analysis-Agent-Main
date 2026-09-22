@@ -4,9 +4,19 @@ export const STAGE_LABEL: Record<Stage, string> = {
   router: "Reading your question",
   sql_gen: "Writing the query",
   sql_guard: "Checking the query is read-only",
-  db_exec: "Running it on IoT database",
+  db_exec: "Running it on your data",
   answer: "Writing the answer",
 };
+
+/** A forecast writes, checks and runs a query too; what it runs is the history, then the model. */
+const FORECAST_STAGE_LABEL: Partial<Record<Stage, string>> = {
+  sql_gen: "Writing the query for the history",
+  db_exec: "Fetching the history and forecasting",
+};
+
+export function stageLabel(stage: Stage, tool?: Attempt["tool"]): string {
+  return (tool === "forecast" && FORECAST_STAGE_LABEL[stage]) || STAGE_LABEL[stage];
+}
 
 /** Why an attempt went no further, by where it stopped. */
 export const REFUSAL_LABEL: Record<NonNullable<Attempt["at"]>, string> = {
@@ -23,13 +33,12 @@ export function toolLabel(tool: string | null): string | null {
 }
 
 /**
- * A live run has no `tool` field until it is saved. A forecast shows itself by its chart, or
- * by its refusal when the data could not support one; anything else that reached the guard
- * was a query.
+ * A live run has no `tool` field until it is saved. The agent names the tool on every attempt,
+ * and the saved run keeps the last one, so the last attempt's tool is the same answer live. A
+ * backend from before tools were named sends none, and anything it guarded was a query.
  */
-export function liveTool(state: Pick<RunState, "stageLog" | "chart" | "attempts">): "forecast" | "sql" | null {
-  if (state.chart?.type === "forecast" || state.attempts.some((a) => a.at === "forecast")) return "forecast";
-  return state.stageLog.includes("sql_guard") ? "sql" : null;
+export function liveTool(state: Pick<RunState, "attempts" | "stageLog">): "forecast" | "sql" | null {
+  return state.attempts.at(-1)?.tool ?? (state.stageLog.includes("sql_guard") ? "sql" : null);
 }
 
 /**
@@ -76,7 +85,7 @@ export function buildProcessSteps(stageLog: Stage[], attempts: Attempt[], phase:
       rejected ? REFUSAL_LABEL[query.at ?? "guard"].toLowerCase()
         : mark === "hollow" ? "not completed" : outcome(stage, query, attempts),
     ];
-    return { stage, label: STAGE_LABEL[stage], attempt, rejected, mark, note: notes.filter(Boolean).join(" · ") || null };
+    return { stage, label: stageLabel(stage, query?.tool), attempt, rejected, mark, note: notes.filter(Boolean).join(" · ") || null };
   });
 }
 

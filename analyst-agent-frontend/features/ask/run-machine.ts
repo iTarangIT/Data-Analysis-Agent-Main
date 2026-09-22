@@ -69,12 +69,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       return state;
 
     case "status": {
-      const { stage } = action.data;
+      const { stage, tool } = action.data;
       // The guard is announced before its verdict is known, so a pending attempt starts
       // rejected until a `sql` event accepts it.
       const attempts =
         stage === "sql_gen"
-          ? [...state.attempts, { sql: null, rejected: false }]
+          ? [...state.attempts, { sql: null, rejected: false, ...(tool ? { tool } : {}) }]
           : stage === "sql_guard"
             ? patchLast(state.attempts, { rejected: true })
             : state.attempts;
