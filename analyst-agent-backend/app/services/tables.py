@@ -8,6 +8,10 @@ selected ones. None of it is ever a row of a table.
 A source's first listing chooses every table when there are no more than the cap allows, which
 keeps a small database or a spreadsheet answering without a visit to the picker. Past the cap
 nothing is chosen, and a run is refused until a person has chosen.
+
+A connection whose `table_scope` is "all" skips choosing altogether: every listed table is in
+play, so each has its structure and statistics read and joins are mapped across all of them. A
+run then gives the model the ones its question needs (see app/agent/table_ranker.py).
 """
 
 import asyncio
@@ -71,6 +75,17 @@ def _add(db: Session, connection_id: str, names: list[str], selected: bool) -> N
     )
 
 
+def whole(conn: Connection) -> bool:
+    """Every table the source exposes is in play, rather than only the chosen ones."""
+    return conn.table_scope == "all"
+
+
+def _in_play(conn: Connection, rows: list[ConnectionTable]) -> list[ConnectionTable]:
+    if whole(conn):
+        return rows[:PREVIEW_LIMIT]
+    return [r for r in rows if r.selected]
+
+
 def _first_listing(db: Session, conn: Connection, names: list[str]) -> list[ConnectionTable]:
     _add(db, conn.id, names, selected=len(names) <= get_settings().max_agent_tables)
     return _rows(db, conn.id)
@@ -96,17 +111,18 @@ def _reachable(conn: Connection) -> Iterator[None]:
 
 
 def _introspect(
-    connector: CatalogReader, rows: list[ConnectionTable]
+    conn: Connection, connector: CatalogReader, rows: list[ConnectionTable]
 ) -> tuple[list[TableDef], dict[str, dict[str, Any]]]:
-    """Structure for every row given (selected ones always, others up to PREVIEW_LIMIT), and
-    statistics for the selected ones only: those cost probes, a picker preview does not need
+    """Structure for every row given (those in play always, others up to PREVIEW_LIMIT), and
+    statistics for those in play only: those cost probes, a picker preview does not need
     them."""
-    selected = [r.name for r in rows if r.selected]
-    preview = [r.name for r in rows if not r.selected][:PREVIEW_LIMIT]
-    if not selected and not preview:
+    playing = [r.name for r in _in_play(conn, rows)]
+    taken = set(playing)
+    preview = [r.name for r in rows if r.name not in taken][:PREVIEW_LIMIT]
+    if not playing and not preview:
         return [], {}
-    stats = connector.table_stats(selected) if selected else {}
-    return connector.read_tables(selected + preview), stats
+    stats = connector.table_stats(playing) if playing else {}
+    return connector.read_tables(playing + preview), stats
 
 
 def _apply(
@@ -115,15 +131,16 @@ def _apply(
     definitions: list[TableDef],
     stats: dict[str, dict[str, Any]],
 ) -> None:
-    """Record what was read for these rows. A selected table the source no longer has is left
+    """Record what was read for these rows. A table in play the source no longer has is left
     without a definition, which keeps it out of every run until a refresh removes it.
-    Relationships are only ever mapped between selected tables."""
+    Relationships are only ever mapped between tables in play."""
     read = {d.name: d for d in definitions}
+    playing = {r.name for r in _in_play(conn, rows)}
     for row in rows:
         definition = read.get(row.name)
         row.definition = definition.model_dump() if definition else None
-        row.stats = stats.get(row.name) if definition and row.selected else None
-    chosen = [read[r.name] for r in rows if r.selected and r.name in read]
+        row.stats = stats.get(row.name) if definition and row.name in playing else None
+    chosen = [read[r.name] for r in rows if r.name in playing and r.name in read]
     conn.relationships = [r.model_dump() for r in map_relationships(chosen)]
     conn.catalog_refreshed_at = datetime.now(UTC)
 
@@ -135,8 +152,19 @@ def ensure_listed(db: Session, conn: Connection) -> None:
     connector = connector_for(conn)
     with _reachable(conn):
         rows = _first_listing(db, conn, connector.list_tables())
-        _apply(conn, rows, *_introspect(connector, rows))
+        _apply(conn, rows, *_introspect(conn, connector, rows))
     db.commit()
+
+
+def set_scope(db: Session, conn: Connection, scope: str) -> dict[str, Any]:
+    """Switch between every table and only the chosen ones, then re-read what is in play."""
+    ensure_listed(db, conn)
+    conn.table_scope = scope
+    rows = _rows(db, conn.id)
+    with _reachable(conn):
+        _apply(conn, rows, *_introspect(conn, connector_for(conn), rows))
+    db.commit()
+    return view(db, conn)
 
 
 def view(db: Session, conn: Connection) -> dict[str, Any]:
@@ -148,6 +176,7 @@ def view(db: Session, conn: Connection) -> dict[str, Any]:
                     files.setdefault(part["table"], set()).add(f.name)
     return {
         "max_selected": get_settings().max_agent_tables,
+        "scope": conn.table_scope,
         "refreshed_at": conn.catalog_refreshed_at,
         "tables": [
             {
@@ -172,13 +201,13 @@ def save_selection(db: Session, conn: Connection, names: list[str]) -> dict[str,
     if unknown:
         raise DomainError(f"this connection has no table named {', '.join(unknown)}")
     cap = get_settings().max_agent_tables
-    if len(wanted) > cap:
+    if len(wanted) > cap and not whole(conn):
         raise DomainError(f"choose at most {cap} tables")
 
     for row in rows:
         row.selected = row.name in wanted
     with _reachable(conn):
-        _apply(conn, rows, *_introspect(connector_for(conn), rows))
+        _apply(conn, rows, *_introspect(conn, connector_for(conn), rows))
     db.commit()
     return view(db, conn)
 
@@ -202,7 +231,7 @@ def refresh(db: Session, conn: Connection) -> dict[str, Any]:
     db.flush()
     rows = _rows(db, conn.id)
     with _reachable(conn):
-        _apply(conn, rows, *_introspect(connector, rows))
+        _apply(conn, rows, *_introspect(conn, connector, rows))
     db.commit()
     return {**view(db, conn), "added": added, "removed": removed}
 
@@ -230,9 +259,9 @@ def forget(db: Session, conn: Connection) -> None:
 
 
 async def load_for_run(db: Session, conn: Connection, connector: CatalogReader) -> Catalog:
-    """The chosen tables for one run, re-read first when the last reading has gone stale.
+    """The tables in play for one run, re-read first when the last reading has gone stale.
 
-    A run only ever updates the rows of tables already chosen, or inserts a first listing that
+    A run only ever updates the rows of tables already in play, or inserts a first listing that
     the unique key makes safe to race. Tables arriving or vanishing wait for a refresh a person
     asks for. The customer's database is read off the event loop; the Session stays on it.
     """
@@ -240,7 +269,7 @@ async def load_for_run(db: Session, conn: Connection, connector: CatalogReader) 
     if not rows:
         with _reachable(conn):
             rows = _first_listing(db, conn, await asyncio.to_thread(connector.list_tables))
-    selected = [r for r in rows if r.selected]
+    selected = _in_play(conn, rows)
 
     stale = (
         conn.catalog_refreshed_at is None
@@ -250,8 +279,10 @@ async def load_for_run(db: Session, conn: Connection, connector: CatalogReader) 
         with _reachable(conn):
             # Only the chosen tables: a run must not pay for the picker's preview.
             read = await asyncio.to_thread(
-                lambda: (connector.read_tables([r.name for r in selected]),
-                         connector.table_stats([r.name for r in selected]))
+                lambda: (
+                    connector.read_tables([r.name for r in selected]),
+                    connector.table_stats([r.name for r in selected]),
+                )
             )
         _apply(conn, selected, *read)
 

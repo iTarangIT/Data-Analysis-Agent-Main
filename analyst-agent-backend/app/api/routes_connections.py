@@ -24,6 +24,7 @@ from app.api.schemas import (
     UPLOAD_SUFFIXES,
     ConnectionCreate,
     ConnectionOut,
+    ConnectionUpdate,
     DatasetCreate,
     DriveListing,
     DryRunOut,
@@ -59,6 +60,7 @@ def _out(c: Connection, counts: dict[str, tuple[int, int]], files: dict[str, int
         kind=c.kind,
         selected_tables=selected,
         total_tables=total,
+        table_scope=c.table_scope,
         file_count=files.get(c.id, 0),
         catalog_refreshed_at=c.catalog_refreshed_at,
         sync_status=c.sync_status,
@@ -262,6 +264,18 @@ def choose_tables(
     """Replace the selection. The chosen tables' structure is read before this returns."""
     conn = svc.get_connection(db, ctx.tenant_id, connection_id)
     return TablesOut.model_validate(tables_svc.save_selection(db, conn, body.tables))
+
+
+@router.patch("/{connection_id}", response_model=TablesOut)
+def update_connection(
+    connection_id: str,
+    body: ConnectionUpdate,
+    ctx: TenantContext = Depends(current_tenant),
+    db: Session = Depends(get_db),
+) -> TablesOut:
+    """Let every table answer questions ("all"), or only the chosen ones ("selected")."""
+    conn = svc.get_connection(db, ctx.tenant_id, connection_id)
+    return TablesOut.model_validate(tables_svc.set_scope(db, conn, body.table_scope))
 
 
 @router.post("/{connection_id}/tables/refresh", response_model=TablesRefreshOut)

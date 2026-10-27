@@ -280,3 +280,35 @@ class TestRememberTool:
 
         other = RunContext(tenant_id="t_other", connection_id="c1", run_id="r2", thread_id="th2")
         assert memory.recall(store, other) == ""
+
+
+class TestWholeDatabase:
+    """Every table in play, only the focused ones described in full."""
+
+    FOCUSED = CATALOG.model_copy(update={"focus": ["vehicles"]})
+
+    def test_the_description_indexes_every_table_and_details_the_focus(self, connector):
+        description = make_query_tool(connector, self.FOCUSED).description
+        assert "  alerts | severity" in description
+        assert "TABLE vehicles" in description
+        assert "TABLE alerts" not in description
+
+    def test_a_table_outside_the_focus_is_still_queryable(self, connector):
+        tool = make_query_tool(connector, self.FOCUSED)
+        content, _ = call(tool, "SELECT severity FROM alerts")
+        assert "rejected" not in content
+
+    def test_describe_is_offered_only_with_a_focus(self, connector):
+        def names(catalog):
+            return [t.name for t in make_tools(connector, catalog, False)]
+
+        assert "describe_tables" in names(self.FOCUSED)
+        assert "describe_tables" not in names(CATALOG)
+
+    def test_describe_returns_stored_structure_and_names_unknown_tables(self, connector):
+        describe = next(
+            t for t in make_tools(connector, self.FOCUSED, False) if t.name == "describe_tables"
+        )
+        out = describe.invoke({"tables": ["alerts", "nope"]})
+        assert "TABLE alerts" in out and "severity text" in out
+        assert "No such table: nope" in out

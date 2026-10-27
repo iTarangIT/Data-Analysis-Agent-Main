@@ -20,11 +20,12 @@ from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import Session
 
 from app import queue
+from app.agent import table_ranker
 from app.agent.context import RunContext
 from app.agent.graph import build_agent, recursion_limit
 from app.agent.middleware import build_middleware
 from app.agent.store import memory_enabled, open_store
-from app.agent.tools import FORECAST_TOOL_NAME
+from app.agent.tools import DESCRIBE_TOOL_NAME, FORECAST_TOOL_NAME
 from app.api.schemas import RunCreate
 from app.catalog.types import Catalog
 from app.config import get_settings
@@ -95,6 +96,11 @@ class EventTranslator:
             yield self._status("router")
 
         if message.tool_calls:
+            if all(c["name"] == DESCRIBE_TOOL_NAME for c in message.tool_calls):
+                # Reading structure, not querying: no stage and no attempt. A client opens an
+                # attempt on every sql_gen, and this tool's message carries no artifact for
+                # _for_tool to settle one against, so it would hang there unanswered.
+                return
             forecasting = any(c["name"] == FORECAST_TOOL_NAME for c in message.tool_calls)
             self.outcome.tool = "forecast" if forecasting else "sql"
             # Named now, before the tool runs, so the client can say what is happening while it
@@ -310,6 +316,37 @@ def agent_config(run: Run, callbacks: list, limit: int) -> dict[str, Any]:
     }
 
 
+# How many earlier questions of a thread inform which tables a follow-up needs.
+PRIOR_QUESTIONS = 3
+
+
+def _prior_questions(db: Session, run: Run) -> list[str]:
+    """The thread's latest earlier questions, so "and by dealer?" keeps its tables."""
+    return list(
+        db.scalars(
+            select(Run.question)
+            .where(
+                Run.tenant_id == run.tenant_id,
+                Run.thread_id == run.thread_id,
+                Run.id != run.id,
+                Run.created_at <= run.created_at,
+            )
+            .order_by(Run.created_at.desc())
+            .limit(PRIOR_QUESTIONS)
+        )
+    )
+
+
+def focus_for_run(db: Session, run: Run, catalog: Catalog) -> Catalog:
+    """The catalog this question sees: every table in play, the likeliest few in full."""
+    s = get_settings()
+    if len(catalog.tables) <= s.max_agent_tables:
+        return catalog
+    return table_ranker.focus(
+        catalog, run.question, s.rank_top_k, s.max_agent_tables, _prior_questions(db, run)
+    )
+
+
 def execute_run(
     db: Session,
     run: Run,
@@ -336,6 +373,11 @@ def execute_run(
     # Built before the run so the limit is known to the handler that reports overrunning it.
     middleware = build_middleware(memory_enabled())
     limit = recursion_limit(middleware)
+
+    catalog = focus_for_run(db, run, catalog)
+    if catalog.focus is not None:
+        log.info("run.focus", tables=catalog.focus, of=len(catalog.tables))
+        emit({"type": "tables", "data": {"focus": catalog.focus, "total": len(catalog.tables)}})
 
     try:
         with ExitStack() as stack:
@@ -386,6 +428,8 @@ def execute_run(
     # budget is enforced from exactly this number.
     totals = list(usage.usage_metadata.values())
     trace: dict[str, Any] = {"stages": outcome.stages, "attempts": outcome.attempts}
+    if catalog.focus is not None:
+        trace["focus"] = catalog.focus
     # Absent rather than null when routing is off, so `trace->'route' is not null` finds only
     # the runs that were routed.
     if outcome.route:

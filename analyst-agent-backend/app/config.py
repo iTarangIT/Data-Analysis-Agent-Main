@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     # How many of a connection's tables a person may let the agent use. Every selected table's
     # structure goes into every query prompt, so this is what bounds that prompt's size.
     max_agent_tables: int = 12
+    # When every table of a database is in play and there are more than max_agent_tables, how
+    # many the prompt describes in full for one question. The rest are one index line each.
+    rank_top_k: int = 8
     statement_timeout_ms: int = 8000
     # `statement_timeout` bounds a query once connected; opening the connection is unbounded
     # without this. A source behind a dead SSH tunnel accepts the TCP connection and then never
@@ -111,7 +114,8 @@ class Settings(BaseSettings):
     max_sql_retries: int = 2
     # How many tool calls one question may make. Distinct from max_sql_retries: a model may
     # legitimately query more than once to answer, without any of them having been rejected.
-    max_tool_calls: int = 6
+    # Eight rather than six since a whole-database run may first read a table's structure.
+    max_tool_calls: int = 8
 
     # Forecasting runs a ~200M-parameter model in this process: measured at 1.1 GB resident, and
     # 2 GB while it loads, which Render's free plan cannot hold. Off, the forecast tool is not

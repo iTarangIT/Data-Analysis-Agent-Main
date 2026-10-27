@@ -12,6 +12,8 @@ from app.agent import memory
 from app.agent.context import RunContext
 from app.agent.nodes.sql_guard import validate_sql
 from app.agent.prompts import (
+    DESCRIBE_TOOL_DESC,
+    DESCRIBE_TOOL_TABLES_ARG,
     DIALECTS,
     FORECAST_GRAIN_ARG,
     FORECAST_HORIZON_ARG,
@@ -21,6 +23,7 @@ from app.agent.prompts import (
     FORECAST_TOOL_DESC,
     FORECAST_VALUE_ARG,
     QUERY_TOOL_DESC,
+    QUERY_TOOL_DESC_INDEXED,
     QUERY_TOOL_SQL_ARG,
     QUERY_TOOL_WHAT_ARG,
     QUERY_TOOL_WHY_ARG,
@@ -28,7 +31,7 @@ from app.agent.prompts import (
     REMEMBER_TERM_ARG,
     REMEMBER_TOOL_DESC,
 )
-from app.agent.schema_context import render_relationships, render_tables
+from app.agent.schema_context import render_index, render_relationships, render_tables
 from app.catalog.types import Catalog
 from app.config import get_settings
 from app.connectors.base import SqlConnector
@@ -38,6 +41,10 @@ from app.forecasting.service import ForecastEngineError, ForecastService
 TOOL_NAME = "query_database"
 FORECAST_TOOL_NAME = "forecast_series"
 REMEMBER_TOOL_NAME = "remember"
+DESCRIBE_TOOL_NAME = "describe_tables"
+
+# How many tables one describe_tables call may ask for.
+DESCRIBE_LIMIT = 6
 
 # Enough rows for the model to answer from, without putting a full result set in its context.
 # The complete result travels separately as the tool's artifact.
@@ -96,9 +103,22 @@ def _select(
     return _Selected(safe_sql, cols, rows, int((time.perf_counter() - t0) * 1000))
 
 
+def query_description(catalog: Catalog) -> str:
+    if catalog.focus is None:
+        return QUERY_TOOL_DESC.format(
+            tables=render_tables(catalog), relationships=render_relationships(catalog)
+        )
+    return QUERY_TOOL_DESC_INDEXED.format(
+        index=render_index(catalog),
+        tables=render_tables(catalog),
+        relationships=render_relationships(catalog),
+    )
+
+
 def make_query_tool(connector: SqlConnector, catalog: Catalog) -> BaseTool:
-    # The catalog holds only the tables a person chose, so it is the allowlist as well as the
+    # The catalog holds only the tables in play, so it is the allowlist as well as the
     # description: a table left out is one the model is neither told about nor allowed to query.
+    # A focus narrows what is described in full, never what may be queried.
     allowed = catalog.table_names
     dialect = DIALECTS[connector.dialect]
     args = create_model(
@@ -112,9 +132,7 @@ def make_query_tool(connector: SqlConnector, catalog: Catalog) -> BaseTool:
 
     @tool(
         TOOL_NAME,
-        description=QUERY_TOOL_DESC.format(
-            tables=render_tables(catalog), relationships=render_relationships(catalog)
-        ),
+        description=query_description(catalog),
         args_schema=args,
         response_format="content_and_artifact",
     )
@@ -241,6 +259,37 @@ def _prior_fix(runtime: ToolRuntime[RunContext], sql: str) -> str:
     return f" This was refused before and corrected to: {past['corrected']}." if past else ""
 
 
+def make_describe_tool(catalog: Catalog) -> BaseTool:
+    """Full structure of indexed tables, from what the catalog already stored. Reads no rows
+    and never reaches the customer's database."""
+    held = catalog.table_names
+    args = create_model(
+        "DescribeTablesArgs",
+        tables=(
+            list[str],
+            Field(
+                min_length=1,
+                max_length=DESCRIBE_LIMIT,
+                description=DESCRIBE_TOOL_TABLES_ARG.format(limit=DESCRIBE_LIMIT),
+            ),
+        ),
+    )
+
+    @tool(DESCRIBE_TOOL_NAME, description=DESCRIBE_TOOL_DESC, args_schema=args)
+    def describe_tables(tables: list[str]) -> str:
+        known = [t for t in dict.fromkeys(tables) if t in held]
+        unknown = [t for t in tables if t not in held]
+        parts = []
+        if known:
+            parts.append(render_tables(catalog, known))
+            parts.append("How they join:\n" + render_relationships(catalog, known))
+        if unknown:
+            parts.append(f"No such table: {', '.join(unknown)}. Use names from the index.")
+        return "\n\n".join(parts)
+
+    return describe_tables
+
+
 @tool(REMEMBER_TOOL_NAME, description=REMEMBER_TOOL_DESC, args_schema=RememberArgs)
 def remember(term: str, definition: str, runtime: ToolRuntime[RunContext]) -> str:
     """Records a definition against the connection, never against an id the model supplies."""
@@ -256,6 +305,8 @@ def make_tools(
     today: date | None = None,
 ) -> list[BaseTool]:
     tools = [make_query_tool(connector, catalog)]
+    if catalog.focus is not None:
+        tools.append(make_describe_tool(catalog))
     if forecaster is not None:
         tools.append(make_forecast_tool(connector, catalog, forecaster, today or date.today()))
     if with_memory:

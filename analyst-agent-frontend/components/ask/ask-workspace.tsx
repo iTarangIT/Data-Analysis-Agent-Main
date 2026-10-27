@@ -86,6 +86,7 @@ export function AskWorkspace({
   // tables have not been read yet, which the first question does itself.
   const needsTables =
     activeConnection !== null &&
+    activeConnection.table_scope !== "all" &&
     activeConnection.total_tables > 0 &&
     activeConnection.selected_tables === 0;
   const ready = connectionId !== "" && !needsTables;

@@ -85,6 +85,18 @@ def _choose(client, auth, connection_id, names):
     return client.put(f"/connections/{connection_id}/tables", headers=auth, json={"tables": names})
 
 
+def _scope(client, auth, connection_id, scope) -> dict:
+    r = client.patch(f"/connections/{connection_id}", headers=auth, json={"table_scope": scope})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+@pytest.fixture
+def picker(client, auth, connection_id):
+    """The connection limited to the tables a person chooses. A database starts with all."""
+    _scope(client, auth, connection_id, "selected")
+
+
 def _by_name(body: dict) -> dict:
     return {t["name"]: t for t in body["tables"]}
 
@@ -130,6 +142,7 @@ class TestANewConnection:
         assert (listed["selected_tables"], listed["total_tables"]) == (total, total)
 
 
+@pytest.mark.usefixtures("picker")
 class TestChoosing:
     def test_an_unchosen_table_shows_its_columns_but_no_stats_or_joins(
         self, client, auth, connection_id
@@ -217,7 +230,7 @@ class TestRefreshing:
         assert tables["invoices"]["selected"] is False
 
 
-class TestRuns:
+class _Asking:
     @staticmethod
     def _ask(client, auth, connection_id, sql):
         from langchain_core.language_models import FakeMessagesListChatModel
@@ -257,6 +270,9 @@ class TestRuns:
                 events.append((name, json.loads(line.removeprefix("data:").strip())))
         return events
 
+
+@pytest.mark.usefixtures("picker")
+class TestRuns(_Asking):
     def test_a_connection_with_nothing_chosen_is_refused_before_the_stream_opens(
         self, client, auth, connection_id
     ):
@@ -288,6 +304,54 @@ class TestRuns:
         names = [n for n, _ in self._events(r)]
         assert r.status_code == 200
         assert "sql" not in names and "rows" not in names
+
+
+class TestWholeDatabase(_Asking):
+    """A database connection starts with every table in play: nothing to choose."""
+
+    def test_a_new_database_connection_uses_every_table(self, client, auth, connection_id):
+        body = _read(client, auth, connection_id)
+        (listed,) = client.get("/connections", headers=auth).json()
+
+        assert body["scope"] == "all"
+        assert listed["table_scope"] == "all"
+        assert all(t["stats"] is not None for t in _by_name(body).values())
+
+    def test_any_table_answers_with_nothing_chosen(self, client, auth, connection_id):
+        _choose(client, auth, connection_id, [])
+
+        events = dict(
+            self._events(
+                self._ask(client, auth, connection_id, "select count(*) as n from dealers")
+            )
+        )
+
+        assert events["rows"]["rows"] == [[3]]
+
+    def test_the_cap_does_not_apply(self, client, auth, connection_id):
+        names = list(_by_name(_read(client, auth, connection_id)))
+        with patch("app.services.tables.get_settings") as settings:
+            settings.return_value.max_agent_tables = 1
+            r = client.put(
+                f"/connections/{connection_id}/tables", headers=auth, json={"tables": names}
+            )
+        assert r.status_code == 200, r.text
+
+    def test_switching_to_the_picker_and_back(self, client, auth, connection_id):
+        _choose(client, auth, connection_id, ["dealers"])
+
+        limited = _scope(client, auth, connection_id, "selected")
+        assert limited["scope"] == "selected"
+        assert {n for n, t in _by_name(limited).items() if t["stats"]} == {"dealers"}
+
+        whole = _scope(client, auth, connection_id, "all")
+        assert all(t["stats"] is not None for t in _by_name(whole).values())
+
+    def test_an_unknown_scope_is_refused(self, client, auth, connection_id):
+        r = client.patch(
+            f"/connections/{connection_id}", headers=auth, json={"table_scope": "some"}
+        )
+        assert r.status_code == 422
 
 
 def test_deleting_a_connection_forgets_its_tables(client, auth, connection_id):

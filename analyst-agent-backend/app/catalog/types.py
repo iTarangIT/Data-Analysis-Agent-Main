@@ -52,6 +52,10 @@ class CatalogTable(BaseModel):
 class Catalog(BaseModel):
     tables: list[CatalogTable]
     relationships: list[Relationship] = []
+    # Set when every table the source exposes is in play and there are too many to describe in
+    # full: the names whose structure the prompt spells out for this question. The rest are
+    # listed in a one-line index, and all of them stay queryable.
+    focus: list[str] | None = None
 
     @property
     def table_names(self) -> set[str]:

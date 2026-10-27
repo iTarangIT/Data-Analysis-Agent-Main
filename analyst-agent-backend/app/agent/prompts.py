@@ -65,6 +65,34 @@ How the tables join:
 Queries run under a short statement timeout. Constrain time columns, filter by entity where
 the question names one, and prefer summary tables over raw readings."""
 
+# The same tool when every table of a large database is in play. The index costs one line a
+# table; full structure is given only for the tables this question most likely needs.
+QUERY_TOOL_DESC_INDEXED = """Run one read-only SQL SELECT against the customer's database and
+return the rows. Use this for any question about historic or stored data. Only SELECT is
+permitted.
+
+Every table you may query is in this index (name - what it holds | its columns):
+{index}
+
+Full structure of the tables most likely to answer this question:
+{tables}
+
+How those tables join:
+{relationships}
+
+If the answer needs a table from the index whose full structure is not above, call
+describe_tables for it first, so you know its column types and joins before you write SQL.
+Never guess a column that is not listed.
+
+Queries run under a short statement timeout. Constrain time columns, filter by entity where
+the question names one, and prefer summary tables over raw readings."""
+
+DESCRIBE_TOOL_DESC = """Get the full structure (columns, types, keys, size, joins) of tables
+from the index in the query_database description. Use it before querying a table whose full
+structure you have not been given. It reads no rows."""
+
+DESCRIBE_TOOL_TABLES_ARG = "Up to {limit} table names, exactly as the index spells them."
+
 QUERY_TOOL_SQL_ARG = "One {dialect} SELECT statement. No prose, no code fences."
 
 DIALECTS = {"postgres": "PostgreSQL", "duckdb": "DuckDB"}

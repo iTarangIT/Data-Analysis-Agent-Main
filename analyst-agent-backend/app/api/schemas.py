@@ -42,6 +42,8 @@ class ConnectionOut(BaseModel):
     kind: str
     selected_tables: int
     total_tables: int
+    # "all": every table is in play and each question finds its own; "selected": the picker.
+    table_scope: Literal["all", "selected"]
     file_count: int
     catalog_refreshed_at: datetime | None
     sync_status: str | None
@@ -60,9 +62,10 @@ class TableOut(BaseModel):
 
 class TablesOut(BaseModel):
     max_selected: int
+    scope: Literal["all", "selected"]
     refreshed_at: datetime | None
     tables: list[TableOut]
-    # Between selected tables only.
+    # Between the tables in play only.
     relationships: list[Relationship]
 
 
@@ -74,6 +77,10 @@ class TablesRefreshOut(TablesOut):
 class TableSelection(BaseModel):
     # The cap is a setting enforced by the service; this only stops an absurd body.
     tables: list[str] = Field(max_length=1000)
+
+
+class ConnectionUpdate(BaseModel):
+    table_scope: Literal["all", "selected"]
 
 
 class DatasetCreate(BaseModel):

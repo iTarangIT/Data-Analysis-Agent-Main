@@ -186,18 +186,15 @@ def table_stats(names: list[str]) -> dict[str, dict[str, Any]]:
 
 @mcp.tool()
 def run_select(sql: str, max_rows: int) -> QueryResult:
-    """Run one read-only SELECT over the tables chosen for this connection."""
+    """Run one read-only SELECT over the tables in play for this connection: every listed
+    table when its scope is "all", otherwise the chosen ones."""
     with _database() as (db, connection, database):
         # Re-read per query rather than cached: unselecting a table has to take effect now, not
         # when some session happens to end.
-        allowed = set(
-            db.scalars(
-                select(ConnectionTable.name).where(
-                    ConnectionTable.connection_id == connection.id,
-                    ConnectionTable.selected.is_(True),
-                )
-            )
-        )
+        listed = select(ConnectionTable.name).where(ConnectionTable.connection_id == connection.id)
+        if connection.table_scope != "all":
+            listed = listed.where(ConnectionTable.selected.is_(True))
+        allowed = set(db.scalars(listed))
         return database.run_select(sql, min(max_rows, get_settings().max_rows + 1), allowed)
 
 

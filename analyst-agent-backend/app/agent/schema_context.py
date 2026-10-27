@@ -1,8 +1,12 @@
-"""The selected tables, and how they join, written out for the query tool's description.
+"""The tables in play, and how they join, written out for the query tool's description.
 
 This text is the whole of what the model knows about a customer's database. It states only what
 the catalog holds: columns, types and keys; what each table holds, as the catalog measured it;
 and each relationship, with whether a constraint declares it or a column name suggested it.
+
+When a catalog has a focus (every table of a large database is in play), only the focused tables
+are written out in full; every table also gets one line in an index, so the model knows what
+else exists and can ask for its structure.
 """
 
 from typing import Any
@@ -69,8 +73,43 @@ def _table(definition: TableDef, stats: dict[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
-def render_tables(catalog: Catalog) -> str:
-    return "\n\n".join(_table(t.definition, t.stats) for t in catalog.tables)
+def _focused(catalog: Catalog) -> list:
+    if catalog.focus is None:
+        return catalog.tables
+    held = {t.definition.name: t for t in catalog.tables}
+    return [held[name] for name in catalog.focus if name in held]
+
+
+def render_tables(catalog: Catalog, names: list[str] | None = None) -> str:
+    """Full structure of the focused tables, or of `names` when given."""
+    if names is None:
+        chosen = _focused(catalog)
+    else:
+        held = {t.definition.name: t for t in catalog.tables}
+        chosen = [held[name] for name in names if name in held]
+    return "\n\n".join(_table(t.definition, t.stats) for t in chosen)
+
+
+# An index line names this many columns before it stops; the full list is a describe away.
+INDEX_COLUMNS = 15
+
+
+def _index_line(definition: TableDef, stats: dict[str, Any] | None) -> str:
+    line = definition.name
+    if stats and stats.get("rows") == "empty":
+        line += " (EMPTY)"
+    if definition.comment:
+        line += f" - {definition.comment.splitlines()[0][:160]}"
+    names = [c.name for c in definition.columns]
+    shown = ", ".join(names[:INDEX_COLUMNS])
+    if len(names) > INDEX_COLUMNS:
+        shown += f", ... ({len(names)} columns)"
+    return f"  {line} | {shown}"
+
+
+def render_index(catalog: Catalog) -> str:
+    """One line for every table in play: name, what it holds, and its column names."""
+    return "\n".join(_index_line(t.definition, t.stats) for t in catalog.tables)
 
 
 def _end(table: str, columns: list[str]) -> str:
@@ -84,7 +123,13 @@ def _relationship(r: Relationship) -> str:
     return f"  {_end(r.from_table, r.from_columns)} -> {_end(r.to_table, r.to_columns)}  ({kind})"
 
 
-def render_relationships(catalog: Catalog) -> str:
-    if not catalog.relationships:
+def render_relationships(catalog: Catalog, names: list[str] | None = None) -> str:
+    """Every join, or with a focus (or `names`) only those touching one of those tables."""
+    touching = names if names is not None else catalog.focus
+    shown = catalog.relationships
+    if touching is not None:
+        wanted = set(touching)
+        shown = [r for r in shown if r.from_table in wanted or r.to_table in wanted]
+    if not shown:
         return NO_RELATIONSHIPS
-    return "\n".join(_relationship(r) for r in catalog.relationships)
+    return "\n".join(_relationship(r) for r in shown)

@@ -38,7 +38,13 @@ def create_connection(
     db: Session, tenant_id: str, name: str, kind: str, secret: dict
 ) -> Connection:
     ensure_tenant(db, tenant_id)
-    conn = Connection(tenant_id=tenant_id, name=name, kind=kind, secret_enc=vault.encrypt(secret))
+    conn = Connection(
+        tenant_id=tenant_id,
+        name=name,
+        kind=kind,
+        secret_enc=vault.encrypt(secret),
+        table_scope="all" if kind == "postgres" else "selected",
+    )
     db.add(conn)
     db.commit()
     db.refresh(conn)

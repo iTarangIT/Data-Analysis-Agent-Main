@@ -54,6 +54,12 @@ class Connection(Base):
     catalog_refreshed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # "all": every table the login can read is in play, and each question is given the ones it
+    # needs. "selected": only the tables a person chose. A database defaults to "all", because
+    # its own grants already bound what it exposes; files keep the picker.
+    table_scope: Mapped[str] = mapped_column(
+        String(10), default="selected", server_default="selected"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # Soft delete, because runs reference this row and they are the ledger we price from.
     # Deleting also blanks secret_enc, so a deleted connection holds no customer credential.
@@ -114,8 +120,9 @@ class DatasetFile(Base):
 class ConnectionTable(Base):
     """One table a connection's source exposes, and whether the agent may use it.
 
-    `definition` and `stats` are held only while the table is selected, and neither is ever a
-    row: a definition is columns and keys, and stats are a size bucket and a partition bound.
+    `definition` is held for every listed table (up to the preview limit) and `stats` for every
+    table in play, and neither is ever a row: a definition is columns and keys, and stats are a
+    size bucket and a partition bound.
     """
 
     __tablename__ = "connection_tables"

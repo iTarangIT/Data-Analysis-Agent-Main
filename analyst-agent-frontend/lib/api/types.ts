@@ -8,6 +8,8 @@ export type Connection = {
   kind: ConnectionKind;
   selected_tables: number;
   total_tables: number;
+  /** "all": every table answers and each question finds its own; "selected": the picker. */
+  table_scope: "all" | "selected";
   file_count: number;
   catalog_refreshed_at: string | null;
   sync_status: "syncing" | "ready" | "failed" | null;
@@ -67,6 +69,7 @@ export type Relationship = {
 
 export type ConnectionTables = {
   max_selected: number;
+  scope: "all" | "selected";
   refreshed_at: string | null;
   tables: SourceTable[];
   /** Between chosen tables only. */
