@@ -136,3 +136,26 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO analyst_ro;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO analyst_ro;
 ALTER ROLE analyst_ro SET statement_timeout = '8s';
 ALTER ROLE analyst_ro SET default_transaction_read_only = on;
+
+-- A masked login, the way iTarang's analyst_ro reads its CRM: a personal table it may not read
+-- at all, one it may read only some columns of, and a view made for it. The catalog lists all
+-- three to anyone, so these pin the schema reader to what the login can actually select.
+CREATE TABLE payroll (
+    staff_id INT PRIMARY KEY,
+    salary   NUMERIC(12, 2) NOT NULL
+);
+INSERT INTO payroll VALUES (1, 50000), (2, 65000);
+
+CREATE TABLE staff (
+    id    INT PRIMARY KEY,
+    name  TEXT NOT NULL,
+    role  TEXT NOT NULL,
+    phone TEXT
+);
+INSERT INTO staff VALUES (1, 'Asha', 'sales_head', '+91 90000 00001'), (2, 'Ravi', 'asm', '+91 90000 00002');
+
+CREATE VIEW staff_roster AS SELECT s.id AS staff_id, s.name, s.role FROM staff s;
+
+REVOKE ALL ON payroll, staff FROM analyst_ro;
+GRANT SELECT (id, role) ON staff TO analyst_ro;
+GRANT SELECT ON staff_roster TO analyst_ro;

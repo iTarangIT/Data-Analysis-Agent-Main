@@ -86,3 +86,29 @@ def test_reading_structure_never_selects_from_a_customer_table(connector):
     reads_a_table = re.compile(rf'\b(FROM|JOIN)\s+(public\.)?"?({"|".join(SEEDED)})\b', re.I)
     assert issued, "nothing was captured, so this proves nothing"
     assert [s for s in issued if reads_a_table.search(s)] == []
+
+
+def test_it_lists_only_what_the_login_may_read(connector):
+    """The catalog shows every table to anyone. Listing `payroll`, which the login may not
+    select, put it in the picker, and every query the model wrote on it was refused."""
+    names = connector.list_tables()
+
+    assert "payroll" not in names
+    assert "staff" in names  # some of its columns are readable
+    assert "staff_roster" in names  # a view made for the login
+    assert not [n for n in names if n.startswith("pg_stat_statements")]
+
+
+def test_it_reads_only_the_columns_the_login_may_read(connector):
+    read = {t.name: t for t in connector.read_tables(["staff", "payroll"])}
+
+    assert list(read) == ["staff"]
+    assert [c.name for c in read["staff"].columns] == ["id", "role"]
+
+
+def test_a_view_is_read_with_its_columns_and_no_keys(connector):
+    [roster] = connector.read_tables(["staff_roster"])
+
+    assert [c.name for c in roster.columns] == ["staff_id", "name", "role"]
+    assert roster.primary_key == []
+    assert roster.foreign_keys == []

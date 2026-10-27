@@ -18,8 +18,12 @@ _TABLES = text(
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname = 'public'
-       AND c.relkind IN ('r', 'p')
+       AND c.relkind IN ('r', 'p', 'v', 'm')
        AND NOT c.relispartition
+       AND has_any_column_privilege(c.oid, 'SELECT')
+       AND NOT EXISTS (
+             SELECT 1 FROM pg_depend d
+              WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
      ORDER BY c.relname
     """
 )
@@ -40,17 +44,25 @@ _COLUMNS = text(
        AND c.relname = ANY(:names)
        AND a.attnum > 0
        AND NOT a.attisdropped
+       AND has_column_privilege(c.oid, a.attnum, 'SELECT')
      ORDER BY c.relname, a.attnum
     """
 )
 
 
 def list_tables(conn: Connection) -> list[str]:
-    """Ordinary and partitioned tables in `public`, never partition children.
+    """Tables, partitioned tables and views in `public` the login may read, never partition
+    children.
 
     `Inspector.get_table_names` returns children too. On the iTarang IoT database that is 100
-    weekly partitions against 15 real tables. Views are excluded with them: the only ones present
-    belong to pg_stat_statements.
+    weekly partitions against 15 real tables. Views are listed because a masked login reads
+    personal tables only through views made for it (iTarang's `analyst_ro` reads `users` as
+    `analyst_staff`); extension-owned ones such as pg_stat_statements are left out.
+
+    The catalog itself ignores privileges, so without the privilege test a masked login is
+    offered tables and columns that every query then fails on with "permission denied". A
+    table with at least one readable column is listed; its unreadable columns are not
+    (see `_COLUMNS`). An owner login sees everything, as before.
     """
     return [r.relname for r in conn.execute(_TABLES)]
 
