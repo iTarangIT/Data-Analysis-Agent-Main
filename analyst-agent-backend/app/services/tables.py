@@ -1,7 +1,9 @@
 """Which of a connection's tables the agent may use, and what is known of their structure.
 
-Every table the source exposes gets a row, so the picker can list them all. A definition and
-statistics are held only while a table is selected, and neither is ever a row of that table.
+Every table the source exposes gets a row, so the picker can list them all, each with its
+structure (up to PREVIEW_LIMIT tables) so a person can see a table's columns before choosing it.
+Statistics and relationships are held only for selected tables, and a run only ever reads the
+selected ones. None of it is ever a row of a table.
 
 A source's first listing chooses every table when there are no more than the cap allows, which
 keeps a small database or a spreadsheet answering without a visit to the picker. Past the cap
@@ -31,6 +33,10 @@ from app.services.errors import DomainError, SourceUnavailable
 # Structure rarely changes, but what a table holds does, and the model reads both: a table that
 # emptied or a partition that stopped filling must reach the prompt without anyone refreshing.
 REFRESH_AFTER = timedelta(hours=6)
+
+# How many unselected tables have their structure read for the picker. One catalog read covers
+# them all, but a source with thousands of tables shows names only past this.
+PREVIEW_LIMIT = 400
 
 
 def _rows(db: Session, connection_id: str) -> list[ConnectionTable]:
@@ -90,27 +96,35 @@ def _reachable(conn: Connection) -> Iterator[None]:
 
 
 def _introspect(
-    connector: CatalogReader, names: list[str]
+    connector: CatalogReader, rows: list[ConnectionTable]
 ) -> tuple[list[TableDef], dict[str, dict[str, Any]]]:
-    if not names:
+    """Structure for every row given (selected ones always, others up to PREVIEW_LIMIT), and
+    statistics for the selected ones only: those cost probes, a picker preview does not need
+    them."""
+    selected = [r.name for r in rows if r.selected]
+    preview = [r.name for r in rows if not r.selected][:PREVIEW_LIMIT]
+    if not selected and not preview:
         return [], {}
-    return connector.read_tables(names), connector.table_stats(names)
+    stats = connector.table_stats(selected) if selected else {}
+    return connector.read_tables(selected + preview), stats
 
 
 def _apply(
     conn: Connection,
-    selected: list[ConnectionTable],
+    rows: list[ConnectionTable],
     definitions: list[TableDef],
     stats: dict[str, dict[str, Any]],
 ) -> None:
-    """Record what was read. A selected table the source no longer has is left without a
-    definition, which keeps it out of every run until a refresh removes it."""
+    """Record what was read for these rows. A selected table the source no longer has is left
+    without a definition, which keeps it out of every run until a refresh removes it.
+    Relationships are only ever mapped between selected tables."""
     read = {d.name: d for d in definitions}
-    for row in selected:
+    for row in rows:
         definition = read.get(row.name)
         row.definition = definition.model_dump() if definition else None
-        row.stats = stats.get(row.name) if definition else None
-    conn.relationships = [r.model_dump() for r in map_relationships(definitions)]
+        row.stats = stats.get(row.name) if definition and row.selected else None
+    chosen = [read[r.name] for r in rows if r.selected and r.name in read]
+    conn.relationships = [r.model_dump() for r in map_relationships(chosen)]
     conn.catalog_refreshed_at = datetime.now(UTC)
 
 
@@ -120,8 +134,8 @@ def ensure_listed(db: Session, conn: Connection) -> None:
         return
     connector = connector_for(conn)
     with _reachable(conn):
-        selected = [r for r in _first_listing(db, conn, connector.list_tables()) if r.selected]
-        _apply(conn, selected, *_introspect(connector, [r.name for r in selected]))
+        rows = _first_listing(db, conn, connector.list_tables())
+        _apply(conn, rows, *_introspect(connector, rows))
     db.commit()
 
 
@@ -163,11 +177,8 @@ def save_selection(db: Session, conn: Connection, names: list[str]) -> dict[str,
 
     for row in rows:
         row.selected = row.name in wanted
-        if not row.selected:
-            row.definition = row.stats = None
-    selected = [r for r in rows if r.selected]
     with _reachable(conn):
-        _apply(conn, selected, *_introspect(connector_for(conn), [r.name for r in selected]))
+        _apply(conn, rows, *_introspect(connector_for(conn), rows))
     db.commit()
     return view(db, conn)
 
@@ -188,9 +199,10 @@ def refresh(db: Session, conn: Connection) -> dict[str, Any]:
             db.delete(row)
     _add(db, conn.id, added, selected=False)
 
-    selected = [r for r in rows if r.selected and r.name in present]
+    db.flush()
+    rows = _rows(db, conn.id)
     with _reachable(conn):
-        _apply(conn, selected, *_introspect(connector, [r.name for r in selected]))
+        _apply(conn, rows, *_introspect(connector, rows))
     db.commit()
     return {**view(db, conn), "added": added, "removed": removed}
 
@@ -236,7 +248,11 @@ async def load_for_run(db: Session, conn: Connection, connector: CatalogReader) 
     )
     if selected and stale:
         with _reachable(conn):
-            read = await asyncio.to_thread(_introspect, connector, [r.name for r in selected])
+            # Only the chosen tables: a run must not pay for the picker's preview.
+            read = await asyncio.to_thread(
+                lambda: (connector.read_tables([r.name for r in selected]),
+                         connector.table_stats([r.name for r in selected]))
+            )
         _apply(conn, selected, *read)
 
     catalog = Catalog(

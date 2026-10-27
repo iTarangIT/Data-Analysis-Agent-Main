@@ -131,14 +131,20 @@ class TestANewConnection:
 
 
 class TestChoosing:
-    def test_structure_is_kept_only_for_the_tables_chosen(self, client, auth, connection_id):
+    def test_an_unchosen_table_shows_its_columns_but_no_stats_or_joins(
+        self, client, auth, connection_id
+    ):
+        """The picker shows every table's columns so a person can choose; only the chosen ones
+        get statistics, and joins are mapped between chosen tables only."""
         r = _choose(client, auth, connection_id, ["dealers", "batteries"])
 
         assert r.status_code == 200, r.text
         body = r.json()
         assert _selected(body) == {"dealers", "batteries"}
         telemetry = _by_name(body)["telemetry"]
-        assert (telemetry["definition"], telemetry["stats"]) == (None, None)
+        assert [c["name"] for c in telemetry["definition"]["columns"]][:2] == ["id", "battery_id"]
+        assert telemetry["stats"] is None
+        assert _by_name(body)["dealers"]["stats"] is not None
         assert _joins(body) == {("batteries", ("dealer_id",), "dealers", ("id",), "declared")}
 
     def test_the_choice_is_what_a_later_read_returns(self, client, auth, connection_id):

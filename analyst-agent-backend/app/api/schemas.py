@@ -52,7 +52,8 @@ class TableOut(BaseModel):
     name: str
     files: list[str]
     selected: bool
-    # Both null for a table that is not selected: its structure is not kept.
+    # Structure is kept for every listed table (see services/tables.py PREVIEW_LIMIT) so the
+    # picker can show columns; stats are null for a table that is not selected.
     definition: TableDef | None
     stats: dict[str, Any] | None
 
