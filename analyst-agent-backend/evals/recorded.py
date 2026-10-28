@@ -248,7 +248,7 @@ def record(cases_path: Path, only: str | None) -> int:
     book.update(
         {
             "recorded_on": book.get("recorded_on", date.today().isoformat()),
-            "model": get_settings().gemini_model,
+            "model": get_settings().llm_model,
             "prompt_sha": prompt_sha(),
             "cases": [kept[c["q"]] for c in cases if c["q"] in kept],
         }

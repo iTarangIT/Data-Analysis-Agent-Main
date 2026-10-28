@@ -7,9 +7,10 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
+_KEY = "OPENAI_API_KEY" if os.environ.get("LLM_PROVIDER") == "openai" else "GEMINI_API_KEY"
 needs_llm = pytest.mark.skipif(
-    not os.environ.get("GEMINI_API_KEY", "").strip() or os.environ.get("GEMINI_API_KEY") == "test",
-    reason="needs a real GEMINI_API_KEY",
+    os.environ.get(_KEY, "").strip() in ("", "test"),
+    reason=f"needs a real {_KEY}",
 )
 
 

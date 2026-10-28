@@ -12,6 +12,7 @@ from tests import supabase_tokens
 # developer's shell or .env points at.
 os.environ["SUPABASE_URL"] = supabase_tokens.SUPABASE_URL
 os.environ.setdefault("GEMINI_API_KEY", "test")
+os.environ.setdefault("OPENAI_API_KEY", "test")
 os.environ.setdefault("CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode())
 os.environ.setdefault("APP_DB_URL", "postgresql+psycopg://app:app@localhost:5432/analyst")
 os.environ.setdefault("CHECKPOINT_DB_URL", "postgresql://ckpt:ckpt@localhost:5432/checkpoints")

@@ -20,8 +20,23 @@ class Settings(BaseSettings):
     env: str = Field(default="dev", alias="APP_ENV")
     log_level: str = "INFO"
 
-    gemini_api_key: SecretStr
+    # Which provider answers runs. Only the chosen provider's key has to be set.
+    llm_provider: Literal["gemini", "openai"] = "gemini"
+    gemini_api_key: SecretStr | None = None
     gemini_model: str = "gemini-3.5-flash-lite"
+    openai_api_key: SecretStr | None = None
+    openai_model: str = "gpt-5.5"
+
+    @model_validator(mode="after")
+    def _provider_needs_a_key(self) -> Self:
+        key = self.openai_api_key if self.llm_provider == "openai" else self.gemini_api_key
+        if not key:
+            raise ValueError(f"LLM_PROVIDER is {self.llm_provider} but its API key is not set")
+        return self
+
+    @property
+    def llm_model(self) -> str:
+        return self.openai_model if self.llm_provider == "openai" else self.gemini_model
 
     # TypeSafe's Jev classifier picks the tool a run needs before the model is called. "shadow"
     # records its pick in the run's trace and changes nothing; "on" offers the model only the

@@ -17,6 +17,7 @@ anyio==4.15.1
     #   httpx2
     #   langsmith
     #   mcp
+    #   openai
     #   sse-starlette
     #   starlette
     #   watchfiles
@@ -34,6 +35,7 @@ certifi==2026.7.22
     # via
     #   httpcore
     #   httpx
+    #   langchain-openai
     #   requests
 cffi==2.1.1
     # via cryptography
@@ -125,6 +127,7 @@ httpx2==2.12.0
     # via
     #   langchain-typesafe
     #   langsmith
+    #   openai
 idna==3.19
     # via
     #   anyio
@@ -133,6 +136,8 @@ idna==3.19
     #   requests
 iniconfig==2.3.0
     # via pytest
+jiter==0.18.0
+    # via openai
 jsonpatch==1.33
     # via langchain-core
 jsonpointer==3.1.1
@@ -149,6 +154,7 @@ langchain-core==1.6.2
     #   langchain
     #   langchain-google-genai
     #   langchain-mcp-adapters
+    #   langchain-openai
     #   langchain-typesafe
     #   langgraph
     #   langgraph-checkpoint
@@ -157,6 +163,8 @@ langchain-core==1.6.2
 langchain-google-genai==4.4.0
     # via analyst-agent (pyproject.toml)
 langchain-mcp-adapters==0.3.2
+    # via analyst-agent (pyproject.toml)
+langchain-openai==1.6.2
     # via analyst-agent (pyproject.toml)
 langchain-protocol==0.0.19
     # via
@@ -201,6 +209,8 @@ numpy==2.5.3
     # via
     #   analyst-agent (pyproject.toml)
     #   pandas
+openai==3.40.0
+    # via langchain-openai
 openpyxl==3.1.5
     # via analyst-agent (pyproject.toml)
 opentelemetry-api==1.44.0
@@ -274,6 +284,7 @@ pydantic==2.13.5
     #   langgraph
     #   langsmith
     #   mcp
+    #   openai
     #   pydantic-settings
 pydantic-core==2.46.5
     # via pydantic
@@ -334,6 +345,8 @@ referencing==0.37.0
     # via
     #   jsonschema
     #   jsonschema-specifications
+regex==2026.9.29
+    # via tiktoken
 reportlab==5.0.1
     # via analyst-agent (pyproject.toml)
 requests==2.34.2
@@ -343,6 +356,7 @@ requests==2.34.2
     #   google-genai
     #   langsmith
     #   requests-toolbelt
+    #   tiktoken
 requests-toolbelt==1.0.0
     # via langsmith
 rpds-py==2026.6.3
@@ -361,6 +375,7 @@ sniffio==1.3.1
     # via
     #   google-genai
     #   langsmith
+    #   openai
 sortedcontainers==2.4.0
     # via fakeredis
 sqlalchemy==2.0.52
@@ -384,6 +399,8 @@ tenacity==9.1.4
     # via
     #   google-genai
     #   langchain-core
+tiktoken==0.14.0
+    # via langchain-openai
 truststore==0.10.4
     # via
     #   httpcore2
@@ -401,6 +418,7 @@ typing-extensions==4.16.0
     #   langsmith
     #   mcp
     #   mypy
+    #   openai
     #   opentelemetry-api
     #   psycopg
     #   psycopg-pool
